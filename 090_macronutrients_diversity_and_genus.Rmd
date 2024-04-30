@@ -1,0 +1,280 @@
+---
+title: "Macronutrients with diversity or genus"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Previous 2 day results** 
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(tidybayes)  
+library(brms)
+library(rstan)
+options(mc.cores = parallel::detectCores())
+ncores = parallel::detectCores()
+rstan_options(auto_write = TRUE)
+axis_text_size <- 10
+axis_title_size <- 10
+#dtb <- read_csv('../data/cleaned_diet_data/FINAL_97_with_code_all_foods_drt_with_EN_finalized.csv')
+dtb <- read_csv('../data/152_combined_DTB.csv')
+meta <- read_csv('../data/153_combined_META.csv') 
+```
+```{r}
+cts <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
+  filter(sampleid %in% meta$sampleid) 
+thre <- seq(0.0001, 0.002, 0.0001)
+thre %>% 
+  set_names(thre) %>% 
+  map_dfr(function(num){
+    cts %>% 
+    group_by(genus) %>% 
+    count(relab > num) %>% 
+    rename(criteria = names(.)[2]) %>% 
+    filter(criteria == 'TRUE') %>% 
+    arrange(-n) %>% 
+    filter(genus != 'NA') %>% 
+    mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
+    filter(perc > 10) %>% 
+      nrow
+  }) %>% 
+  gather('thre', 'num')
+target_genera <-  cts %>% 
+  group_by(genus) %>% 
+  count(relab > 0.0001) %>% 
+  rename(criteria = names(.)[2]) %>% 
+  filter(criteria == 'TRUE') %>% 
+  arrange(-n) %>% 
+  filter(genus != 'NA') %>% 
+  mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
+  filter(perc > 10) %>% 
+  pull(genus) 
+
+gcts <- read_csv('../data/088_genus_relab_log10_wide.csv') %>% 
+  select(sampleid, all_of(target_genera))
+
+full <- meta %>% 
+  inner_join(gcts)
+```
+## p2d average in macronutrients
+
+```{r}
+# the daily caloric intake :
+all_daily_pt <- dtb %>%
+  group_by(mrn, fdrt) %>%
+  summarise(total_daily = sum(Calories_kcal))
+
+# the previous two days average for each stool sample
+
+stb_pair <- meta %>%
+  select(mrn, sdrt) %>%
+  transmute(mrn = mrn,
+            p1d = sdrt-1,
+            p2d = sdrt-2)
+
+mean_p2d_cal <-  function(mrn_, p1d_, p2d_){
+  df = all_daily_pt %>%
+    filter(mrn == mrn_) %>%
+    filter(fdrt %in% c(p1d_, p2d_  )) %>%
+    group_by(mrn) %>%
+    summarise(ave_cal = sum(total_daily)/2)
+  return(df)
+}
+
+mean_p2d_df_cal <- pmap(stb_pair, function(mrn, p1d, p2d){
+    mean_p2d_cal(mrn, p1d, p2d)
+  }) %>%
+  set_names(meta %>% pull(sampleid)) %>%
+  bind_rows(.id = 'sampleid')
+```
+
+```{r p2d_nutrients}
+# the daily total of each nutrients
+nutrients <- dtb %>%
+  select(mrn, fdrt, Protein_g:Sugars_g) %>%
+  gather('type','gram', Protein_g:Sugars_g) %>%
+  group_by(mrn, fdrt, type) %>%
+  summarise(total_daily = sum(gram)) %>%
+  split(.$type)
+
+mean_p2d_fiber <-  function(mrn_, p1d_, p2d_){
+  df = nutrients$Fibers_g %>%
+    filter(mrn == mrn_) %>%
+    filter(fdrt %in% c(p1d_, p2d_  )) %>%
+    group_by(mrn) %>%
+    summarise(ave_fiber = sum(total_daily)/2)
+  return(df)
+}
+mean_p2d_carb <-  function(mrn_, p1d_, p2d_){
+  df = nutrients$Carbohydrates_g %>%
+    filter(mrn == mrn_) %>%
+    filter(fdrt %in% c(p1d_, p2d_  )) %>%
+    group_by(mrn) %>%
+    summarise(ave_carb = sum(total_daily)/2)
+  return(df)
+}
+
+mean_p2d_fat <-  function(mrn_, p1d_, p2d_){
+  df = nutrients$Fat_g %>%
+    filter(mrn == mrn_) %>%
+    filter(fdrt %in% c(p1d_, p2d_  )) %>%
+    group_by(mrn) %>%
+    summarise(ave_fat = sum(total_daily)/2)
+  return(df)
+}
+mean_p2d_Protein <-  function(mrn_, p1d_, p2d_){
+  df = nutrients$Protein_g %>%
+    filter(mrn == mrn_) %>%
+    filter(fdrt %in% c(p1d_, p2d_  )) %>%
+    group_by(mrn) %>%
+    summarise(ave_Protein = sum(total_daily)/2)
+  return(df)
+}
+mean_p2d_Sugars <-  function(mrn_, p1d_, p2d_){
+  df = nutrients$Sugars_g %>%
+    filter(mrn == mrn_) %>%
+    filter(fdrt %in% c(p1d_, p2d_  )) %>%
+    group_by(mrn) %>%
+    summarise(ave_Sugars = sum(total_daily)/2)
+  return(df)
+}
+
+mean_p2d_fiber <- pmap(stb_pair, function(mrn, p1d, p2d){
+    mean_p2d_fiber(mrn, p1d, p2d)
+  }) %>%
+  set_names(meta %>% pull(sampleid)) %>%
+  bind_rows(.id = 'sampleid')
+
+mean_p2d_fat <- pmap(stb_pair, function(mrn, p1d, p2d){
+    mean_p2d_fat(mrn, p1d, p2d)
+  }) %>%
+  set_names(meta %>% pull(sampleid)) %>%
+  bind_rows(.id = 'sampleid')
+
+mean_p2d_Protein <- pmap(stb_pair, function(mrn, p1d, p2d){
+    mean_p2d_Protein(mrn, p1d, p2d)
+  }) %>%
+  set_names(meta %>% pull(sampleid)) %>%
+  bind_rows(.id = 'sampleid')
+
+mean_p2d_Sugars <- pmap(stb_pair, function(mrn, p1d, p2d){
+    mean_p2d_Sugars(mrn, p1d, p2d)
+  }) %>%
+  set_names(meta %>% pull(sampleid)) %>%
+  bind_rows(.id = 'sampleid')
+
+mean_p2d_carb <- pmap(stb_pair, function(mrn, p1d, p2d){
+    mean_p2d_carb(mrn, p1d, p2d)
+  }) %>%
+  set_names(meta %>% pull(sampleid)) %>%
+  bind_rows(.id = 'sampleid')
+
+p2d_diet <- mean_p2d_df_cal %>%
+  full_join(mean_p2d_fiber, by = c("sampleid", "mrn")) %>%
+  full_join(mean_p2d_fat, by = c("sampleid", "mrn")) %>%
+  full_join(mean_p2d_Protein, by = c("sampleid", "mrn")) %>%
+  full_join(mean_p2d_Sugars, by = c("sampleid", "mrn")) %>%
+  full_join(mean_p2d_carb, by = c("sampleid", "mrn"))
+```
+
+
+```{r p2d_nutrients}
+full <- meta %>%
+  full_join(p2d_diet, by = c("sampleid", "mrn")) %>%
+  full_join(gcts, by = "sampleid") %>%
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>%
+  mutate(mrn = factor(mrn)) %>%
+  mutate(ave_fiber = ave_fiber/100,
+       ave_fat = ave_fat/100,
+       ave_Protein = ave_Protein/100,
+       ave_Sugars = ave_Sugars/100,
+       ave_carb = ave_carb/100,
+       ave_cal = ave_cal/1000
+       ) %>% 
+  mutate(intensityAblative = if_else(intensity == 'ablative', T, F),
+         intensityNonablative = if_else(intensity == 'nonablative', T, F),
+         intensityReduced = if_else(intensity == 'reduced', T, F))
+
+full %>%
+  write_csv('../data/090_all_samples_meta_p2d_fg9_dietall_genera90.csv')
+```
+
+
+### simpson reciprocal ~ ave_fiber + ave_fat + ave_Sugars + empirical + intensity + TPN + EN + ...
+
+```{r}
+# to change the df a little bit 
+full <- read_csv('../data/090_all_samples_meta_p2d_fg9_dietall_genera90.csv') %>% 
+  mutate(abx = if_else(empirical == 'TRUE', 1, 0),
+         TPN = if_else(TPN == 'TRUE', 1, 0),
+         EN = if_else(EN == 'TRUE', 1, 0)) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(      ave_fiber_e= ave_fiber*abx,
+                ave_fat_e=ave_fat*abx,
+                ave_Sugars_e=ave_Sugars*abx)
+```
+
+
+```{r}
+alpha_macro_fat <- log(simpson_reciprocal) ~ 0 +
+                ave_fiber_e +
+                ave_fat_e +
+                ave_Sugars_e +
+                ave_fiber +
+                ave_fat +
+                ave_Sugars +
+               abx+
+               intensity +
+                TPN+
+                EN+
+               (1 | mrn) +
+                (1 | timebin)
+get_prior(formula = alpha_macro_fat, data = full)
+
+priors_alpha_macro_fat <- c(
+            # for the macro nutrients
+            prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
+            prior(normal(0, 1), class = 'b', coef = "ave_fat"),
+            prior(normal(0, 1), class = 'b', coef = "ave_Sugars"),
+            # for the interaction terms
+            prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
+            prior(normal(0, 1), class = 'b', coef = "ave_fat_e"),
+            prior(normal(0, 1), class = 'b', coef = "ave_Sugars_e"),
+            # for the TPN 
+            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "EN"),
+            # for the empirical 
+            prior(normal(0, 0.5), class = 'b', coef = "abx"),
+            # for the intensity 
+            prior(normal(2, .1), class = 'b', coef = "intensityablative"),
+            prior(normal(2, .1), class = 'b', coef = "intensityreduced"),
+            prior(normal(2, .1), class = 'b', coef = "intensitynonablative"))
+
+# vet the prior 
+model_alpha_macro_fat  <- brm( alpha_macro_fat,  
+              data = full, 
+              warmup = 1000, iter = 3000, 
+              prior = priors_alpha_macro_fat,
+               control = list(adapt_delta = 0.99),
+              cores = ncores,
+              chains = 2, 
+              seed = 123, sample_prior = T)
+
+
+post_res <- suppressWarnings(posterior_samples(model_alpha_macro_fat))
+post_res %>%  write_csv('../data/090_model_alpha_macro_fat_post_interaction.csv')
+
+prior_df <- prior_draws(model_alpha_macro_fat) 
+prior_df %>% 
+  write_csv('../data/090_model_alpha_macro_fat_prior_interaction.csv')
+meta %>% count(empirical) %>% 
+  mutate(perc = round(n/sum(n)*100))
+```
+
+
+
