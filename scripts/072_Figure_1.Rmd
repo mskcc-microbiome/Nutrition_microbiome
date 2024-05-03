@@ -1,0 +1,795 @@
+---
+title: "The fig1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Now this is the script for making the updated Figure 1 with the combined cohort 173 patients.
+
+```{r setting}
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+library(ggimage)
+library(ggrastr)
+library(lemon)
+axis_text_size <- 10
+axis_title_size <- 10
+stip_txt_size <- 8
+alpha_val <- 0.05
+point_size <- 0.2
+scatter_col <- 'gray14'
+pick_point_size <- 1
+pick_line_size <- 0.5
+example_pt_line_size <- 0.3
+diet_line_color <- '#E41A1C'
+stool_line_color <- 'blue'
+strip_color <- 'gray91'
+umap_pt_size <- 0.2
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+# the colors for each food group specified and saved here
+fpalette <- tribble(
+  ~fg1_name, ~color, ~fgrp1,
+  #--|--|
+  'fg_milk' , '#3498DB', '1',
+  'fg_meat' , '#591605', '2',
+  'fg_egg' , '#F1C40F', '3',
+  'fg_legume' , '#E67E22', '4',
+  'fg_grain' , '#D35400', '5',
+  'fg_fruit' , '#7D3C98', '6',
+  'fg_veggie' , '#229954', '7',
+  'fg_oils' , '#707B7C',  '8',
+  'fg_sweets' , '#db2589' , '9'
+) 
+library(vdbR)
+connect_database()
+list_table_from_database()
+get_table_from_database('asv_alpha_diversity_ag')
+get_table_from_database('shotgun_lookup_ad')
+get_table_from_database('fmt_arm_ag')
+get_table_from_database('fmt_nutrition_notes_el')
+```
+
+# fig1 data summaries
+
+The first 2 need to be redo, since the data has been updated.
+
+```{r load_table}
+dtb  <- read_csv('../data/152_combined_DTB.csv')
+meta <- read_csv('../data/153_combined_META.csv')
+
+# how many stool samples per patient
+meta %>% count(pid) %>% summarise(med = median(n))
+
+dtb %>% distinct(Food_code)
+
+# how many days of data among all of the patients?
+dtb %>% count(pid,  fdrt) %>% 
+  count(pid) %>% 
+  summarise(total_days = sum(n))
+
+dtb %>% distinct(Food_NSC)
+
+dtb %>% count(pid, fdrt) %>% 
+  distinct(pid, fdrt) 
+
+range(dtb$fdrt)
+  
+
+# summary statistics 
+# median N samples per patient
+n_per_patient <- meta %>% 
+  count(pid) 
+summary(n_per_patient$n)
+
+# max number of meals across all patients 
+# calculate how many meals each patient had
+tallyres <- dtb %>% 
+  distinct(pid, Meal, fdrt) %>% 
+  count(pid)
+range(tallyres$n)
+
+# “1 day prior to this fecal sample, the patient consumed 50 g of chicken, find a patient for this example
+# find the food code that is this chicken 24122160
+daily_chicken <- dtb %>% 
+  filter(Food_code == 24122160) %>% 
+  group_by(pid, fdrt) %>% 
+  summarise(daily_ch = sum(total_weight))
+
+# find the prior one day for every stool sample
+p1d <- meta %>% 
+  select(pid, sdrt) %>% 
+  mutate(fdrt = sdrt - 1) %>% 
+  inner_join(daily_chicken, by = join_by(pid, fdrt)) %>% 
+  filter(sdrt < 0) %>% 
+  arrange(desc(daily_ch)) %>% 
+  slice(1)
+```
+
+```{r spectral_legend}
+library(RColorBrewer)
+pdf(file = "../data/072_F1_spectral_legend.pdf",   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 3)
+display.brewer.pal(9, "Spectral")
+dev.off()
+```
+
+```{r}
+# summarize how many diet data days we have for the patients?  Median min and max.  
+dtb %>% 
+  distinct(pid, fdrt) %>% 
+  #count(pid) %>% 
+  summary
+
+# -how common was it? how many of 97 patients consumed at least 1?
+#-what fraction of meals (or fraction of days) included a smoothie?
+#-for how many meals  (or days) was smoothie the only thing consumed?
+
+# find the food code that has the highest per meal average consumption
+smoothie <- dtb %>% 
+  group_by(Food_code, description) %>% 
+  summarise(total = sum(dehydrated_weight))  %>% 
+  arrange(desc(total)) %>% 
+  ungroup() %>% 
+  slice(1)  %>% 
+  pull(Food_code)
+```
+
+# the top part 
+
+```{r stool_hist}
+# Tsoni says: I still think a little figure would be helpful. Perhaps best a small histogram of N samples and N meals recorded over transplant time. That would show both the depth of sampling and emphasize the temporal nature of the dataset
+# the histogram of the N stool samples over transplant time
+stool_hist <- meta %>% 
+  gghistogram(x = 'sdrt', xlab = 'Transplant day', ylab = 'Stool samples', color = stool_line_color, fill = stool_line_color, alpha = 1) +
+  scale_x_continuous( breaks = seq(-10, 50, 20)) + 
+  annotate("text", x = 20, y = 110, label = "1,009\nstool samples", hjust = 0, size = 2.5) +
+  theme_classic(base_size = 8) +
+  theme(aspect.ratio=1.5,   axis.title=element_text(size=axis_title_size))
+stool_hist   
+```
+
+```{r diet_hist}
+# the histogram of the N meals over transplant time
+diet_hist <- dtb %>% 
+  distinct(pid, Meal, fdrt) %>% 
+  gghistogram(x = 'fdrt', xlab = 'Transplant day', ylab = 'Meals recorded', color = diet_line_color, fill = diet_line_color, alpha = 1)+
+    scale_x_continuous( breaks = seq(-10, 50, 20)) + 
+  annotate("text", x = 5, y = 900, label = "173 patients,\n9,419 total meals\n40,702 food items", hjust = 0, size = 2.5) +
+  theme_classic(base_size = 8) +
+  theme(aspect.ratio=1.5,
+         axis.title=element_text(size=axis_title_size),
+        #axis.text.x = element_blank(),
+        axis.title.x = element_blank())
+
+diet_hist
+```
+
+```{r stool_alpha}
+stool_alpha <- meta %>% 
+     ggplot() +
+  rasterise(geom_point(aes(x = sdrt, y = simpson_reciprocal, shape = 'triangle'), alpha = 0.03,size = point_size , shape = 16), dpi = 300) +
+  geom_smooth(aes(x = sdrt, y = simpson_reciprocal), method = "loess", formula = 'y ~ x', colour = stool_line_color ,  size = 1, fill = 'darkblue') +
+  labs( x = 'Transplant day',title = 'Microbiome\nalpha diversity', y = '') +
+  theme_classic(base_size = 8) +
+   scale_x_continuous( breaks = seq(0, 50, 20)) + 
+  theme(axis.text=element_text(size=8), axis.title=element_text(size=axis_title_size),
+        plot.title = element_blank(),
+        aspect.ratio=1)
+```
+
+
+```{r stool_alpha}
+# to calculate a p value for the dropping trend of the line of the stool alpha diversity
+
+library(geepack)
+# Gee model
+# Using simple linear model to easily describe increasing/decreasing trends
+mod_stool_alpha <- geeglm(log(simpson_reciprocal) ~ sdrt,
+                          family=gaussian,
+                          corstr = "ar1",
+                          id=pid,
+                          data=meta %>% mutate(pid = as.factor(pid)))
+
+# Wald p-value
+# Alternative hypothesis: slope is less than zero
+# Z-score calculation
+zscore = coef(mod_stool_alpha)[2]/sqrt(vcov(mod_stool_alpha)[2,2])
+# One-sided p-value
+pval <- 1-pnorm(abs(zscore))
+# the p value for the 1K
+pval
+```
+
+```{r food2_line}
+day_calori <- dtb %>% 
+  group_by(pid, fdrt) %>% 
+  summarise(daycal = sum(Calories_kcal))
+
+# this faith pd is all the combined data of the patients
+faith <- read_csv('../data/162_all_faith_pid.csv')
+
+
+# make a separate version of the faith and the day_cal
+food <- day_calori %>%
+  full_join(faith)
+
+# I think I want to put them together in a facet to save some space
+food2_line <-  food %>% 
+  gather('grp','value',daycal:faith_pd) %>% 
+  mutate(value = value/1000) %>%
+       ggplot() +
+  rasterise(geom_point(aes(x = fdrt, y = value), alpha = 0.01,size = point_size , shape = 16), dpi = 300) +
+  geom_smooth(aes(x = fdrt, y = value), method = "loess", formula = 'y ~ x', colour = diet_line_color ,  size = 1, fill = 'hotpink') +
+  labs( x = '',title = '', y = '') +
+  facet_wrap(~ grp,scales = 'free_y' , dir = 'v') +
+  scale_x_continuous( breaks = seq(0, 50, 20)) +
+  theme_classic(base_size = 8) +
+  theme(axis.text.y=element_text(size=8),
+        axis.text.x=element_blank(),
+        axis.title=element_text(size=8),
+        strip.background = element_blank(),
+        strip.text.x = element_blank(), 
+        plot.title = element_text(size=axis_title_size),aspect.ratio=1) 
+
+line_column <- plot_grid(food2_line, NA, stool_alpha,
+                      rel_heights = c( 1.67, -0.2, 1.05) ,
+                      labels = c('G','K'), 
+          ncol = 1, hjust = 0.5,
+          align = 'hv',
+          axis = 'tblr')
+line_column
+
+```
+
+```{r}
+# the p value from GEE about the G and H
+# 1G caloric intake
+mod_cal <- geeglm(log(daycal+1) ~ fdrt,
+                          family=gaussian,
+                          corstr = "ar1",
+                          id=pid,
+                          data=food %>% mutate(pid = as.factor(pid)))
+
+# Wald p-value
+# Alternative hypothesis: slope is less than zero
+# Z-score calculation
+zscore = coef(mod_cal)[2]/sqrt(vcov(mod_cal)[2,2])
+# One-sided p-value
+pval <- 1-pnorm(abs(zscore))
+# the p value for the 1G
+pval
+```
+```{r}
+# 1H diet diversity
+mod_faith_pd <- geeglm(log(faith_pd) ~ fdrt,
+                          family=gaussian,
+                          corstr = "ar1",
+                          id=pid,
+                          data=food%>% mutate(pid = as.factor(pid)))
+
+# Wald p-value
+# Alternative hypothesis: slope is less than zero
+# Z-score calculation
+zscore = coef(mod_faith_pd)[2]/sqrt(vcov(mod_faith_pd)[2,2])
+# One-sided p-value
+pval <- 1-pnorm(abs(zscore))
+# the p value for the 1H
+pval
+```
+
+# UMAPs
+
+```{r}
+# calculate the dominant food group of that day
+key <- read_csv('../data/food_group_color_key_final.csv') %>% mutate(fgrp1 = as.character(fgrp1))
+fg_daily <- dtb %>% 
+  group_by(pid, fdrt ) %>% 
+  summarise(daily_total = sum(dehydrated_weight))
+
+fg_sum <- dtb %>% 
+  mutate(fgrp1 = str_sub(Food_code, 1, 1)) %>% 
+   group_by(pid, fdrt , fgrp1) %>% 
+  summarise(daily_fg = sum(dehydrated_weight)) %>% 
+  left_join(fg_daily) %>% 
+  mutate(fg_relab = daily_fg/daily_total) %>% 
+  ungroup() %>% 
+  left_join(key) %>% 
+  group_by(pid, fdrt) %>% 
+  arrange(desc(fg_relab)) %>% 
+  slice(1)
+
+# find out why the few dots are on that far island
+OUT <- read_csv('../data/072_taxumap_embedding_cleaned_pid.csv')
+
+color_key <- OUT %>% 
+  distinct( color, shortname) %>% select(shortname, color) %>% 
+  deframe()
+```
+
+# color by the dominant food group
+
+```{r}
+out2_umap <- OUT %>% 
+  #arrange(desc(n)) %>% 
+  ggplot() +
+  rasterise(geom_point(aes(x = taxumap1, y = taxumap2, color = shortname), alpha = 1,size = umap_pt_size , shape = 16), dpi = 300) +
+  labs(x = 'TaxUMAP1', y = 'TaxUMAP2') +
+  scale_color_manual(values = color_key) +
+  theme_classic() +
+  #lemon::coord_capped_cart(bottom = 'both', left = 'both') +
+  theme(line = element_blank(),
+        #legend.position = "none",
+        legend.title = element_blank(),
+        axis.title=element_blank(),
+        axis.text= element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_rect(fill='gray97'), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') , aspect.ratio=1) +
+  guides(colour = guide_legend(override.aes = list(alpha=1)))
+ggsave('../data/072_umap1_ras.pdf')
+```
+
+# color by the daily cal intake
+
+```{r}
+# calculate daily caloric intake   
+cal <- dtb %>% 
+  group_by(pid, fdrt) %>% 
+  summarise(total_cal = sum(Calories_kcal)) 
+out2_cal <- OUT %>% full_join(cal)
+
+out2_caloric <- out2_cal %>% 
+  mutate(transform_cal = sqrt(total_cal)) %>% 
+    ggplot() +
+  rasterise(geom_point(aes(x = taxumap1, y = taxumap2, color = transform_cal), alpha = 1,size = umap_pt_size , shape = 16), dpi = 300) +
+  paletteer::scale_color_paletteer_c("viridis::plasma") +
+  theme_classic() +
+  #lemon::coord_capped_cart(bottom = 'both', left = 'both') +
+  theme(line = element_blank(),
+        #legend.position = "none",
+        legend.title = element_blank(),
+        axis.title=element_blank(),
+        axis.text= element_blank(),
+        axis.ticks = element_blank(),
+         panel.background = element_rect(fill='gray97'), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), #remove major gridlines
+    panel.grid.minor = element_blank(), #remove minor gridlines
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') ,
+        aspect.ratio=1)
+ggsave('../data/072_cal_legend.pdf')
+```
+
+# color by diet alpha diversity
+
+```{r}
+
+
+faith <- read_csv('../data/162_all_faith_pid.csv')
+
+out_faith <- OUT %>% 
+  full_join(faith)
+
+library(viridis)
+umap_faith <- out_faith %>% 
+  #arrange(desc(n)) %>% 
+  mutate(log10faith = log10(faith_pd + 1)) %>% 
+    ggplot() +
+  rasterise(geom_point(aes(x = taxumap1, y = taxumap2, color = faith_pd), alpha = 1,size = umap_pt_size , shape = 16), dpi = 300) +
+  scale_color_viridis() +
+  theme_classic() +
+  theme(line = element_blank(),
+        legend.title = element_blank(),
+        axis.title=element_blank(),
+        axis.text= element_blank(),
+        axis.ticks = element_blank(),
+        #legend.position = 'none', 
+        aspect.ratio=1,
+                 panel.background = element_rect(fill='gray97'), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), #remove major gridlines
+    panel.grid.minor = element_blank(), #remove minor gridlines
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') 
+        )
+ggsave('../data/072_faith_legend.pdf')
+```
+
+
+# color by the time relative to transplant
+
+```{r}
+# cuztomizing the times bins of the drt
+cutoff = 0 # Day 0 is conveneint but this can be varied
+n_groups_pre = 3;  # all HCT days <0 will be split into 3 bins; can vary this number to play
+n_groups_post = 6; # all HCT days >0 will be split into 6 bins; can vary this number to play
+# split the fdrt into groups:
+umap_time <- OUT %>% 
+  select(taxumap1, taxumap2, fdrt)  
+times <- umap_time %>% select( fdrt)  
+splits <- times %>% 
+  split(.$fdrt <= 0)
+pre <- splits %>% 
+  pluck('TRUE') %>% 
+  mutate(bin = cut_number(fdrt, n_groups_pre))
+post <- splits %>% 
+  pluck('FALSE') %>% 
+  mutate(bin = cut_number(fdrt, n_groups_post)) 
+both <- bind_rows(pre, post) %>% 
+  distinct(fdrt, .keep_all = T)
+
+umap_time_df <- umap_time %>% 
+  left_join(both)
+
+umap_drt_high_to_low_bin <- umap_time_df %>% 
+  arrange(desc(fdrt)) %>% 
+    ggplot() +
+  rasterise(geom_point(aes(x = taxumap1, y = taxumap2, color = bin), alpha = 1,size = umap_pt_size , shape = 16), dpi = 300) +
+   scale_color_manual(values = RColorBrewer::brewer.pal(9,"Spectral"))  +
+   theme_classic() +
+   theme(
+         line = element_blank(),
+         #legend.position = "none",
+         legend.title = element_blank(),
+         axis.title=element_blank(),
+         axis.text= element_blank(),
+         axis.ticks = element_blank(),
+              panel.background = element_rect(fill='gray97'), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), #remove major gridlines
+    panel.grid.minor = element_blank(), #remove minor gridlines
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') ,
+        aspect.ratio=1)
+ggsave('../data/072_time_legend.pdf')
+```
+
+```{r tree}
+# import the tree from pdf to a ggplot kind of object
+p <- '../data/080_food_tree_ring.jpg'
+tree <- ggdraw() +
+  draw_image(p,   scale = 1) 
+```
+
+# the macronutrients 3 by 2 grid
+
+```{r}
+# the days that we know the patient didn't eat anythinng
+
+zerodaysall <-  read_csv('../data/072_total_patients_zero_eating_days_pid.csv')
+```
+
+```{r 3X2}
+# the macronutrients scatter plot
+# good I've checked there are no zeros that I need to be put in
+m_all <- dtb %>%  
+  select(pid, fdrt,Protein_g:Sugars_g ) %>% 
+  gather('grp','gram', Protein_g:Sugars_g) %>% 
+  mutate(grp = str_replace(grp, '_g$','')) %>% 
+  group_by(pid, fdrt, grp) %>% 
+  summarise(eachsum = sum(gram)) %>% 
+  spread('grp', 'eachsum')
+
+# are there any NAs
+m_all %>% 
+  gather('key','value', Carbohydrates:Sugars) %>% 
+  filter(is.na(value)) %>% nrow
+
+dailymacro <- bind_rows(
+  m_all,
+  zerodaysall %>% 
+    mutate(Carbohydrates = 0, Fat= 0, Fibers= 0, Protein= 0, Sugars= 0) %>% 
+    select(colnames(m_all))
+) %>% gather('grp','eachsum', Carbohydrates:Sugars)
+  
+# dailymacro %>% 
+#   filter(grp %in% c('Carbohydrates','Sugars')) %>% 
+#   distinct(pid, fdrt, grp, .keep_all = T) %>% 
+#   spread('grp','eachsum') %>% 
+#   ggscatter( x= 'Carbohydrates',y ='Sugars') +
+#   stat_cor(method = "pearson") +
+#   geom_abline(slope = 1, intercept = 0, color = 'red')
+```
+```{r}
+# the p value from GEE about the panels in each of these macronutrients
+macro5 <- dailymacro %>% 
+  filter(fdrt <= 12) %>% 
+  split(.$grp) %>% 
+  map(function(df){
+    mod_macro = geeglm(log(eachsum +0.5) ~ fdrt,
+                          family=gaussian,
+                          corstr = "ar1",
+                          id=pid,
+                          data=df %>% mutate(pid = as.factor(pid)))
+    
+    zscore = coef(mod_macro)[2]/sqrt(vcov(mod_macro)[2,2])
+
+      pval = 1-pnorm(abs(zscore))
+      return(pval)
+  }) %>% 
+  bind_rows(.id = 'grp') %>% 
+  mutate(pval_lt_001 = if_else(fdrt < 0.01, T, F))%>% 
+  mutate(pval_lt_005 = if_else(fdrt < 0.05, T, F))%>% 
+  mutate(FDR = p.adjust(fdrt, method = 'BH')) %>% 
+  mutate(q_lt_005 = if_else(FDR < 0.05, T, F))
+ 
+macro5
+# how to show these as p values 
+```
+
+
+```{r 3X2}
+m_panel <- dailymacro %>% 
+  mutate(grp = if_else(str_detect(grp, 'Carbohydrates'), str_replace(grp, 'Carbohydrates','Carbs'), grp)) %>% 
+   ggplot() +
+  rasterise(geom_point(aes(x = fdrt, y = eachsum), alpha = 0.015,size = point_size , shape = 16), dpi = 300) +
+  geom_smooth(aes(x = fdrt, y = eachsum), method = "loess", formula = 'y ~ x', colour = diet_line_color ,  size = 1, fill = 'hotpink') +
+  labs( x = 'Transplant day',title = 'Macronutrients', y = 'Grams') +
+  facet_wrap(~ grp, nrow = 3, scales = 'free_y') +
+  scale_x_continuous( breaks = seq(0, 50, 20)) + 
+  theme_classic() +
+  theme(axis.text=element_text(size=6),
+        strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+        strip.text.x = element_text(size = stip_txt_size), 
+        axis.title=element_text(size=axis_title_size),
+        plot.title = element_text(size=axis_title_size),
+        aspect.ratio=1)
+m_panel
+```
+
+# the food group  3 by 3 grid 
+
+```{r 3X3}
+fg_all <- dtb %>%  
+  mutate(fgrp1 = str_sub(Food_code, 1, 1)) %>% 
+  mutate(fgrp1 = as.numeric(fgrp1)) %>% 
+  group_by(pid, fdrt, fgrp1) %>% 
+  summarise(eachsum = sum(dehydrated_weight)) %>% 
+  mutate(fgrp1 = as.character(fgrp1)) %>% 
+  left_join(key %>% select(fgrp1, shortname)) %>% 
+  select(-fgrp1) %>% 
+  spread('shortname','eachsum', fill = 0)
+
+fg_total <- bind_rows(
+  fg_all,
+  zerodaysall %>% 
+    mutate(Eggs = 0, Fruits= 0, Grains= 0, Legumes= 0, Meats= 0, Milk= 0,Oils= 0,Sweets= 0,Vegetables= 0) %>% 
+    select(colnames(fg_all))
+) %>%  gather('grp','eachsum', Eggs:Vegetables)
+  
+
+fg_panel <- fg_total %>% 
+     ggplot() +
+  rasterise(geom_point(aes(x = fdrt, y = eachsum), alpha = 0.015,size = point_size , shape = 16), dpi = 300) +
+  geom_smooth(aes(x = fdrt, y = eachsum), method = "loess", formula = 'y ~ x', colour = diet_line_color ,  size = 1, fill = 'hotpink') +
+  labs( x = 'Transplant day',title = 'Food groups', y = 'Grams') +
+  facet_wrap(~ grp, 
+             scales = 'free_y',
+             nrow = 3 ) +
+  scale_x_continuous( breaks = seq(0, 50, 20)) + 
+  scale_y_sqrt() +
+  theme_classic() +
+  theme(axis.text=element_text(size=6),
+       strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+        strip.text.x = element_text(size = stip_txt_size), 
+        axis.title=element_text(size=axis_title_size),
+        plot.title = element_text(size=axis_title_size),
+        aspect.ratio=1)
+fg_panel
+```
+ 
+ 
+```{r}
+# the p value from the GEE
+
+
+fg9 <- fg_total %>% 
+  filter(fdrt <= 12) %>% 
+  split(.$grp) %>% 
+  map(function(df){
+    mod_fg = geeglm(log(eachsum +0.5) ~ fdrt,
+                          family=gaussian,
+                          corstr = "ar1",
+                          id=pid,
+                          data=df %>% mutate(pid = as.factor(pid)))
+    
+    zscore = coef(mod_fg)[2]/sqrt(vcov(mod_fg)[2,2])
+
+      pval = 1-pnorm(abs(zscore))
+      return(pval)
+  }) %>% 
+  bind_rows(.id = 'grp') %>% 
+  mutate(pval_lt_001 = if_else(fdrt < 0.01, T, F))%>% 
+  mutate(pval_lt_005 = if_else(fdrt < 0.05, T, F)) %>% 
+  mutate(FDR = p.adjust(fdrt, method = 'BH')) %>% 
+  mutate(q_lt_005 = if_else(FDR < 0.05, T, F))
+ 
+fg9
+```
+ 
+# Assembling all 
+
+```{r}
+title <- ggdraw() + 
+  draw_label("Fig. 1",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+```{r}
+# assemble the 4 UMAPs
+maps <- plot_grid(out2_umap, out2_caloric, umap_faith, umap_drt_high_to_low_bin,
+          nrow = 2, hjust = 0,
+          align = 'hv',
+          labels = c('C','D', 'E', "F"),
+          axis = 'tblr')
+maps
+```
+
+```{r two_hist}
+# assemble the two hists
+two_hist <- plot_grid(diet_hist, NA, stool_hist, 
+                      rel_heights = c(1, -0.4, 1) ,
+          ncol = 1, hjust = 0.5,
+          align = 'hv',
+          axis = 'tblr') 
+
+```
+
+```{r top_row}
+# top row 
+top_row <- plot_grid(two_hist, tree, maps,
+          nrow = 1, 
+         rel_widths = c(.6,1.5,1.5), 
+          labels = c('A', 'B', NA))
+```
+```{r middle_row}
+middle_row <- plot_grid(line_column,m_panel, fg_panel, 
+          nrow = 1, 
+          #align = 'h',
+          labels = c(NA, 'I', 'J'),
+          #axis = 'tblr',
+          rel_widths =  c(0.9,1.4,2))
+
+# assemble all macro_facets
+f1 <-  plot_grid(top_row, NA, middle_row,NA, NA,
+                 align = 'hv',axis = 'tblr',
+                 labels = c(NA, NA, NA, NA, 'L'),
+                 rel_heights = c(1,-0.2, 1,-0.12, 1),
+                 ncol = 1)
+
+combined <- plot_grid(
+  title, f1,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.01, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/F1_overview_raw_072_new_test.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', 
+      #plot = combined, 
+      dpi = 300)   
+```
+
+```{r}
+# library(ggplot2)
+# 
+# # Create a data frame
+# df <- data.frame(x = key$shortname, y = rep(1, 9), colors = key$color) %>% 
+#   arrange(x) %>% 
+#   mutate(x  =  factor(x, levels = key$shortname))
+# 
+# 
+# fg_colors <- key %>% 
+#   distinct(shortname, color) %>% 
+#   select(shortname, color) %>% 
+#   mutate(shortname = factor(shortname, levels= key$shortname)) %>% 
+#   deframe()
+# 
+# # Create the plot
+# ggplot(df, aes(x, y)) +
+#   geom_bar(stat = "identity", fill = colors) +
+#   scale_color_manual(values = colors) +theme_classic() +
+#   theme(axis.text.x=element_text(colour=fg_colors, family = "Arial", face = 'bold', size = 10))
+# 
+# ggsave('../data/072_foodgroup_color_name.svg')
+```
+
+The last panel of the F1
+
+```{r}
+full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv')
+
+byday_original <- dtb %>% 
+  group_by(pid, fdrt) %>% 
+  summarise(daycal = sum(Calories_kcal),
+            d_protein = sum(Protein_g),
+            d_fat = sum(Fat_g),
+            d_carb = sum(Carbohydrates_g),
+            d_fiber = sum(Fibers_g),
+            d_sugar = sum(Sugars_g)) %>% 
+  rename(drt = fdrt) %>% 
+  inner_join(full %>% 
+               rename(drt = sdrt) %>% 
+               select(pid,drt, simpson_reciprocal,  Blautia, Enterococcus, intensity), by = c("pid", "drt")) %>% 
+  ungroup()
+```
+```{r}
+macro_panel <- byday_original %>% 
+  mutate(simpson_reciprocal_nlog  = log(simpson_reciprocal)) %>% 
+  rename(`log10(Blautia)` = Blautia,
+         `log10(Enterococcus)` = Enterococcus,
+         `log(Simpson reciprocal)` = simpson_reciprocal_nlog) %>% 
+  dplyr::select(`log(Simpson reciprocal)`, `log10(Blautia)`, `log10(Enterococcus)`,  daycal:d_sugar ) %>% 
+  mutate(daycal = daycal/1000) %>%  # now divide the value by 1000 to save some space in x axis text!!! 
+  gather('yaxis', 'value', `log(Simpson reciprocal)`:`log10(Enterococcus)`) %>% 
+  mutate(yaxis = factor(yaxis, levels = c('log(Simpson reciprocal)','log10(Blautia)','log10(Enterococcus)'))) %>% 
+  gather('xaxis', 'number', daycal:d_sugar) %>% 
+  mutate(xaxis = factor(xaxis, levels = c('daycal','d_carb','d_sugar','d_fiber','d_protein','d_fat'))) %>% 
+  mutate(xaxis = if_else(str_detect(xaxis, '^d_'), str_replace(xaxis, 'd_',''), str_replace(xaxis, '^day','')),
+         xaxis = if_else(str_detect(xaxis, 'cal'), str_replace(xaxis, 'cal','calorie'), xaxis),
+         xaxis = if_else(str_detect(xaxis, 'carb'), str_replace(xaxis, 'carb','carbohydrate'), xaxis),
+         xaxis = str_to_title(xaxis),
+         xaxis = str_glue('{xaxis}')) %>% 
+  mutate(xaxis = factor(xaxis, levels = c('Calorie','Carbohydrate','Sugar','Fiber','Protein','Fat')))
+```
+
+```{r}
+library(facetscales)
+Blautia_lim <- floor(min(byday_original$Blautia))
+entero_lim <- floor(min(byday_original$Enterococcus))
+simpson_reciprocal_nlog_lim <- max(log(byday_original$simpson_reciprocal))
+
+scales_y <- list(
+  `log(Simpson reciprocal)` = scale_y_continuous(limits = c(0, simpson_reciprocal_nlog_lim), breaks = seq(0, simpson_reciprocal_nlog_lim, 1)),
+  `log10(Blautia)` = scale_y_continuous(limits = c(Blautia_lim, 0), breaks = seq(Blautia_lim, 0, 2)),
+  `log10(Enterococcus)` = scale_y_continuous(limits = c(entero_lim, 0), breaks = seq(entero_lim, 0, 2))
+)
+
+# to use the max observed in the data
+cal_lim <- max(byday_original$daycal)/1000
+protein_lim <- max(byday_original$d_protein)
+d_fat_lim <- max(byday_original$d_fat)
+d_carb_lim <- max(byday_original$d_carb)
+d_fiber_lim <- max(byday_original$d_fiber)
+d_sugar_lim <- max(byday_original$d_sugar)
+
+scales_x <- list(
+  `Calorie` = scale_x_continuous(limits = c(0, cal_lim), breaks = seq(0, cal_lim, 1)),
+  `Protein` = scale_x_continuous(limits = c(0, protein_lim), breaks = seq(0, protein_lim, 50)),
+  `Fat` = scale_x_continuous(limits = c(0, d_fat_lim), breaks = seq(0, d_fat_lim, 100)),
+  `Carbohydrate` = scale_x_continuous(limits = c(0, d_carb_lim), breaks = seq(0, d_carb_lim, 250)),
+  `Fiber` = scale_x_continuous(limits = c(0,d_fiber_lim), breaks = seq(0, d_fiber_lim, 20)),        
+  `Sugar` = scale_x_continuous(limits = c(0, d_sugar_lim), breaks = seq(0, d_sugar_lim, 100) )
+)
+```
+
+
+
+```{r}
+macro_facets <- macro_panel %>% 
+     ggplot() +
+  rasterise(geom_point(aes(x = number, y = value), alpha = 0.02,size = 1 , shape = 16), dpi = 300) +
+  geom_smooth(aes(x = number, y = value), method = "lm", colour = 'darkblue' ,  size = 1, fill = 'gray59') +
+  labs( x = '',title = '', y = '') +
+  stat_cor(aes(x = number, y = value), method = "spearman",  label.sep = ", ",label.x.npc = "left", label.y.npc = "bottom", cor.coef.name = c("rho"), size = 2, p.accuracy = 0.01, r.accuracy = 0.01) +
+  facet_grid_sc(rows = vars(yaxis), cols = vars(xaxis), scales = list(y = scales_y, x = scales_x)) +
+  theme_classic(base_size = 11) +
+  theme(aspect.ratio = 1,
+        panel.background = element_rect(fill = "gray97"),axis.title=element_text(size=axis_title_size),
+        plot.title = element_text(size=axis_title_size),
+        panel.grid.major = element_blank(), 
+        strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+        panel.grid.minor = element_blank()
+       )
+macro_facets
+```

@@ -1,0 +1,97 @@
+---
+title: "Macronutrients with diversity or genus"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Previous 2 day results** 
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(tidybayes)  
+library(brms)
+library(rstan)
+options(mc.cores = parallel::detectCores())
+ncores = parallel::detectCores()
+rstan_options(auto_write = TRUE)
+axis_text_size <- 10
+axis_title_size <- 10
+```
+
+### simpson reciprocal ~ ave_fiber + ave_fat + ave_Sugars + empirical + intensity + TPN + EN + ...
+
+```{r}
+# to change the df a little bit 
+full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv') %>% 
+  mutate(abx = if_else(empirical == 'TRUE', 1, 0),
+         TPN = if_else(TPN == 'TRUE', 1, 0),
+         EN = if_else(EN == 'TRUE', 1, 0)) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(      ave_fiber_e= ave_fiber*abx,
+                ave_fat_e=ave_fat*abx,
+                ave_Sugars_e=ave_Sugars*abx)
+```
+
+
+```{r}
+alpha_macro_fat <- log(simpson_reciprocal) ~ 0 +
+                ave_fiber_e +
+                ave_fat_e +
+                ave_Sugars_e +
+                ave_fiber +
+                ave_fat +
+                ave_Sugars +
+               abx+
+               intensity +
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+get_prior(formula = alpha_macro_fat, data = full)
+
+priors_alpha_macro_fat <- c(
+            # for the macro nutrients
+            prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
+            prior(normal(0, 1), class = 'b', coef = "ave_fat"),
+            prior(normal(0, 1), class = 'b', coef = "ave_Sugars"),
+            # for the interaction terms
+            prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
+            prior(normal(0, 1), class = 'b', coef = "ave_fat_e"),
+            prior(normal(0, 1), class = 'b', coef = "ave_Sugars_e"),
+            # for the TPN 
+            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "EN"),
+            # for the empirical 
+            prior(normal(0, 0.5), class = 'b', coef = "abx"),
+            # for the intensity 
+            prior(normal(2, .1), class = 'b', coef = "intensityablative"),
+            prior(normal(2, .1), class = 'b', coef = "intensityreduced"),
+            prior(normal(2, .1), class = 'b', coef = "intensitynonablative"))
+
+# vet the prior 
+model_alpha_macro_fat  <- brm( alpha_macro_fat,  
+              data = full, 
+              warmup = 1000, iter = 3000, 
+              prior = priors_alpha_macro_fat,
+               control = list(adapt_delta = 0.99),
+              cores = ncores,
+              chains = 2, 
+              seed = 123, sample_prior = T, file = '../data/090_alpha_macro_fat_interaction_model')
+
+
+post_res <- suppressWarnings(posterior_samples(model_alpha_macro_fat))
+post_res %>%  write_csv('../data/090_model_alpha_macro_fat_post_interaction.csv')
+
+prior_df <- prior_draws(model_alpha_macro_fat) 
+prior_df %>% 
+  write_csv('../data/090_model_alpha_macro_fat_prior_interaction.csv')
+
+```
+
+
+

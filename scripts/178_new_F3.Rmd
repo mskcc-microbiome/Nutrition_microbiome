@@ -1,0 +1,455 @@
+---
+title: "New F3"
+author: "Anqi Dai"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(scales)
+library(tidybayes)
+library(cowplot)
+theme_set(theme_pubr(base_size = 8))
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+DTB <- read_csv('../data/152_combined_DTB.csv')
+```
+
+# prep the df 
+
+```{r}
+# correlate top genus abundance with diversity, check if entero and kleb have most negative correlation
+set.seed(1)
+meta <- read_csv('../data/153_combined_META.csv')
+g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
+  spread('genus','relab', fill = 0) %>% 
+  gather('genus','relab', names(.)[2]:names(.)[ncol(.)]) %>% 
+  inner_join(meta %>% select(sampleid, simpson_reciprocal)) %>% 
+  mutate(pseudotiny = runif(nrow(.), min = 0, max = 10^-10) ) %>% 
+  mutate(changed_relab = relab + pseudotiny)
+
+# just calculate the spearman correlation and p value
+spearman_res <- g_relab %>% 
+  split(.$genus) %>% 
+  imap_dfr(function(.x, .y ){
+    # the spearman correlation 
+      spearman_cor = cor.test(.x$simpson_reciprocal, .x$changed_relab, method = c( "spearman"), exact = T)
+      return(list(genus = .y, rho = spearman_cor$estimate, pval = spearman_cor$p.value))
+  } ) 
+
+# the smallest nonzero p value 
+pvals <- spearman_res %>% 
+  filter(pval > 0) 
+tinypseudo <- min(pvals$pval)/10
+
+# show the % of the samples that have the relab of the genus > 10^-4
+perc_thre <- g_relab %>% 
+  count(genus, relab > 10^-4) %>% 
+  filter(`relab > 10^-4` == 'TRUE') %>% 
+  mutate(passthre_perc = round(n/1009*100, 0))
+
+spearman_all <- spearman_res %>% 
+  left_join(perc_thre) %>% 
+  mutate(n = ifelse(is.na(n), 0, n),
+         passthre_perc = ifelse(is.na(passthre_perc), 0, passthre_perc)) %>% 
+    filter(passthre_perc > 10) %>% 
+  mutate(changed_pval = if_else(pval == 0, pval + tinypseudo, pval)) %>% 
+  mutate(padj = p.adjust(changed_pval, method = 'BH'),
+         neglogp = -log10(padj)) %>% 
+  mutate(sig05 = if_else(padj < 0.05, 'FDR < 0.05', 'FDR >= 0.05')) %>% 
+  mutate(Correlation = if_else(rho >= 0, 'higher diversity', 'lower diversity')) %>% 
+  arrange(rho, desc(genus)) 
+
+
+spearman_all %>% write_csv('../data/172_spearman_all.csv')
+```
+
+```{r}
+res <- read_csv('../data/172_spearman_all.csv') %>% 
+  mutate(Correlation = factor(Correlation, levels = c('lower diversity','higher diversity')))
+
+# make a panel with only top 5 significant ones in either direction for the main figure 3
+main <- res %>% 
+  filter(sig05 == 'FDR < 0.05') %>% 
+  split(.$Correlation) %>% 
+  map(function(df){
+    df %>% mutate(absrho = abs(rho)) %>% slice_max(order_by =absrho, n = 5 )
+  }) %>% bind_rows()
+
+correbar <- main %>% 
+  ggbarplot(x = 'genus', y = 'rho', orientation = c( "horizontal"),
+            sort.val = "desc",   fill = "Correlation",  color = "white",    palette = "jco",     sort.by.groups = F,     ylab = "Spearman correlation",    xlab = '') +
+  theme(legend.position = c(.8,.8),axis.text=element_text(size=10),axis.title=element_text(size=10),legend.text  = element_text(size=8), legend.title = element_text(size = 8), 
+         aspect.ratio=1/1.3) +
+  guides(fill = guide_legend(title = "Correlated with"))
+```
+
+```{r}
+# make a panel with all the sig ones for the supplementary
+correbar_all <- res %>% 
+  filter(sig05 == 'FDR < 0.05') %>% 
+  ggbarplot(x = 'genus', y = 'rho', orientation = c( "horizontal"),
+            sort.val = "desc",   fill = "Correlation",  color = "white",    palette = "jco",     sort.by.groups = F,     ylab = "Spearman correlation",    xlab = '') +
+  theme(legend.position = c(.8,.8),axis.text=element_text(size=10),axis.title=element_text(size=10),legend.text  = element_text(size=8), legend.title = element_text(size = 8), 
+         aspect.ratio=1.8) +
+  guides(fill = guide_legend(title = "Correlated with"))
+
+
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S7",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 7)
+  )
+ 
+combined <- plot_grid(
+  title, correbar_all,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/S7_genus_diversity_correlation_178.pdf',
+      width = 210, height = 290, units = "mm", device = 'pdf', plot = combined, dpi = 300)
+```
+
+# the Enterococcus results
+
+```{r}
+entero <- read_csv('../data/171_entero_model_fg_post_interaction.csv')  %>% 
+  select(starts_with('b_')) %>% 
+  gather('item', 'coeff') %>% 
+  mutate(item = str_replace(item, 'b_fg_',''),
+         item = str_replace(item, 'b_',''),
+         item = str_replace(item, 'intensity','')) %>% 
+   mutate(fgrp1 = case_when(
+    item ==  'milk' ~ '1',
+    item == 'meat' ~ '2',
+    item ==  'egg' ~ '3',
+    item ==  'legume' ~ '4',
+    item == 'grain' ~ '5',
+    item == 'fruit' ~ '6',
+    item == 'veggie' ~ '7',
+    item ==  'oils' ~ '8', 
+    item ==  'sweets' ~ '9'
+  ))  %>% 
+  left_join(key %>% select(fgrp1, color, shortname)) %>% 
+  mutate(shortname = case_when(
+        item ==  'milk_e' ~ 'abx * Milk',
+    item == 'meat_e' ~ 'abx * Meats',
+    item ==  'egg_e' ~ 'abx * Eggs',
+    item ==  'legume_e' ~ 'abx * Legumes',
+    item == 'grain_e' ~ 'abx * Grains',
+    item == 'fruit_e' ~ 'abx * Fruits',
+    item == 'veggie_e' ~ 'abx * Vegetables',
+    item ==  'oils_e' ~ 'abx * Oils', 
+    item ==  'sweets_e' ~ 'abx * Sweets',
+    item ==  'nonablative' ~ 'Nonablative',
+    item ==  'reduced' ~ 'Reduced',
+    item ==  'ablative' ~ 'Ablative',
+    item ==  'TPN' ~ 'TPN',
+    item ==  'EN' ~ 'EN',
+    item ==  'abx' ~ 'abx',
+    TRUE ~ `shortname`
+  )) %>% 
+  filter(! shortname %in% c('Nonablative','Reduced','Ablative'))
+
+entero %>% 
+  distinct(shortname) %>% pull(shortname)
+entero %>% 
+  distinct(item) %>% pull(item)
+```
+
+```{r}
+# deciding on how to order these terms 
+# find the q25 of the coeffs
+fg_order <- entero %>% filter(str_detect(item, '_e$')) %>% 
+  group_by(shortname) %>% 
+  tidybayes::median_qi(coeff , .width = c( .66)) %>% 
+  arrange(.lower) %>% pull(shortname)
+```
+
+```{r}
+total_order <- c('Vegetables','abx * Vegetables',
+                 'Oils','abx * Oils',
+                 'Fruits','abx * Fruits',
+                 'Meats','abx * Meats',
+                 'Legumes','abx * Legumes',
+                 'Eggs','abx * Eggs',
+                 'Milk','abx * Milk',
+                 'Grains','abx * Grains',
+                 'Sweets','abx * Sweets',
+                 "TPN" ,"EN" , 'abx')
+#tibble(ord = total_order) %>% write_csv('../data/178_coeff_order.csv')
+arrange_label <- tibble(ord = total_order) %>% 
+  mutate(shortname = str_replace(ord, 'abx \\+ ','')) %>% 
+  left_join(key %>% select(shortname, color)) %>% 
+  mutate(color = if_else(is.na(color), 'black', color))
+
+```
+
+```{r}
+# color the most positive one with red: the abx + sweets        
+mostpos <- entero %>%   
+  group_by(shortname) %>% 
+  count(coeff > 0) %>% 
+  ungroup %>% 
+  filter(`coeff > 0` == 'TRUE') %>% 
+  arrange(desc(n)) %>% 
+  top_n(1) %>% 
+  pull(shortname)
+mostpos
+
+```
+
+```{r}
+# I need to create a data frame that has the coordinates of the rectangles that I wanna create
+interaction_terms <- tibble(
+  shortname = total_order
+) %>% 
+  mutate(ymin = seq(1, nrow(.)) - 0.5,
+         ymax = seq(1, nrow(.)) + 0.5) %>% 
+  filter(str_detect(shortname, '\\*')) %>% 
+  mutate(xmin = -Inf, xmax = Inf,
+         interaction_fill = 'interaction_fill')
+
+# this leaves me no choice but I need to fill the other blue area with the blue rectangles 
+blue_terms <- tibble(
+  shortname = total_order
+) %>% 
+  mutate(ymin = seq(1, nrow(.)) - 0.5,
+         ymax = seq(1, nrow(.)) + 0.5) %>% 
+  filter(!str_detect(shortname, '\\*')) %>% 
+  mutate(xmin = -Inf, xmax = Inf,
+         blue_fill = 'blue_fill')
+```
+
+```{r}
+entero_df <- entero %>% 
+  mutate(mark = if_else(shortname %in% mostpos, 'mostpos','others')) %>% 
+  mutate(shortname = factor(shortname, levels = total_order))
+
+```
+
+```{r}
+entero_panel <- entero_df %>%   
+  ggplot() +
+  stat_pointinterval(aes(x = coeff, y = shortname, col = mark),.width = c(.66, .95), fatten_point = 1.2) +
+   geom_rect(data = interaction_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = interaction_fill), alpha = .1) +
+  geom_rect(data = blue_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = blue_fill) , alpha = .1) +
+  scale_fill_manual(values=c("interaction_fill" = "lightblue", "blue_fill" = "royalblue")) +
+  geom_vline(xintercept = 0, col = 'black', linetype = 'dashed') +
+  labs(x = 'CLR(Enterococcus) change', y = '') +
+  #annotate("text", x = 2, y = 18, label = "97.3% > 0", col = 'coral1') + 
+  theme_classic() +
+  theme(legend.position = 'none') +
+  scale_color_manual(values = c("coral1", "black")) +
+  theme(axis.text.y = element_text( size = 10), plot.background = element_rect(fill='transparent', color=NA), 
+        axis.title=element_text(size=10), aspect.ratio=1.3 )
+
+entero_panel 
+
+```
+
+# the mouse experiment   
+
+```{r combined_data}
+newest <- readxl::read_excel('../data/Sucrose_All Experiments Consolidated .xlsx') %>% 
+  mutate(Log_CFUs_per_GramStool = log10((((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1) ) %>%   
+  filter(Day != 1) %>%  
+  separate(Treatment, into = c('diet_treatment','abx_treatment'), sep = ', ', remove = T) %>% 
+  mutate(diet_treatment = if_else(diet_treatment == 'Vehicle','vehicle','sucrose'),
+         abx_treatment = if_else(str_detect(abx_treatment, 'Bia'),'biapenem',abx_treatment),
+         diet_treatment = factor(diet_treatment, levels = c('vehicle','sucrose')),
+         abx_treatment = factor(abx_treatment, levels = c('PBS','biapenem'))) %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1) %>% 
+  select(Experiment:Mouse_identifier, CFUs_per_GramStool, Log_CFUs_per_GramStool)
+
+# are the mice paired in each of the treatment group
+
+```
+
+```{r}
+# N-N mice per group; 2 independent experiments.  for the mouse experiments
+n_per_grp <- newest %>% 
+  count(diet_treatment, abx_treatment)
+range(n_per_grp$n)
+```
+
+
+
+
+
+
+```{r}
+# maybe I can plot in a different way 
+plotdf <- newest %>% 
+  #filter(Day != 3) %>% 
+  mutate(Day = factor(Day)) %>% 
+  arrange(abx_treatment,diet_treatment,  Day) %>% 
+  mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{Day}')) %>% 
+  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+```
+
+
+```{r trapezpid_auc}
+# the trapezpid auc
+dat_entero <- newest %>% 
+  select(diet_treatment,
+         abx_treatment,
+         Day,
+         Mouse_identifier,
+         CFUs_per_GramStool)
+
+dat_entero_wide <- dat_entero %>% 
+  pivot_wider(id_cols = c(diet_treatment,
+                          abx_treatment,
+                          Mouse_identifier),
+              names_from = Day,
+              names_prefix = "Day",
+              values_from = CFUs_per_GramStool)
+ 
+dat_entero_wide <- dat_entero_wide %>% 
+  mutate(trap_0_3 = (Day0  + Day3 )*3/2,
+         trap_3_6 = (Day3  + Day6 )*3/2,
+         trap = trap_0_3 + trap_3_6,
+         groups = paste(abx_treatment,
+                         diet_treatment,sep="__")) %>% 
+  mutate(groups = factor(groups, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+
+grps <- plotdf %>% count(xvar)
+
+df <- dat_entero_wide %>% 
+  filter(Day6 < Day0)
+```
+```{r}
+# the median fold change and the p value for the star in the 3C upper panel
+deltas <- plotdf %>%
+  select(grp, Day, Mouse_identifier, CFUs_per_GramStool) %>% 
+  spread('Day','CFUs_per_GramStool') %>%
+  rename(d0 = `0`, d3 = `3`,d6 = `6`)
+```
+
+
+```{r}
+# the fold change on day 3
+day3fc <- deltas %>% 
+  filter(str_detect(grp, 'biapenem')) %>% 
+  select(grp, Mouse_identifier, d3) %>% 
+  spread('grp','d3') %>% 
+  filter(!is.na(biapenem__vehicle)) %>% 
+  mutate(fc = round(biapenem__sucrose/biapenem__vehicle, 2)) 
+
+day3fc
+
+median(day3fc$fc)
+
+res <- wilcox.test(d3 ~ grp, data = deltas %>% 
+  filter(str_detect(grp, 'biapenem')) %>% 
+  select(grp, Mouse_identifier, d3),
+                   exact = FALSE)
+res
+```
+
+
+```{r} 
+# the fold change on day 6
+day6fc <- deltas %>% 
+  filter(str_detect(grp, 'biapenem')) %>% 
+  select(grp, Mouse_identifier, d6) %>% 
+  spread('grp','d6') %>% 
+  filter(!is.na(biapenem__vehicle)) %>% 
+  mutate(fc = round(biapenem__sucrose/biapenem__vehicle, 2)) 
+
+
+median(day6fc$fc)
+
+
+
+res <- wilcox.test(d6 ~ grp, data = deltas %>% 
+  filter(str_detect(grp, 'biapenem')) %>% 
+  select(grp, Mouse_identifier, d6),
+                   exact = FALSE)
+res
+```
+
+```{r}
+f3_days <- plotdf %>%    
+  ggboxplot(x = 'xvar', y = 'CFUs_per_GramStool',add = 'jitter', 
+             xlab = '', ylab = 'Enterococcal\n CFU/gram',, add.params = list(alpha = 0.5, shape = 16),
+            width = 0.6,color  = 'grp')+
+   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  stat_compare_means(comparisons = list(c('biapenem__vehicle__3','biapenem__sucrose__3'), c('biapenem__vehicle__6','biapenem__sucrose__6')),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  scale_y_log10(breaks = c(1 %o% 10^(-1:12)),  labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+  theme(axis.text =  element_text(size = 10),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
+
+# the boxplot of the AUC
+my_comparisons <- list( c("PBS__vehicle", "biapenem__vehicle"), 
+                        c("biapenem__vehicle", "biapenem__sucrose"), 
+                        c("PBS__vehicle", "PBS__sucrose"))
+
+f3_AUC <- ggboxplot(dat_entero_wide,
+          x="groups",add = 'jitter',
+          y="trap", color  = 'groups', add.params = list(alpha = 0.5, shape = 16)) +
+  ylab("Trapezoidal\nAUC")+xlab('') +
+   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  scale_y_log10(breaks = c(1 %o% 10^(-1:8)),  labels = trans_format("log10", math_format(10^.x))) +
+  stat_compare_means(comparisons = my_comparisons,label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  theme(axis.text.x = element_blank(),axis.title=element_text(size=10), axis.text =  element_text(size = 10),legend.position = 'none',aspect.ratio=1/3.1, axis.ticks.x = element_blank())
+
+# combine the above two together on a stack
+f3_mouse <- plot_grid(f3_days,NA, f3_AUC,  ncol = 1,
+                align = 'vh', axis = 'lrtb', rel_heights = c(1.1,-0.2,0.7))
+f3_mouse
+
+
+f3_AUC_stats <- ggboxplot(dat_entero_wide,
+          x="groups",add = 'jitter',
+          y="trap", color  = 'groups') +
+  ylab("Trapezoidal\nAUC")+xlab('') +
+   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  scale_y_log10(breaks = c(1 %o% 10^(-1:8)),  labels = trans_format("log10", math_format(10^.x))) +
+  stat_compare_means(comparisons = my_comparisons, method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +  
+  theme(axis.text.x = element_blank(),axis.title=element_text(size=10), axis.text =  element_text(size = 10),legend.position = 'none',aspect.ratio=1/3.1, axis.ticks.x = element_blank())
+```
+
+
+```{r}
+# assemble
+title <- ggdraw() + 
+  draw_label(
+    "Fig. 3",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 5)
+  )
+
+
+f3 <- plot_grid(correbar, entero_panel,f3_days, f3_AUC, label_size = 12, ncol = 1,labels = c('A','B','C', NA),
+                align = 'vh', axis = 'lrtb', rel_heights = c(1,1.55,1, 0.55))
+
+ 
+combined <- plot_grid(
+  title, f3,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+)+theme(plot.margin = unit(c(1,9,2,1), "cm"))
+
+ggsave('../data/F3_current_178_changing.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)
+```
