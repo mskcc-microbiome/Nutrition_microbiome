@@ -1,0 +1,88 @@
+---
+title: "The mice 16s sequencing data from diet experiments"
+output: html_document
+date: "2024-07-18"
+---
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(janitor)
+library(kableExtra)
+library(knitr)
+library(Maaslin2)
+library(vegan)
+library(vdbR)
+connect_database('~/dbConfig.txt')
+```
+# the alpha diversity results in simpson reciprocal
+
+```{r}
+healthyall <- read_csv('../data/204_mice_diet_healthy_all.csv')
+
+gvhdall <- read_csv('../data/204_mice_diet_gvhd_all.csv')
+
+meta <- healthyall %>%
+  select(-Taxon, -relab) %>% 
+  distinct() 
+```
+
+
+```{r}
+alpha_healthy_days <-meta %>% 
+  mutate(day = factor(day)) %>% 
+  arrange(abx_treatment,desc(diet_treatment),  day) %>% 
+  mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
+  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>%    
+  ggboxplot(x = 'xvar', y = 'simpson_reciprocal',add = 'jitter', 
+             xlab = '', ylab = 'alpha diversity(simpson reciprocal)',, add.params = list(alpha = 0.5, shape = 16),
+            width = 0.6,color  = 'grp')+
+   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  stat_compare_means(comparisons = list(
+    c('biapenem__vehicle__3','biapenem__sucrose__3'), 
+    #c('biapenem__vehicle__6','biapenem__sucrose__6'),
+    c('PBS__vehicle__3','PBS__sucrose__3'),
+    c('PBS__vehicle__3','biapenem__vehicle__3')
+    ),
+    label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+  scale_y_sqrt() +
+  theme_light() +
+  theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
+alpha_healthy_days
+```
+sucrose-only doesn’t reduce diversity on day 3, compared with vehicle, but biapenem-only does.  However, sucrose doesn’t further reduce diversity beyond the biapenem effect on day 3. 
+
+# beta diversity and composition
+
+
+```{r}
+# calculate my own bc distance using the subsetted samples
+
+relab_df <- healthyall %>% 
+  select(Taxon, sampleid, relab) %>% 
+  spread(key = 'Taxon', value = 'relab', fill = 0) %>% 
+  column_to_rownames('sampleid')
+
+dist_ <- vegdist(relab_df, method = 'bray')
+eigen <- cmdscale(dist_, eig = T)$eig
+percent_var <- signif(eigen/sum(eigen), 3)*100
+bc <- cmdscale(dist_, k = 2)
+beta_all <- bc %>%
+  as.data.frame() %>%
+  rownames_to_column('sampleid')  %>% 
+  full_join(meta) 
+```
+
+```{r}
+# color by abx        
+beta_all %>% 
+  mutate(experiment_no = factor(experiment_no)) %>% 
+  ggscatter(x = 'V1', y = 'V2', color = 'abx_treatment', shape = 'diet_treatment', alpha = 0.6) +
+  facet_grid(day ~ experiment_no) +
+  theme_light() +
+  xlab(paste0("PC 1 [",percent_var[1],"%]")) +
+  ylab(paste0("PC 2 [",percent_var[2],"%]")) +
+  theme(aspect.ratio=1, legend.position = 'right') 
+```
