@@ -1,0 +1,83 @@
+---
+title: "GVHD experiment mice sequencing 16s"
+output: html_document
+date: "2024-07-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(janitor)
+library(kableExtra)
+library(knitr)
+library(Maaslin2)
+library(vegan)
+library(vdbR)
+connect_database('~/dbConfig.txt')
+```
+```{r}
+gvhdall <- read_csv('../data/204_mice_diet_gvhd_all.csv') %>% 
+  rename(day_relative_to_transplant = day)
+
+meta <- gvhdall %>%
+  select(-Taxon, -relab) %>% 
+  distinct() 
+```
+
+```{r}
+# there is a discrepancy of enterococcus bloom in counts data on day 4 in abx +vehicle in BMT mice but not so in 16s data 
+gvhd_counts <- readxl::read_excel('../data/BMT2_Metadata_ForCSVImport copy.xlsx') %>% 
+  mutate(Log_CFUs_per_GramStool = log10((((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1) ) %>%   
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1) %>% 
+  clean_names() %>% 
+  separate_rows(treatment, sep = "\\+") %>% 
+  mutate(grp = case_when(
+    str_detect(treatment, '^BM') ~ 'gvhd_grp',
+    str_detect(treatment, 'B|PBS') ~ 'abx_treatment',
+    str_detect(treatment, 'PH|S') ~ 'diet_treatment'
+  )) %>% 
+  spread('grp','treatment') %>% 
+  mutate(diet_treatment = if_else(diet_treatment == 'PH','vehicle','sucrose'),
+         abx_treatment = if_else(str_detect(abx_treatment, '^B'),'biapenem',abx_treatment),
+         gvhd_grp = if_else(str_detect(gvhd_grp, '^BMT'),'BM+Tcells','BMonly')) 
+```
+
+```{r}
+# stack the CFU counts and the relab together
+two <- bind_rows(
+  gvhd_counts %>% 
+    select(day_relative_to_transplant, log_cf_us_per_gram_stool,abx_treatment:gvhd_grp) %>% 
+    mutate(type = 'CFU') %>% 
+    rename(value = log_cf_us_per_gram_stool),
+  gvhdall %>% 
+    filter(str_detect(Taxon, 'g__Enterococc')) %>% 
+    select(day_relative_to_transplant,relab,  abx_treatment:gvhd_grp)%>% 
+    mutate(type = 'relab')%>% 
+    rename(value = relab)
+) %>% 
+  filter(day_relative_to_transplant != 9) %>% 
+  arrange(abx_treatment,desc(diet_treatment),  day_relative_to_transplant) %>% 
+  mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day_relative_to_transplant}')) %>% 
+  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+  
+
+two %>% 
+  ggboxplot(x = 'xvar', y = 'value',add = 'jitter', 
+             xlab = '', ylab = 'value',, add.params = list(alpha = 0.5, shape = 16),
+            width = 0.6,color  = 'grp') +
+  scale_y_sqrt() +
+  facet_grid(type~ gvhd_grp, scales = 'free')+ 
+   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2'))+
+  theme_light() +
+  theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/3)
+```
+```{r}
+# to prove that the zymo annotation is not problematic
+
+```
+
