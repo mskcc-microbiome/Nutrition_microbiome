@@ -12,8 +12,6 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(ggpubr)
 library(janitor)
-library(kableExtra)
-library(knitr)
 library(Maaslin2)
 library(vegan)
 library(vdbR)
@@ -43,41 +41,115 @@ gvhd_counts <- readxl::read_excel('../data/BMT2_Metadata_ForCSVImport copy.xlsx'
   spread('grp','treatment') %>% 
   mutate(diet_treatment = if_else(diet_treatment == 'PH','vehicle','sucrose'),
          abx_treatment = if_else(str_detect(abx_treatment, '^B'),'biapenem',abx_treatment),
-         gvhd_grp = if_else(str_detect(gvhd_grp, '^BMT'),'BM+Tcells','BMonly')) 
+         gvhd_grp = if_else(str_detect(gvhd_grp, '^BMT'),'BM+Tcells','BMonly')) %>% 
+  rename(tube_no = tube_id) %>% 
+  left_join(gvhdall %>% distinct(tube_no, sampleid))
+
+
+```
+```{r}
+# the absolute copy numbers of enterococcus
+abso <- read_csv('../data/absolute.abundance.csv') %>% 
+  rename(sampleid = customer_label) %>% 
+  select(sampleid, gene_copies_per_ul) %>% 
+  inner_join(gvhd_counts %>% select(sampleid, stool_weight_mg)) %>% 
+  mutate(gene_copies_per_gram = gene_copies_per_ul * 500 /(stool_weight_mg/1000)) %>% 
+  inner_join(gvhdall %>% 
+    filter(str_detect(Taxon, 'g__Enterococc')) %>% 
+    select(sampleid, day_relative_to_transplant,relab,  abx_treatment:gvhd_grp) %>% 
+      group_by(sampleid, day_relative_to_transplant,abx_treatment, diet_treatment, gvhd_grp) %>% 
+    summarise(relab = sum(relab)) ) %>% 
+  mutate(abs_copy = gene_copies_per_gram * relab,
+         log10_abs_copy = log10(abs_copy + 1)) %>% 
+  mutate(type = 'log10_abs_copy') %>% 
+  rename(value = log10_abs_copy)
 ```
 
 ```{r}
 # stack the CFU counts and the relab together
 two <- bind_rows(
   gvhd_counts %>% 
-    select(day_relative_to_transplant, log_cf_us_per_gram_stool,abx_treatment:gvhd_grp) %>% 
+    select(sampleid, day_relative_to_transplant, log_cf_us_per_gram_stool,abx_treatment:gvhd_grp) %>% 
     mutate(type = 'CFU') %>% 
-    rename(value = log_cf_us_per_gram_stool),
+    rename(value = log_cf_us_per_gram_stool) %>% 
+    filter(!is.na(sampleid)),
   gvhdall %>% 
     filter(str_detect(Taxon, 'g__Enterococc')) %>% 
-    select(day_relative_to_transplant,relab,  abx_treatment:gvhd_grp)%>% 
-    mutate(type = 'relab')%>% 
-    rename(value = relab)
+    select(sampleid,day_relative_to_transplant,relab,  abx_treatment:gvhd_grp)%>% 
+    group_by(sampleid, day_relative_to_transplant,abx_treatment, diet_treatment, gvhd_grp) %>% 
+    summarise(entero_relab = sum(relab)) %>% 
+    mutate(type = 'entero_relab')%>% 
+    rename(value = entero_relab),
+  abso %>% 
+    select(sampleid,day_relative_to_transplant, value, abx_treatment:gvhd_grp, type)
 ) %>% 
   filter(day_relative_to_transplant != 9) %>% 
   arrange(abx_treatment,desc(diet_treatment),  day_relative_to_transplant) %>% 
   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day_relative_to_transplant}')) %>% 
   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>% 
+  mutate(type = factor(type , levels = c('CFU','log10_abs_copy','entero_relab')))
   
 
 two %>% 
   ggboxplot(x = 'xvar', y = 'value',add = 'jitter', 
              xlab = '', ylab = 'value',, add.params = list(alpha = 0.5, shape = 16),
             width = 0.6,color  = 'grp') +
-  scale_y_sqrt() +
+  #scale_y_sqrt() +
   facet_grid(type~ gvhd_grp, scales = 'free')+ 
    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2'))+
   theme_light() +
   theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/3)
 ```
+
+```{r}
+# to make them three different columns and do a pairwise correlation
+threecols <- two %>% 
+  spread('type','value') %>% 
+  mutate(day_relative_to_transplant = factor(day_relative_to_transplant))
+```
+
+```{r}
+threecols %>% 
+  ggscatter(x = 'CFU', y = 'log10_abs_copy', color = 'day_relative_to_transplant', xlab = 'log10 (CFU)') +
+  geom_abline(slope = 1, intercept = 0)
+```
+```{r}
+threecols %>% 
+  ggscatter(x = 'CFU', y = 'entero_relab', color = 'day_relative_to_transplant') +
+  geom_abline(slope = 1, intercept = 0)
+```
+```{r}
+threecols %>% 
+  ggscatter(x = 'log10_abscopy', y = 'entero_relab', color = 'day_relative_to_transplant') +
+  geom_abline(slope = 1, intercept = 0)
+```
+
+
 ```{r}
 # to prove that the zymo annotation is not problematic
-
+# annotate few asv that has the highest relab
+# high <- gvhdall %>% 
+#   filter(relab > 0.2) %>% 
+#   distinct(Taxon) %>% 
+#   separate(Taxon, into = c('seq_id','taxa'), sep = ':')
+# high 
 ```
+```{r}
+# library(biomformat)
+# 
+# biom_data <- read_biom("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/zr17118.16S_240607.zymo/00...AllSamples.Bac16Sv34/DADA2_ASV_Distribution/ASV_Table.biom")
+# 
+# library(seqinr)
+# d4_b_v <- meta %>% 
+#   filter(day_relative_to_transplant == 4& abx_treatment == 'biapenem'& diet_treatment == 'vehicle')
+# 
+# sequences <- read.fasta("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/zr17118.16S_240607.zymo/00...AllSamples.Bac16Sv34/DADA2_ASV_Distribution/sv.seqs.fna", as.string = TRUE) 
+# sequences[['seq35']][1]
+# names(sequences)
+# 
+# seqs <- gvhdall %>% 
+#   filter(tube_no == 'C020394')
+```
+
 
