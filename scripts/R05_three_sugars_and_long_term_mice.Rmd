@@ -140,7 +140,8 @@ day3fc <- deltas %>%
   spread('grp','d3') %>% 
   filter(!is.na(biapenem_vehicle)) %>% 
   mutate(fc_fructose = round(biapenem_fructose/biapenem_vehicle, 2),
-         fc_glucose = round(biapenem_glucose/biapenem_vehicle, 2)) 
+         fc_glucose = round(biapenem_glucose/biapenem_vehicle, 2),
+         fc_sucrose = round(biapenem_sucrose/biapenem_vehicle, 2)) 
 ```
 
 
@@ -162,5 +163,30 @@ res_glucose <- wilcox.test(d3 ~ grp, data = deltas %>%
   select(grp, mouse_identifier, d3),
                    exact = FALSE)
 res_glucose
+```
+```{r sucrose_day3}
+median(day3fc$fc_sucrose)
+
+res_sucrose <- wilcox.test(d3 ~ grp, data = deltas %>% 
+  filter(grp %in% c('biapenem_sucrose','biapenem_vehicle')) %>% 
+  select(grp, mouse_identifier, d3),
+                   exact = FALSE)
+res_sucrose
+```
+```{r sucrose_day6}
+day6fc <- deltas %>% 
+  filter(str_detect(grp, 'biapenem')) %>% 
+  select(grp, mouse_identifier, d6) %>% 
+  spread('grp','d6') %>% 
+  filter(!is.na(biapenem_vehicle)) %>% 
+  mutate(fc_sucrose = round(biapenem_sucrose/biapenem_vehicle, 2)) 
+
+median(day6fc$fc_sucrose)
+
+res_sucrose_d6 <- wilcox.test(d6 ~ grp, data = deltas %>% 
+  filter(grp %in% c('biapenem_sucrose','biapenem_vehicle')) %>% 
+  select(grp, mouse_identifier, d6),
+                   exact = FALSE)
+res_sucrose_d6
 ```
 
