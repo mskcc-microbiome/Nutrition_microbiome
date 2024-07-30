@@ -1,0 +1,171 @@
+---
+title: "beta diversity of microbiome and diet"
+output: html_document
+date: "2024-07-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(vegan)
+```
+
+Use the prior two day summary of the data, meaning count the average of the prior two day and their distance to the earliest 
+
+# to summarize the food code based average of the prior two days 
+
+```{r}
+dtb <- read_csv('../data/152_combined_DTB.csv')
+meta <- read_csv('../data/153_combined_META.csv')
+```
+
+```{r}
+stb_pair <- meta %>%
+  select(pid, sdrt) %>%
+  transmute(pid = pid,
+            p1d = sdrt-1,
+            p2d = sdrt-2)
+
+food_code_daily <- dtb %>%
+  group_by(pid, fdrt, Food_code) %>%
+  summarise(fc_daily = sum(dehydrated_weight))
+ 
+mean_p2d_fc <-  function(pid_, p1d_, p2d_){
+  df = food_code_daily %>%
+    filter(pid == pid_) %>%
+    filter(fdrt %in% c(p1d_, p2d_  )) %>%
+    group_by(Food_code) %>%
+    summarise(ave_fc = sum(fc_daily)/2)
+  return(df)
+} 
+
+mean_p2d_fc_df <- pmap(stb_pair, function(pid, p1d, p2d){
+    mean_p2d_fc(pid, p1d, p2d)
+  }) %>%
+  set_names(meta %>% pull(sampleid)) %>%
+  bind_rows(.id = 'sampleid')
+ 
+```
+```{r}
+# transform the shape so that I can calculate the unweighted unifrac distance 
+p2d_fc_df <- mean_p2d_fc_df %>% 
+  spread('sampleid','ave_fc', fill = 0) 
+
+p2d_fc_df %>% write_tsv('../data/R06_p2d_fc_df.tsv')
+
+```
+
+```{bash}
+biom convert -i  R06_p2d_fc_df.tsv -o R06_p2d_fc_df.biom --to-hdf5 --table-type="Table"
+```
+
+
+```{bash}
+qiime tools import --input-path R06_p2d_fc_df.biom --output-path  R06_p2d_fc_df.qza --type "FeatureTable[Frequency]"
+```
+
+```{bash}
+ qiime diversity beta-phylogenetic \
+            --i-table R06_p2d_fc_df.qza \
+            --i-phylogeny output_food_tree_datatree.qza \
+            --p-metric unweighted_unifrac \
+            --o-distance-matrix R06_p2d_fc_unweighted_unifrac_distance_matrix.qza
+```
+
+```{bash}
+qiime diversity pcoa \
+            --i-distance-matrix R06_p2d_fc_unweighted_unifrac_distance_matrix.qza \
+            --o-pcoa R06_p2d_fc_unweighted_unifrac_distance_PCOA.qza
+
+```
+
+```{bash}
+qiime tools export --input-path R06_p2d_fc_unweighted_unifrac_distance_PCOA.qza --output-path R06_p2d_fc_unweighted_unifrac_distance_PCOA
+```
+
+```{r}
+# import the ordination results
+dfn <- '../data/R06_p2d_fc_unweighted_unifrac_distance_PCOA/ordination.txt'
+dpcoa <- read_tsv(dfn, skip = 9, col_names = F)  %>% 
+    filter(! X1 %in% c('Biplot','Site constraints')) %>%
+    select(sampleid = X1, PC1 = X2, PC2 = X3) %>% 
+  inner_join(meta %>% select(sampleid, pid, sdrt))
+
+dpcoa_dist_earliest <- dpcoa %>% 
+  group_by(pid) %>%
+  arrange(sdrt) %>%
+  mutate(distance_to_earliest = sqrt((PC1 - first(PC1))^2 + (PC2 - first(PC2))^2))
+
+# some patient follows a very clear trajectory of the sdrt up, distance also up.
+dpcoa_dist_earliest %>% 
+  ggscatter(x = 'sdrt', y = 'distance_to_earliest', facet.by = 'pid')
+```
+
+# similary do this for the stool samples relative abundance at genus level
+
+```{r}
+relab_genus <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
+  spread(key = 'genus', value = 'relab', fill = 0) %>% 
+  column_to_rownames('sampleid')
+
+dist_ <- vegdist(relab_genus, method = 'bray')
+eigen <- cmdscale(dist_, eig = T)$eig
+percent_var <- signif(eigen/sum(eigen), 3)*100
+bc <- cmdscale(dist_, k = 2)
+beta_ <- bc %>%
+  as.data.frame() %>%
+  rownames_to_column('sampleid')  %>% 
+  inner_join(meta %>% select(sampleid, pid, sdrt)) %>% 
+  rename(PC1 = V1, PC2 = V2)
+
+beta_dist_earliest <- beta_ %>% 
+  group_by(pid) %>%
+  arrange(sdrt) %>%
+  mutate(distance_to_earliest = sqrt((PC1 - first(PC1))^2 + (PC2 - first(PC2))^2))
+```
+# now see if there is some association
+
+```{r}
+joined <- dpcoa_dist_earliest %>% 
+  select(-PC1, -PC2) %>% 
+  rename(diet_dist = distance_to_earliest) %>% 
+  inner_join(beta_dist_earliest %>% select(-PC1, -PC2) %>% rename(stool_dist = distance_to_earliest))
+
+# it's important to account for the repeated measurements here 
+# joined %>% 
+#   ggscatter(x = 'diet_dist', y = 'stool_dist', facet.by = 'pid')
+```
+
+
+```{r}
+# use the linear mixed effects model 
+library(lmerTest)
+model = lmer(stool_dist ~ diet_dist + (1 | pid), data = joined)
+ret = summary(model)
+ret
+coeff = ret$coefficients[2,1]
+pval = ret$coefficients[2,5]
+
+# residuals <- residuals(model)
+# hist(residuals, main = "Distribution of Residuals", xlab = "Residuals")
+# plot(density(residuals), main = "Density Plot of Residuals", xlab = "Residuals")
+# 
+# qqnorm(residuals)
+# qqline(residuals) # Adds a reference line for the normal distribution
+# 
+# ggplot(data.frame(residuals), aes(x = residuals)) +
+#   geom_histogram(aes(y = ..density..), binwidth = 0.1, color = "black", fill = "lightblue") +
+#   geom_density(alpha = 0.2, fill = "red") +
+#   labs(title = "Distribution of Residuals", x = "Residuals", y = "Density")
+
+```
+
+
+
+
+
+
