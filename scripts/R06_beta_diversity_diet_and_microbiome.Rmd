@@ -142,7 +142,7 @@ joined <- dpcoa_dist_earliest %>%
 
 
 ```{r}
-# use the linear mixed effects model 
+# use the linear mixed effects model  
 library(lmerTest)
 model = lmer(stool_dist ~ diet_dist + (1 | pid), data = joined)
 ret = summary(model)
@@ -161,11 +161,27 @@ pval = ret$coefficients[2,5]
 #   geom_histogram(aes(y = ..density..), binwidth = 0.1, color = "black", fill = "lightblue") +
 #   geom_density(alpha = 0.2, fill = "red") +
 #   labs(title = "Distribution of Residuals", x = "Residuals", y = "Density")
-
 ```
+```{r}
+library(ggpmisc)
+joined %>% 
+  ungroup() %>% 
+  mutate(fixed_effects = predict(model, re.form=NA),
+         residuals = residuals(model),
+         partial_residuals = residuals + fixed_effects) %>% 
+ggplot( aes(x = diet_dist, y = partial_residuals)) +
+  geom_point(alpha = 0.8, shape = 16) +
+  stat_poly_eq(formula = y ~ x, 
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+               parse = TRUE) +  # Add the equation and R-squared
+  geom_smooth(method = "lm", se = FALSE) +  
+  labs(x = "Diet Distance", y = "Partial Residuals (Stool Distance)") +
+  ggtitle("Partial Residual Plot") +
+  theme_pubr() +
+  theme(aspect.ratio = 1)
 
-
-
-
-
+# Direction of Association: The positive slope of the line confirms that there is a positive association between diet distance and stool distance. This means that, on average, as the dissimilarity between a patient's subsequent and initial food intake increases, so does the dissimilarity between their subsequent and initial stool microbiome composition.
+# 
+# Average Effect Size: The slope of the line quantifies the average change in stool distance for each unit increase in diet distance. For example, if the slope is 0.8, it would mean that a 1-unit increase in diet distance is associated with a 0.8-unit increase in stool distance, on average, after controlling for individual patient effects.
+```
 
