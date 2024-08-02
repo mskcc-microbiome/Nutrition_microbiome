@@ -87,6 +87,13 @@ qiime diversity pcoa \
 qiime tools export --input-path R06_p2d_fc_unweighted_unifrac_distance_PCOA.qza --output-path R06_p2d_fc_unweighted_unifrac_distance_PCOA
 ```
 
+```{bash}
+qiime tools export \
+    --input-path  R06_p2d_fc_unweighted_unifrac_distance_matrix.qza \
+    --output-path R06_p2d_fc_unweighted_unifrac_distance_matrix
+```
+
+
 ```{r}
 # import the ordination results
 dfn <- '../data/R06_p2d_fc_unweighted_unifrac_distance_PCOA/ordination.txt'
@@ -133,11 +140,14 @@ beta_dist_earliest <- beta_ %>%
 joined <- dpcoa_dist_earliest %>% 
   select(-PC1, -PC2) %>% 
   rename(diet_dist = distance_to_earliest) %>% 
-  inner_join(beta_dist_earliest %>% select(-PC1, -PC2) %>% rename(stool_dist = distance_to_earliest))
+  inner_join(beta_dist_earliest %>% select(-PC1, -PC2) %>% rename(stool_dist = distance_to_earliest)) %>% 
+  # filter out the baseline compared to baseline (distance is zero)
+  filter(diet_dist > 0)
 
 # it's important to account for the repeated measurements here 
 # joined %>% 
 #   ggscatter(x = 'diet_dist', y = 'stool_dist', facet.by = 'pid')
+
 ```
 
 
@@ -184,4 +194,43 @@ ggplot( aes(x = diet_dist, y = partial_residuals)) +
 # 
 # Average Effect Size: The slope of the line quantifies the average change in stool distance for each unit increase in diet distance. For example, if the slope is 0.8, it would mean that a 1-unit increase in diet distance is associated with a 0.8-unit increase in stool distance, on average, after controlling for individual patient effects.
 ```
+```{r}
+# would be good to do a visualization of the beta diversity of the food and stool 
+# too hard to do the whole thing in ggplot, so start with a scatter plot and then fininsh in illustrator 
+sbeta_example <-  beta_dist_earliest %>% 
+  mutate(highlightpt = if_else(pid == 'P104', T, F),
+         highlight_time = if_else(pid == 'P104' & sdrt == -2, T, F))
 
+sbeta_example %>% 
+  ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
+            title = 'Microbiome Bray curtis distance PCoA') +
+  scale_color_manual(values = c('gray','red')) +
+  theme(aspect.ratio =  1)
+```
+```{r}
+dbeta_example <-  dpcoa_dist_earliest %>% 
+  mutate(highlightpt = if_else(pid == 'P104', T, F),
+         highlight_time = if_else(pid == 'P104' & sdrt == -2, T, F))
+
+dbeta_example %>% 
+  ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
+            title = 'Diet unweighted unifrac distance PCoA') +
+  scale_color_manual(values = c('gray','red')) +
+  theme(aspect.ratio =  1)
+```
+```{r}
+# are there correlation within each pt own diet
+library(vegan)
+
+diet_dist_matrix <- read_tsv('../data/R06_p2d_fc_unweighted_unifrac_distance_matrix/distance-matrix.tsv') %>% 
+  rename(sampleid = ...1) %>% 
+  full_join(meta %>% select(pid, sampleid))
+
+diet_matrix <- diet_dist_matrix %>% 
+  select(-pid) %>% 
+  column_to_rownames('sampleid') %>% as.matrix()
+
+# Run PERMANOVA
+adonis2(diet_matrix ~ diet_dist_matrix$pid, permutations = 999, parallel = 10) 
+```
+The results of the PERMANOVA strongly suggest that there is significant within-patient correlation in dietary intake. In other words, individual patients tend to have consistent dietary patterns over time, and these patterns are distinct from those of other patients.
