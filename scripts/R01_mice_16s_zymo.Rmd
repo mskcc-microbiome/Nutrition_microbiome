@@ -13,14 +13,13 @@ library(knitr)
 library(Maaslin2)
 library(vegan)
 library(vdbR)
-connect_database('~/dbConfig.txt')
+connect_database()
 ```
+
 # the alpha diversity results in simpson reciprocal
 
 ```{r}
 healthyall <- read_csv('../data/204_mice_diet_healthy_all.csv')
-
-gvhdall <- read_csv('../data/204_mice_diet_gvhd_all.csv')
 
 meta <- healthyall %>%
   select(-Taxon, -relab) %>% 
@@ -86,3 +85,59 @@ beta_all %>%
   ylab(paste0("PC 2 [",percent_var[2],"%]")) +
   theme(aspect.ratio=1, legend.position = 'right') 
 ```
+
+# bar plot composition
+
+```{r}
+taxa_annot <- read_csv('../data/204_zymo_annotation_taxa_color.csv')
+
+heathy_relab_df <- healthyall  %>% 
+  separate(Taxon, into = c('asv','taxa'), sep = ':') %>% 
+  select(-taxa) %>% 
+  left_join(taxa_annot) %>% 
+  # not sure why some asv doesn't have annotation, so make them "other"
+  mutate(color = if_else(is.na(color), '#BBBBBB', color)) %>% 
+  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+  
+```
+
+
+```{r}
+asv_color <- heathy_relab_df %>% 
+  distinct(asv, color, .keep_all = T) %>% 
+  arrange(phylum, class, order, family, genus) %>% 
+  select(asv, color) %>%    
+  arrange(color) %>% 
+  deframe()
+
+panels4 <- heathy_relab_df %>%  
+  mutate(xvar = str_glue('{experiment_no}__{mouse_no}')) %>% 
+  split(.$grp) %>% 
+  imap(function(df, name_){
+   plots <-  df %>% 
+  ggplot( aes(x=xvar, y=relab, fill=asv) ) +
+  scale_fill_manual(values = asv_color) +
+  labs(x = '', y = 'Relative abundance', title = str_glue('{name_}')) +
+  geom_bar(stat = "identity",position="fill",width = 1) +
+  theme_classic() +
+  facet_grid(day ~ ., scales = 'free') +
+  theme(legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1))
+   return(plots)
+  })
+ 
+library(cowplot) 
+h_bar4 <- plot_grid(plotlist =panels4, nrow = 2 )
+h_bar4
+ggsave('../data/R01_h_bar4.pdf', width = 8, height = 12)
+ggsave('../data/R01_h_bar4.jpg', width = 8, height = 12)
+```
+
+
+
+# Maaslin2 analysis
+
+```{r}
+ 
+```
+
