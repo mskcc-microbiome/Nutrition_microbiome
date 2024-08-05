@@ -13,6 +13,7 @@ library(knitr)
 library(Maaslin2)
 library(vegan)
 library(vdbR)
+library(ggrepel)
 connect_database()
 ```
 
@@ -57,6 +58,11 @@ sucrose-only doesn’t reduce diversity on day 3, compared with vehicle, but bia
 
 
 ```{r}
+# the enterococccus relab
+g_entero <- healthyall %>% filter(str_detect(Taxon, 'Enterococc')) %>% 
+  group_by(sampleid) %>% 
+  summarise(enterococcus = sum(relab))
+
 # calculate my own bc distance using the subsetted samples
 
 relab_df <- healthyall %>% 
@@ -71,16 +77,20 @@ bc <- cmdscale(dist_, k = 2)
 beta_all <- bc %>%
   as.data.frame() %>%
   rownames_to_column('sampleid')  %>% 
-  full_join(meta) 
+  full_join(meta) %>% 
+  inner_join(g_entero) %>% 
+  mutate(treatment = str_glue('{abx_treatment}_{diet_treatment}')) %>% 
+  mutate(treatment = factor(treatment, levels = c('PBS_vehicle','PBS_sucrose','biapenem_vehicle','biapenem_sucrose')))
 ```
 
 ```{r}
 # color by abx        
 beta_all %>% 
   mutate(experiment_no = factor(experiment_no)) %>% 
-  ggscatter(x = 'V1', y = 'V2', color = 'abx_treatment', shape = 'diet_treatment', alpha = 0.6) +
+  ggscatter(x = 'V1', y = 'V2', color = 'treatment', size = 'enterococcus', alpha = 0.6) +
   facet_grid(day ~ experiment_no) +
   theme_light() +
+  scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
   xlab(paste0("PC 1 [",percent_var[1],"%]")) +
   ylab(paste0("PC 2 [",percent_var[2],"%]")) +
   theme(aspect.ratio=1, legend.position = 'right') 
@@ -98,12 +108,10 @@ heathy_relab_df <- healthyall  %>%
   # not sure why some asv doesn't have annotation, so make them "other"
   mutate(color = if_else(is.na(color), '#BBBBBB', color)) %>% 
   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+  # this velow relevel is important for the order of the group
   mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
   
-```
 
-
-```{r}
 asv_color <- heathy_relab_df %>% 
   distinct(asv, color, .keep_all = T) %>% 
   arrange(phylum, class, order, family, genus) %>% 
@@ -133,11 +141,105 @@ ggsave('../data/R01_h_bar4.pdf', width = 8, height = 12)
 ggsave('../data/R01_h_bar4.jpg', width = 8, height = 12)
 ```
 
-
-
 # Maaslin2 analysis
 
+## at the asv level
+
 ```{r}
+# to put all the healthy mice data in one single model
+df_target <- meta  %>%
+  select(-group, -tube_no, -investigator) %>%
+  mutate(experiment_no = as.character(experiment_no),
+         day = as.character(day)) %>% 
+  mutate(treatment = str_glue('{abx_treatment}_{diet_treatment}'),
+       treatment = factor(treatment, levels = c('biapenem_vehicle','biapenem_sucrose', 'PBS_vehicle','PBS_sucrose'))) 
+```
+
+```{r}
+asv_target <- healthyall %>%
+  inner_join(df_target %>% select(sampleid, treatment)) %>% 
+  select(Taxon, sampleid, relab, treatment, day, experiment_no)
+
+asv_target_sample_n <- asv_target %>% distinct(sampleid) %>% nrow
+
+kept_asv <- asv_target %>%
+  group_by(Taxon) %>%
+  count(relab > 0.0001) %>%
+  rename(criteria = names(.)[2]) %>%
+  filter(criteria == 'TRUE') %>%
+  mutate(perc = round(n/asv_target_sample_n*100, 0)) %>%
+  filter(perc > 10) %>%
+  pull(Taxon)
+
+asv_relab_target_fil <-asv_target %>%
+  filter( Taxon %in% kept_asv) %>%
+  spread('Taxon','relab', fill = 0) %>% 
+  mutate(day = factor(day),
+         experiment_no = factor(experiment_no))
+```
+
+```{r}
+# the setup for the Maaslin2
+metadata <- asv_relab_target_fil %>% select(sampleid:experiment_no) %>% column_to_rownames('sampleid')
+formula <- ~ treatment * day + experiment_no
+design_matrix <- model.matrix(formula, data = metadata)
+metadata <- cbind(metadata, design_matrix)
+
+paste(colnames(metadata) , collapse = ", ")
+```
+
+```{r}
+# Create a MaAsLin2 input feature data file (ASV table)
+feature_data <- asv_relab_target_fil %>% 
+  select(sampleid, starts_with('seq')) %>% 
+  column_to_rownames('sampleid')
+
+fit_res <- Maaslin2(
+  input_data = feature_data, 
+  input_metadata = metadata,
+  output = str_glue("../data/R01_maaslin2_output_ALL_grp4"),  # Output directory
+  fixed_effects = c('treatmentbiapenem_sucrose', 'treatmentPBS_vehicle', 'treatmentPBS_sucrose', 'day3', 'day6', 'experiment_no2', 'treatmentbiapenem_sucrose:day3', 'treatmentPBS_vehicle:day3', 'treatmentPBS_sucrose:day3', 'treatmentbiapenem_sucrose:day6', 'treatmentPBS_vehicle:day6', 'treatmentPBS_sucrose:day6'), 
+  random_effects = NULL,  # No random effects in this case
+  normalization = "TSS",  # Total sum scaling normalization
+  transform = "LOG",  # Log transformation actually log2
+  analysis_method = "LM",  # Linear model
+  max_significance = 0.05,
+  min_abundance = 0.0001,  # Minimum abundance threshold
+  min_prevalence = 0.10,  # Minimum prevalence threshold,
+  cores = 10
+)
+sig_res = read_tsv(str_glue('../data/R01_maaslin2_output_ALL_grp4/significant_results.tsv'))
+
+```
+
+```{r}
+# to use the volcano plot to highlight the results on day 3
+all_res <- read_tsv('../data/R01_maaslin2_output_ALL_grp4/all_results.tsv') %>% 
+  mutate(genus = str_extract(feature, 'g__.+s__'),
+         species = str_extract(feature, 's__.+$'),
+         genus = str_replace(genus, 'g__',''),
+         species = str_replace(species, 's__',''),
+         genus = str_replace(genus, '\\.s__',''),
+         cleaned_name = str_glue('{genus} {species}'))
+
+# A coefficient of 2 means an 2²-fold change (approximately a 4-fold increase) in relative abundance.
+# A coefficient of 3 means an 2³-fold change (approximately a 8-fold increase) in relative abundance.
  
+all_res %>%
+  filter(metadata == 'treatmentbiapenem_sucrose:day3') %>% 
+  mutate(sig_ = if_else(qval < 0.05 & abs(coef) > 1, T, F)) %>% 
+  mutate(neglog10_q = -log10(qval)) %>%
+  ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
+            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
+            title = 'Differential abundance between day 0 and day 3\nin abx + sucrose VS abx + vehicle') +
+  scale_color_manual(values = c('black', 'red')) +
+  geom_vline(xintercept =  0, color = 'black') + 
+  geom_vline(xintercept =  c(1, -1), color = 'gray', linetype = 'dashed') + 
+  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & abs(coef) > 1, cleaned_name, "")), color = 'red') +
+  theme(aspect.ratio = 1/2, legend.position = 'none')
+
+ggsave('../data/R01_maaslin2_abx+sucrose_d3_volcano.pdf', width = 7, height = 5)
+
 ```
 
