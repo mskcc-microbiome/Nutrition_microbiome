@@ -234,8 +234,6 @@ condi_dat %>% write_csv('../data/173_conditional_data.csv')
 # prior predictive check  
 
 ```{r}
-
-  
 fitPrior <- brm(div_model, data=meta, 
                 family = 'gaussian',
                 prior=div_priors, seed = 123,
@@ -275,9 +273,6 @@ post_pred
 
 ```
 
-
-
-
 ```{r}
 S3 <- plot_grid(prior_pred, NA,post_pred,
           labels = c("A",NA, "B"), align = "v",rel_heights = c(1,0.2,1),
@@ -307,3 +302,54 @@ ggsave('../data/S3_prior_and_post_pred_173.pdf',
       #plot = combined, 
       dpi = 300)
 ```
+
+# the random intercepts of the week relative to transplant
+
+```{r}
+random_effects_timebin <- post_res %>% 
+  select(starts_with('r_timebin')) %>% 
+  gather('timebin','coeff') %>% 
+  mutate(timebin = str_replace(timebin, 'r_timebin\\[',''),
+         timebin = str_replace(timebin, ',Intercept\\]','')) 
+  
+
+week_ids <- tibble(
+  timebin = random_effects_timebin %>% distinct(timebin) %>% pull(timebin),
+  weekID = c(c(-2, -1), seq(1, 8))
+) %>% 
+  mutate(weekID = str_glue('Week {weekID}'))
+week_ids 
+ 
+random_effects_timebin_df <- random_effects_timebin %>% 
+  left_join(week_ids)
+```
+```{r}
+ggplot(random_effects_timebin_df, aes(x = coeff, y = weekID)) +
+   stat_pointinterval( .width = 0.95, fatten_point = 1.5) +
+  coord_flip() +  # Flip coordinates for horizontal display
+  theme_pubr() +
+  labs(y = "Week Relative to Transplant", x = "Random Intercept", 
+       title = "Caterpillar Plot of Random Intercepts for Week") +
+  theme(axis.text.x = element_text(angle = 45,hjust = 1 ), aspect.ratio = 1)
+  
+ggsave('../data/173_Caterpillar Plot of Random Intercepts for Week.jpg', width = 6, height = 6)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
