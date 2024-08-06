@@ -94,6 +94,8 @@ beta_all %>%
   xlab(paste0("PC 1 [",percent_var[1],"%]")) +
   ylab(paste0("PC 2 [",percent_var[2],"%]")) +
   theme(aspect.ratio=1, legend.position = 'right') 
+
+ggsave('../data/R01_healthy_mice_pcoa_enterococcus.jpg', width = 6, height = 7)
 ```
 
 # bar plot composition
@@ -227,19 +229,146 @@ all_res <- read_tsv('../data/R01_maaslin2_output_ALL_grp4/all_results.tsv') %>%
  
 all_res %>%
   filter(metadata == 'treatmentbiapenem_sucrose:day3') %>% 
-  mutate(sig_ = if_else(qval < 0.05 & abs(coef) > 1, T, F)) %>% 
+  mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
   ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
             xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
             title = 'Differential abundance between day 0 and day 3\nin abx + sucrose VS abx + vehicle') +
-  scale_color_manual(values = c('black', 'red')) +
+  scale_color_manual(values = c('blue', 'black', 'red')) +
+  geom_vline(xintercept =  0, color = 'black') + 
+  geom_vline(xintercept =  c(1, -1), color = 'gray', linetype = 'dashed') + 
+  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > 1, cleaned_name, "")), color = 'red') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < -1, cleaned_name, "")), color = 'blue') +
+  theme(aspect.ratio = 1/2, legend.position = 'none')
+
+ggsave('../data/R01_maaslin2_abx+sucrose_d3_volcano.pdf', width = 7, height = 5)
+ggsave('../data/R01_maaslin2_abx+sucrose_d3_volcano.jpg', width = 7, height = 5)
+```
+
+```{r}
+# asv at day 6
+all_res %>%
+  filter(metadata == 'treatmentbiapenem_sucrose:day6') %>% 
+  mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
+  mutate(neglog10_q = -log10(qval)) %>%
+  ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
+            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
+            title = 'Differential abundance between day 0 and day 6\nin abx + sucrose VS abx + vehicle') +
+  scale_color_manual(values = c('blue', 'black', 'red')) +
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(1, -1), color = 'gray', linetype = 'dashed') + 
   geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
   geom_text_repel(aes(label = ifelse(qval < 0.05 & abs(coef) > 1, cleaned_name, "")), color = 'red') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < -1, cleaned_name, "")), color = 'blue') +
   theme(aspect.ratio = 1/2, legend.position = 'none')
 
-ggsave('../data/R01_maaslin2_abx+sucrose_d3_volcano.pdf', width = 7, height = 5)
+ggsave('../data/R01_maaslin2_abx+sucrose_d6_volcano.pdf', width = 7, height = 5)
+ggsave('../data/R01_maaslin2_abx+sucrose_d6_volcano.jpg', width = 7, height = 5)
+```
 
+
+# at the family level
+
+```{r}
+asv_target_family <- asv_target %>%
+  separate(Taxon, into = c('asv','taxa'), sep = ':') %>% 
+  left_join(taxa_annot %>% select(asv, family)) %>% 
+  group_by(sampleid,treatment, day, experiment_no, family ) %>% 
+  summarise(family_relab = sum(relab)) %>% 
+  ungroup() %>% 
+  filter(!is.na(family))
+asv_target_family %>% ungroup %>% distinct(family)
+```
+
+
+```{r}
+asv_target_sample_n <- asv_target_family %>% distinct(sampleid) %>% nrow
+
+kept_family <- asv_target_family %>%
+  group_by(family) %>%
+  count(family_relab > 0.001) %>%
+  rename(criteria = names(.)[2]) %>%
+  filter(criteria == 'TRUE') %>%
+  mutate(perc = round(n/asv_target_sample_n*100, 0)) %>%
+  filter(perc > 10) %>%
+  pull(family)
+
+remove_not_in_mice_gut <- c('Alcaligenaceae','Anaeroplasmataceae','Defluviitaleaceae')
+
+family_relab_target_fil <- asv_target_family %>%
+  filter( family %in% kept_family) %>%
+  filter( !family %in% remove_not_in_mice_gut) %>%
+  spread('family','family_relab', fill = 0) %>% 
+  mutate(day = factor(day),
+         experiment_no = factor(experiment_no))
+```
+
+```{r}
+feature_data_family <- family_relab_target_fil %>% 
+  select(-all_of(c('treatment', 'day', 'experiment_no'))) %>% 
+  column_to_rownames('sampleid')
+
+fit_res_family <- Maaslin2(
+  input_data = feature_data_family, 
+  input_metadata = metadata,
+  output = str_glue("../data/R01_maaslin2_output_ALL_grp4_family"),  # Output directory
+  fixed_effects = c('treatmentbiapenem_sucrose', 'treatmentPBS_vehicle', 'treatmentPBS_sucrose', 'day3', 'day6', 'experiment_no2', 'treatmentbiapenem_sucrose:day3', 'treatmentPBS_vehicle:day3', 'treatmentPBS_sucrose:day3', 'treatmentbiapenem_sucrose:day6', 'treatmentPBS_vehicle:day6', 'treatmentPBS_sucrose:day6'), 
+  random_effects = NULL,  # No random effects in this case
+  normalization = "TSS",  # Total sum scaling normalization
+  transform = "LOG",  # Log transformation actually log2
+  analysis_method = "LM",  # Linear model
+  max_significance = 0.05,
+  min_abundance = 0.0001,  # Minimum abundance threshold
+  min_prevalence = 0.10,  # Minimum prevalence threshold,
+  cores = 10
+)
+sig_res = read_tsv(str_glue('../data/R01_maaslin2_output_ALL_grp4_family/significant_results.tsv'))
+
+```
+
+```{r}
+# also make the volcano plot at the family level
+# to use the volcano plot to highlight the results on day 3
+all_res <- read_tsv('../data/R01_maaslin2_output_ALL_grp4_family/all_results.tsv') 
+
+# A coefficient of 2 means an 2²-fold change (approximately a 4-fold increase) in relative abundance.
+# A coefficient of 3 means an 2³-fold change (approximately a 8-fold increase) in relative abundance.
+ 
+all_res %>%
+  filter(metadata == 'treatmentbiapenem_sucrose:day3') %>% 
+  mutate(sig_ = if_else(qval < 0.05 & abs(coef) > 1, T, F)) %>% 
+  mutate(neglog10_q = -log10(qval)) %>%
+  ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
+            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
+            title = 'Differential abundance between day 0 and day 3\nin abx + sucrose VS abx + vehicle\nat Family level') +
+  scale_color_manual(values = c('black', 'red')) +
+  geom_vline(xintercept =  0, color = 'black') + 
+  geom_vline(xintercept =  c(1, -1), color = 'gray', linetype = 'dashed') + 
+  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & abs(coef) > 1, feature, "")), color = 'red') +
+  theme(aspect.ratio = 1/2, legend.position = 'none')
+
+ggsave('../data/R01_maaslin2_abx+sucrose_d3_volcano_family.pdf', width = 7, height = 5)
+ggsave('../data/R01_maaslin2_abx+sucrose_d3_volcano_family.jpg', width = 7, height = 5)
+```
+
+```{r}
+famly_d6 <- all_res %>%
+  filter(metadata == 'treatmentbiapenem_sucrose:day6') %>% 
+  mutate(sig_ = if_else(qval < 0.05 & abs(coef) > 1, T, F)) %>% 
+  mutate(neglog10_q = -log10(qval)) %>%
+  ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
+            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
+            title = 'Differential abundance between day 0 and day 6\nin abx + sucrose VS abx + vehicle\nat Family level') +
+  scale_color_manual(values = c('black', 'red')) +
+  geom_vline(xintercept =  0, color = 'black') + 
+  geom_vline(xintercept =  c(1, -1), color = 'gray', linetype = 'dashed') + 
+  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & abs(coef) > 1, feature, "")), color = 'red') +
+  theme(aspect.ratio = 1/2, legend.position = 'none')
+
+ggsave('../data/R01_maaslin2_abx+sucrose_d6_volcano_family.pdf', width = 7, height = 5)
+ggsave('../data/R01_maaslin2_abx+sucrose_d6_volcano_family.jpg', width = 7, height = 5)
 ```
 
