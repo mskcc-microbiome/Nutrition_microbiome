@@ -14,6 +14,7 @@ library(ggpubr)
 library(readxl)
 library(janitor)
 library(scales)
+library(ggrepel)
 ```
 B+S  (Biapenem + Sucrose) PS (PBS + Sucrose) BP (Biapenem +Plain Hydrogel) and PP (PBS + Plain Hydrogel)
 
@@ -49,11 +50,97 @@ nofiber_days <- plotdf %>%
             ylab = 'Enterococcal\n CFU/gram',, add.params = list(alpha = 0.5, shape = 16),
             width = 0.6,color  = 'grp')+
    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('biapenem__vehicle__3','biapenem__sucrose__3'), c('biapenem__vehicle__6','biapenem__sucrose__6')),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  stat_compare_means(comparisons = list(c('biapenem__vehicle__3','biapenem__sucrose__3'), c('biapenem__vehicle__6','biapenem__sucrose__6'), c('biapenem__vehicle__9','biapenem__sucrose__9')),
+                     #label= "p.signif", 
+                     method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
   scale_y_log10(breaks = c(1 %o% 10^(-1:12)),  labels = trans_format("log10", math_format(10^.x))) +
   #scale_x_discrete(labels=rep(c(0,3,6,9),4)) + 
   theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),
         axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
 nofiber_days
+```
+```{r}
+# the trapezpid auc
+dat_entero <- plotdf %>% 
+  select(diet_treatment,
+         abx_treatment,
+         day,
+         mouse_identifier,
+         CFUs_per_GramStool)
+
+dat_entero_wide <- dat_entero %>% 
+  pivot_wider(id_cols = c(diet_treatment,
+                          abx_treatment,
+                          mouse_identifier),
+              names_from = day,
+              names_prefix = "day",
+              values_from = CFUs_per_GramStool)
+ 
+dat_entero_wide <- dat_entero_wide %>% 
+  mutate(trap_0_3 = (day0  + day3 )*3/2,
+         trap_3_6 = (day3  + day6 )*3/2,
+         trap_6_9 = (day6  + day9 )*3/2,
+         trap = trap_0_3 + trap_3_6 + trap_6_9,
+         groups = paste(abx_treatment,
+                         diet_treatment,sep="__")) %>% 
+  mutate(groups = factor(groups, levels = c('DPBS__vehicle','DPBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+
+# the boxplot of the AUC
+my_comparisons <- list( c("DPBS__vehicle", "biapenem__vehicle"), 
+                        c("biapenem__vehicle", "biapenem__sucrose"), 
+                        c("DPBS__vehicle", "DPBS__sucrose"))
+
+nofiber_AUC <- ggboxplot(dat_entero_wide,
+          x="groups",add = 'jitter',
+          y="trap", color  = 'groups', add.params = list(alpha = 0.5, shape = 16)) +
+  ylab("Trapezoidal\nAUC")+xlab('') +
+   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  scale_y_log10(breaks = c(1 %o% 10^(-1:8)),  labels = trans_format("log10", math_format(10^.x))) +
+  stat_compare_means(comparisons = my_comparisons,label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  theme(#axis.text.x = element_blank(),
+        axis.title=element_text(size=10), 
+        axis.text =  element_text(size = 10),legend.position = 'none',aspect.ratio=1/3.1, axis.ticks.x = element_blank())
+
+nofiber_AUC     
+```
+```{r}
+# I still feel weird that the day 9 data is not significant
+
+d9 <- wilcox.test(CFUs_per_GramStool ~ treatment, data = nofiber %>% filter(day == 9) %>% filter(treatment %in% c('BS','BP')) %>% select(CFUs_per_GramStool, treatment),
+                   exact = FALSE)
+d9
+```
+
+```{r}
+# to calculate the fold change
+deltas <- nofiber %>%
+  select(abx_treatment, diet_treatment, day, mouse_identifier, CFUs_per_GramStool) %>% 
+  spread('diet_treatment','CFUs_per_GramStool') 
+```
+
+
+```{r}
+# wanna calculate the fold change between sucrose and vehicle in either abx or dpbs group on either 3,6, or 9.
+su_ve_fc_df <- deltas %>% 
+  split(list(.$day, .$abx_treatment)) %>% 
+  map_dfr(function(df, name_){
+    ret = df %>% mutate(su_ve_fc = round(sucrose/vehicle, 2))
+    return(ret)
+  }) %>% 
+  mutate(su_ve_fc_log10 = log10(su_ve_fc)) 
+```
+
+
+```{r}
+su_ve_fc_df %>% 
+  ggplot() +
+  geom_boxplot(aes(x =abx_treatment, y = su_ve_fc_log10)) +
+  geom_point(aes(x =abx_treatment, y = su_ve_fc_log10, color = mouse_identifier)) +
+  geom_text_repel(aes(x =abx_treatment, y = su_ve_fc_log10, label = mouse_identifier, color = mouse_identifier)) +
+  facet_grid(. ~ day) +
+  #theme_cleveland() +
+  labs(y  = 'log10(sucrose/vehicle fold change)') +
+  theme(aspect.ratio = 1)
+ggsave('../data/R07_fold_change.jpg', width = 12, height = 10)
 ```
 
