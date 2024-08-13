@@ -1,0 +1,79 @@
+---
+title: "Chow intake for the fiber consumption"
+author: "Anqi Dai"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(readxl)
+library(janitor)
+```
+
+This table has the chow consumption. Chow typically contains a mix of grains, protein sources (like soybean meal), vitamins, and minerals. The exact composition can vary depending on the manufacturer and specific formula.
+
+```{r}
+# chow <- read_excel('/Volumes/peledlab/Projects/2024_Angel Rebuttal Exp /Healthy mice Biapenem_Diet_Exp/Food Consumption Assessment_Exp1.xlsx') %>% clean_names() %>% 
+#   select(day_1:food_consumed_g) %>% 
+#   rename(day = day_1, treatment = treatment_3) %>% 
+#   separate(treatment, into = c('abx_treatment', 'diet_treatment'), sep = '\\+', remove = T) %>% 
+#   mutate(diet_treatment = if_else(diet_treatment == 'S','sucrose','vehicle'),
+#          abx_treatment = 'biapenem')
+# 
+# chow %>% write_csv('../data/08_chow_intake.csv')
+```
+```{r}
+chow <- read_csv('../data/08_chow_intake.csv') %>% 
+  mutate(treatment = str_glue('{abx_treatment}\n+\n{diet_treatment}'),
+         treatment = factor(treatment, levels = c('biapenem\n+\nvehicle','biapenem\n+\nsucrose'))) %>% 
+  mutate(day = str_glue('Day{day}'))
+
+chow_days <- chow %>% 
+  ggboxplot(x = 'treatment', y = 'food_consumed_g', facet.by =  'day', color = 'treatment',
+            xlab = '', ylab = 'Chow consumption (grams)\nper mouse per day',
+            add = 'jitter', 
+            outlier.shape = NA,
+            palette = c('gray32','deeppink2')) 
+chow_days %>% write_rds('../data/08_chow_days.RDS')
+```
+```{r}
+# calculate the trapezoidal AUC since there are several measurements over time for each mouse
+chow_AUC <- chow %>% 
+  select(-total_food_g, -food_left_g) %>% 
+  pivot_wider(id_cols = c(diet_treatment,
+                          abx_treatment,
+                          mouse),
+              names_from = day,
+              names_prefix = "",
+              values_from = food_consumed_g)
+
+
+chow_AUC_wide <- chow_AUC %>% 
+  mutate(trap_3_6 = (Day3  + Day6 )*3/2,
+         trap_6_9 = (Day6  + Day9 )*3/2,
+         trap = trap_3_6 + trap_6_9,
+         groups = paste(abx_treatment,
+                         diet_treatment,sep="+")) %>% 
+  mutate(groups = factor(groups, levels = c('biapenem+vehicle','biapenem+sucrose')))
+```
+
+
+```{r}
+chow_AUC_plot <- ggboxplot(chow_AUC_wide,
+          x="groups",add = 'jitter', title = 'Chow consumption AUC day 3,6,9',
+          y="trap", color  = 'groups', add.params = list(alpha = 0.8, shape = 16)) +
+  ylab("Trapezoidal\nAUC")+xlab('') +
+   scale_color_manual(values = c('gray32','deeppink2')) +
+  stat_compare_means(comparisons = list( 
+                        c("biapenem+vehicle", "biapenem+sucrose")),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  theme(axis.title=element_text(size=10), axis.text =  element_text(size = 10),legend.position = 'none',aspect.ratio=1/2, axis.ticks.x = element_blank())
+
+chow_AUC_plot %>% write_rds('../data/08_chow_auc.RDS')
+```
+
