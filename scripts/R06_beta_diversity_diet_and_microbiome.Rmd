@@ -12,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(ggpubr)
 library(vegan)
+library(cowplot)
 ```
 
 Use the prior two day summary of the data, meaning count the average of the prior two day and their distance to the earliest 
@@ -108,8 +109,8 @@ dpcoa_dist_earliest <- dpcoa %>%
   mutate(distance_to_earliest = sqrt((PC1 - first(PC1))^2 + (PC2 - first(PC2))^2))
 
 # some patient follows a very clear trajectory of the sdrt up, distance also up.
-dpcoa_dist_earliest %>% 
-  ggscatter(x = 'sdrt', y = 'distance_to_earliest', facet.by = 'pid')
+# dpcoa_dist_earliest %>% 
+#   ggscatter(x = 'sdrt', y = 'distance_to_earliest', facet.by = 'pid')
 ```
 
 # similary do this for the stool samples relative abundance at genus level
@@ -174,15 +175,15 @@ pval = ret$coefficients[2,5]
 ```
 ```{r}
 library(ggpmisc)
-joined %>% 
+Partial_residual <- joined %>% 
   ungroup() %>% 
   mutate(fixed_effects = predict(model, re.form=NA),
          residuals = residuals(model),
          partial_residuals = residuals + fixed_effects) %>% 
-ggplot( aes(x = diet_dist, y = partial_residuals)) +
-  geom_point(alpha = 0.8, shape = 16) +
+  ggplot( aes(x = diet_dist, y = partial_residuals)) +
+  geom_point(alpha = 0.5, shape = 16) +
   stat_poly_eq(formula = y ~ x, 
-               aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "\n"), colour = 'red'), 
                parse = TRUE) +  # Add the equation and R-squared
   geom_smooth(method = "lm", se = FALSE) +  
   labs(x = "Diet Distance", y = "Partial Residuals (Stool Distance)") +
@@ -190,32 +191,73 @@ ggplot( aes(x = diet_dist, y = partial_residuals)) +
   theme_pubr() +
   theme(aspect.ratio = 1)
 
+Partial_residual
+  
+# In a linear regression model, a partial residual is a way to isolate and visualize the relationship between the response variable and a specific predictor variable, while accounting for the effects of all the other predictor variables in the model.
+
+# Formula:
+
+# The partial residual for a predictor X_i is calculated as:
+# 
+# Partial Residual_i = Residual + β_i * X_i 
+
+# Check Linearity Assumption: Partial residual plots are a valuable diagnostic tool to check if the assumption of linearity holds for each predictor in a multiple regression model.
+
 # Direction of Association: The positive slope of the line confirms that there is a positive association between diet distance and stool distance. This means that, on average, as the dissimilarity between a patient's subsequent and initial food intake increases, so does the dissimilarity between their subsequent and initial stool microbiome composition.
 # 
-# Average Effect Size: The slope of the line quantifies the average change in stool distance for each unit increase in diet distance. For example, if the slope is 0.8, it would mean that a 1-unit increase in diet distance is associated with a 0.8-unit increase in stool distance, on average, after controlling for individual patient effects.
+# Average Effect Size: The slope of the line quantifies the average change in stool distance for each unit increase in diet distance. For example, if the slope is 0.3, it would mean that a 1-unit increase in diet distance is associated with a 0.3-unit increase in stool distance, on average, after controlling for individual patient effects. 
 ```
+```{r}
+# was I plotting the original data in the above plot??
+# joined %>% 
+#   ungroup() %>% 
+#   mutate(fixed_effects = predict(model, re.form=NA),
+#          residuals = residuals(model),
+#          partial_residuals = residuals + fixed_effects) %>% 
+# ggplot( aes(x = diet_dist, y = stool_dist)) +
+#   geom_point(alpha = 0.8, shape = 16) +
+#   stat_poly_eq(formula = y ~ x, 
+#                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+#                parse = TRUE) +  # Add the equation and R-squared
+#   geom_smooth(method = "lm", se = FALSE) +  
+#   labs(x = "Diet Distance", y = " (Stool Distance)") +
+#   ggtitle("regression Plot") +
+#   theme_pubr() +
+#   theme(aspect.ratio = 1)
+# No I was not! this one is not accounting for patient individual differences. 
+```
+
+
 ```{r}
 # would be good to do a visualization of the beta diversity of the food and stool 
 # too hard to do the whole thing in ggplot, so start with a scatter plot and then fininsh in illustrator 
 sbeta_example <-  beta_dist_earliest %>% 
   mutate(highlightpt = if_else(pid == 'P104', T, F),
-         highlight_time = if_else(pid == 'P104' & sdrt == -2, T, F))
+         highlight_time = if_else(pid == 'P104' & sdrt == -2, T, F)) %>% 
+  arrange(highlightpt)
 
-sbeta_example %>% 
+sbeta_example_pcoa <- sbeta_example %>% 
   ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
             title = 'Microbiome Bray curtis distance PCoA') +
-  scale_color_manual(values = c('gray','red')) +
+  scale_color_manual(name = "", values = c('gray','red'),
+                       labels = c("Other patients", "Patient 104")) +
+  scale_shape_manual(name = "", values = c(16,17),
+                       labels = c("Later time points", "Earliest timepoint")) +
   theme(aspect.ratio =  1)
 ```
 ```{r}
 dbeta_example <-  dpcoa_dist_earliest %>% 
   mutate(highlightpt = if_else(pid == 'P104', T, F),
-         highlight_time = if_else(pid == 'P104' & sdrt == -2, T, F))
+         highlight_time = if_else(pid == 'P104' & sdrt == -2, T, F)) %>% 
+  arrange(highlightpt)
 
-dbeta_example %>% 
+dbeta_example_pcoa <- dbeta_example %>% 
   ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
             title = 'Diet unweighted unifrac distance PCoA') +
-  scale_color_manual(values = c('gray','red')) +
+  scale_color_manual(name = "", values = c('gray','red'),
+                       labels = c("Other patients", "Patient 104")) +
+  scale_shape_manual(name = "", values = c(16,17),
+                       labels = c("Later time points", "Earliest timepoint")) +
   theme(aspect.ratio =  1)
 ```
 ```{r}
@@ -234,3 +276,56 @@ diet_matrix <- diet_dist_matrix %>%
 adonis2(diet_matrix ~ diet_dist_matrix$pid, permutations = 999, parallel = 10) 
 ```
 The results of the PERMANOVA strongly suggest that there is significant within-patient correlation in dietary intake. In other words, individual patients tend to have consistent dietary patterns over time, and these patterns are distinct from those of other patients.
+
+```{r}
+# I wanna repeat the above step for microbiome to look at within patient correlation
+stool_dist_df <- dist_ %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  rownames_to_column('sampleid') %>%
+  inner_join(meta %>% select(sampleid, timebin, pid, empirical))
+
+stool_matrix <- stool_dist_df %>%
+  select(-pid, -timebin, empirical) %>%
+  column_to_rownames('sampleid') %>% as.matrix()
+
+# Run PERMANOVA
+adonis2(stool_matrix ~ stool_dist_df$pid, permutations = 999, parallel = 10)
+adonis2(stool_matrix ~ stool_dist_df$timebin, permutations = 999, parallel = 10)
+
+both <- adonis2(stool_matrix ~ stool_dist_df$pid + stool_dist_df$timebin, permutations = 999, parallel = 10)
+three <- adonis2(stool_matrix ~ stool_dist_df$pid + stool_dist_df$timebin + stool_dist_df$empirical, permutations = 999, parallel = 10)
+```
+ 
+Yes there is strong within individual correlation as well. 
+
+```{r}
+# to combine them together as one single supp figure
+ title <- ggdraw() + 
+  draw_label(
+    "Fig. S_X",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 5)
+  )
+
+
+S_X <- plot_grid(dbeta_example_pcoa, sbeta_example_pcoa, Partial_residual, 
+                 label_size = 12, ncol = 1,labels = c('A','B','C'),
+                align = 'vh', axis = 'lrtb')
+
+ 
+combined <- plot_grid(
+  title, S_X,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/06_distance_to_earliest.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
+```
+
