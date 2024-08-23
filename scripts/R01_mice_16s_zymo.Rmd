@@ -234,7 +234,7 @@ ggsave('../data/R01_h_bar4.jpg', width = 8, height = 12)
 
 # Maaslin2 asv
 
-##  sugar effect on top of abx effect
+##  @sugar effect on top of abx effect
 
 ```{r}
 # to put all the healthy mice data in one single model
@@ -358,6 +358,11 @@ all_res %>%
   theme(aspect.ratio = 1/2, legend.position = 'none')
 
 ```
+
+
+
+
+
 ### a table for all q < 0.05 results
 
 ```{r}
@@ -366,9 +371,45 @@ sugar_effects_table <- all_res %>%
   filter(qval < 0.05) %>% 
   select(-value) %>% 
   arrange(metadata)
+
+healthyall
 ```
 
-## abx effect
+### relab plot for these few highlighed asv
+
+```{r}
+sugar_asvs <- sugar_effects_table %>% 
+  filter(coef > 1 | coef < -1) %>% 
+  distinct(feature)
+
+sugar_asvs_relab <- healthyall %>% 
+  mutate(feature = str_replace(Taxon, '\\:','.'),
+         feature = str_replace(feature, '\\;','.')) %>% 
+  filter(feature %in% sugar_asvs$feature)
+
+sugar_asvs_relab %>% 
+  split(.$feature) %>% 
+  imap(function(df, name_){
+    df %>% 
+      filter(abx_treatment == 'biapenem') %>% 
+      mutate(diet_treatment = factor(diet_treatment , levels = c('vehicle','sucrose'))) %>% 
+  ggboxplot(x = 'day', y = 'relab',
+             xlab = '', ylab = ' relative abundance',, add.params = list(alpha = 0.5, shape = 16),
+            title = str_glue('{name_}'),
+            #color  = 'grp',
+            width = 0.6)+
+       geom_point(aes(group = mouse_no),alpha=0.3) +
+      geom_line(aes(group = mouse_no),alpha=0.3) +
+   #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  stat_compare_means(comparisons = list(c('vehicle','sucrose')),label= "p.value", method= 'wilcox.test',tip.length = 0.04,exact=F) +
+  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+      facet_grid(. ~ diet_treatment) +
+  theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1)
+  })
+  
+```
+
+## @abx effect
 
 ```{r}
 # use the PBS_vehicle as the reference level
