@@ -15,6 +15,8 @@ library(vegan)
 library(ggrepel)
 library(scales)
 library(readxl)
+library(cowplot)
+library(patchwork)
 ```
 
 ```{r}
@@ -44,15 +46,15 @@ alpha_healthy_days <-meta %>%
     c('PBS__vehicle__3','biapenem__vehicle__3')
     ),
     label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
-  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+  scale_x_discrete(labels=rep(c(0,3,6),4)) + 
   scale_y_sqrt() +
   theme_light() +
-  theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
+  theme(axis.text =  element_text(size = 10, angle = 0, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
 alpha_healthy_days
 ```
 sucrose-only doesn’t reduce diversity on day 3, compared with vehicle, but biapenem-only does.  However, sucrose doesn’t further reduce diversity beyond the biapenem effect on day 3. 
 
-# beta diversity and composition
+# beta diversity 
 
 ```{r}
 # the enterococccus relab
@@ -80,19 +82,24 @@ beta_all <- bc %>%
   mutate(treatment = factor(treatment, levels = c('PBS_vehicle','PBS_sucrose','biapenem_vehicle','biapenem_sucrose')))
 ```
 
+## PCoA plot
+
 ```{r}
 # color by abx        
-beta_all %>% 
-  mutate(experiment_no = factor(experiment_no)) %>% 
-  ggscatter(x = 'V1', y = 'V2', color = 'treatment', size = 'enterococcus', alpha = 0.6) +
-  facet_grid(day ~ experiment_no) +
+beta_4 <- beta_all %>% 
+  mutate(experiment_no = str_glue('Expe. {experiment_no}'),
+         day  = str_glue('D{day}')) %>% 
+  ggscatter(x = 'V1', y = 'V2', color = 'treatment',  alpha = 0.9, shape = 16) +
+  facet_grid( experiment_no~  day) +
   theme_light() +
-  scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2'), name = '') +
   xlab(paste0("PC 1 [",percent_var[1],"%]")) +
   ylab(paste0("PC 2 [",percent_var[2],"%]")) +
-  theme(aspect.ratio=1, legend.position = 'right') 
+  theme_light() +
+  theme(aspect.ratio=1, legend.position = 'right',
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
 
-ggsave('../data/R01_healthy_mice_pcoa_enterococcus.jpg', width = 6, height = 7)
+beta_4_plot <- beta_4 +theme(legend.position = 'none')
 ```
 
 ```{r}
@@ -321,13 +328,13 @@ all_res <- read_tsv('../data/R01_maaslin2_output_ALL_grp4/all_results.tsv') %>%
 # A coefficient of 2 means an 2²-fold change (approximately a 4-fold increase) in relative abundance.
 # A coefficient of 3 means an 2³-fold change (approximately a 8-fold increase) in relative abundance.
  
-all_res %>%
+sugar_vol_d3 <- all_res %>%
   filter(metadata == 'treatmentbiapenem_sucrose:day3') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
   ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
             xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
-            title = 'Differential abundance between day 0 and day 3\nin abx + sucrose VS abx + vehicle') +
+            title = 'Between day 0 and day 3') +
   scale_color_manual(values = c('blue', 'black', 'red')) +
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
@@ -342,13 +349,13 @@ all_res %>%
 
 ```{r}
 # asv at day 6
-all_res %>%
+sugar_vol_d6 <-all_res %>%
   filter(metadata == 'treatmentbiapenem_sucrose:day6') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
   ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
             xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
-            title = 'Differential abundance between day 0 and day 6\nin abx + sucrose VS abx + vehicle') +
+            title = 'Between day 0 and day 6') +
   scale_color_manual(values = c('blue', 'black', 'red')) +
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
@@ -372,7 +379,6 @@ sugar_effects_table <- all_res %>%
   select(-value) %>% 
   arrange(metadata)
 
-healthyall
 ```
 
 ### relab plot for these few highlighed asv
@@ -387,26 +393,42 @@ sugar_asvs_relab <- healthyall %>%
          feature = str_replace(feature, '\\;','.')) %>% 
   filter(feature %in% sugar_asvs$feature)
 
-sugar_asvs_relab %>% 
+sugar_asvs_relab_plots <- sugar_asvs_relab %>% 
   split(.$feature) %>% 
   imap(function(df, name_){
     df %>% 
       filter(abx_treatment == 'biapenem') %>% 
-      mutate(diet_treatment = factor(diet_treatment , levels = c('vehicle','sucrose'))) %>% 
-  ggboxplot(x = 'day', y = 'relab',
-             xlab = '', ylab = ' relative abundance',, add.params = list(alpha = 0.5, shape = 16),
+      mutate(diet_treatment = factor(diet_treatment , levels = c('vehicle','sucrose')),
+             u_mouse_id = str_glue('{experiment_no}_{mouse_no}')) %>% 
+  ggboxplot(x = 'day', y = 'relab',outlier.shape = NA,
+             xlab = 'Day', ylab = '',, add.params = list(alpha = 0.5, shape = 16),
             title = str_glue('{name_}'),
             #color  = 'grp',
             width = 0.6)+
-       geom_point(aes(group = mouse_no),alpha=0.3) +
-      geom_line(aes(group = mouse_no),alpha=0.3) +
+       geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
+      geom_line(aes(group = u_mouse_id),alpha=0.3) +
    #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('vehicle','sucrose')),label= "p.value", method= 'wilcox.test',tip.length = 0.04,exact=F) +
+  stat_compare_means(comparisons = list(c('0','3')),label= "p.value", method= 'wilcox.test',paired = T, tip.length = 0.04,exact=F) +
   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
       facet_grid(. ~ diet_treatment) +
-  theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1)
+  theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
   })
+```
+
+
+```{r}
+# why some mice seem to not match
+# there are two experiments!
+test <- sugar_asvs_relab %>% 
+  filter(feature == 'seq1.g__Lactobacillus.s__johnsonii') %>% 
+  filter(abx_treatment == 'biapenem') %>% 
+  select( relab, mouse_no, day, diet_treatment, experiment_no) %>% 
+  split(.$diet_treatment) %>% 
+  map(~ spread(data= . ,'day','relab') %>%
+  rename(d0 = `0`, d3 = `3`,d6 = `6`))
   
+  
+df <- test[[1]]
 ```
 
 ## @abx effect
@@ -489,13 +511,13 @@ all_res <- read_tsv('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effe
          cleaned_name = str_glue('{genus} {species}'))
 
 
-all_res %>%
+abx_vol_d3 <- all_res %>%
   filter(metadata == 'treatmentbiapenem_vehicle:day3') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
   ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
             xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
-            title = 'Differential abundance between day 0 and day 3\nin DPBS + vehicle VS abx + vehicle') +
+            title = 'Between day 0 and day 3') +
   scale_color_manual(values = c('blue', 'black', 'red')) +
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
@@ -508,16 +530,16 @@ all_res %>%
 ### volcano d6  
 
 ```{r}
-all_res %>% 
+abx_vol_d6 <- all_res %>% 
   filter(metadata == 'treatmentbiapenem_vehicle:day6') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
   ggscatter(x = 'coef', y = 'neglog10_q', 
-            #color = 'sig_', 
+            color = 'sig_', 
             alpha = 0.5, shape = 16, 
             xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
-            title = 'Differential abundance between day 0 and day 6\nin DPBS + vehicle VS abx + vehicle') +
-  scale_color_manual(values = c('blue', 'black', 'red')) +
+            title = 'Between day 0 and day 6') +
+  scale_color_manual(values = c( 'black', 'red')) +
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
   geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
@@ -536,7 +558,40 @@ abx_effects_table <- all_res %>%
   arrange(metadata)
 ```
 
+### relab plot for these few highlighed asv
 
+```{r}
+abx_asvs <- abx_effects_table %>% 
+  filter(coef > 1 | coef < -1) %>% 
+  distinct(feature)
+
+abx_asvs_relab <- healthyall %>% 
+  mutate(feature = str_replace(Taxon, '\\:','.'),
+         feature = str_replace_all(feature, '\\;','.')) %>% 
+  filter(feature %in% abx_asvs$feature)
+
+abx_asvs_relab_plots <- abx_asvs_relab %>% 
+  split(.$feature) %>% 
+  imap(function(df, name_){
+    df %>% 
+      filter(diet_treatment == 'vehicle') %>% 
+      mutate(abx_treatment = factor(abx_treatment , levels = c('PBS','biapenem')),
+             u_mouse_id = str_glue('{experiment_no}_{mouse_no}')) %>% 
+  ggboxplot(x = 'day', y = 'relab',outlier.shape = NA,
+             xlab = 'Day', ylab = '',, add.params = list(alpha = 0.5, shape = 16),
+            title = str_glue('{name_}'),
+            #color  = 'grp',
+            width = 0.6)+
+       geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
+      geom_line(aes(group = u_mouse_id),alpha=0.3) +
+   #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.value", method= 'wilcox.test',paired = T, tip.length = 0.04,exact=F) +
+  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+      facet_grid(. ~ abx_treatment) +
+  theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
+  })
+abx_asvs_relab_plots
+```
 
 
 # Maaslin2 family
@@ -648,3 +703,78 @@ famly_d6 <- all_res_family %>%
 famly_d6
 ```
 
+# Final graphs 
+
+## page1
+
+```{r}
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S_X",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+# the top row of the alpha and beta diversity
+top_2 <- plot_grid(alpha_healthy_days, beta_4_plot, nrow = 1, align = 'vh', axis = 'lrtb', rel_widths = c(1,1.1), labels = c('A','B'))
+top_2
+```
+
+
+```{r}
+abx_top <- abx_vol_d3 + abx_vol_d6 + 
+  plot_annotation(title = "Differential abundance in DPBS + vehicle VS abx + vehicle", theme = theme(plot.title = element_text(hjust = 0.5)))
+
+abx_relabs <- plot_grid(plotlist = abx_asvs_relab_plots, nrow = 1, align = 'vh', axis = 'lrtb')
+
+p1 <- plot_grid(top_2, abx_top, abx_relabs, nrow = 3)
+ 
+combined <- plot_grid(
+  title, p1,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/01_mice_16s_p1.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+```
+
+## page2
+
+```{r} 
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S_X (Continued)",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+sugar_top <- plot_grid(sugar_vol_d3, sugar_vol_d6, nrow = 1, align = 'vh', axis = 'lrtb')
+# Combine plots with shared title
+sugar_top_plot <- sugar_vol_d3 + sugar_vol_d6 + 
+  plot_annotation(title = "Differential abundance in abx + sucrose VS abx + vehicle", theme = theme(plot.title = element_text(hjust = 0.5)))
+
+sugar_relabs <- plot_grid(plotlist = sugar_asvs_relab_plots, nrow = 2, align = 'vh', axis = 'lrtb')
+sugars <- plot_grid(sugar_top_plot,sugar_relabs, nrow = 2 , align = 'vh', axis = 'lrtb', rel_heights = c(1,2))
+
+ 
+combined <- plot_grid(
+  title, sugars,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/01_mice_16s_p2.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+```
