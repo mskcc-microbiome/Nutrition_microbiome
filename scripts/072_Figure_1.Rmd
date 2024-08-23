@@ -140,14 +140,16 @@ smoothie <- dtb %>%
 # 1A: stool_hist 
 
 ```{r stool_hist}
-# Tsoni says: I still think a little figure would be helpful. Perhaps best a small histogram of N samples and N meals recorded over transplant time. That would show both the depth of sampling and emphasize the temporal nature of the dataset
+# a small histogram of N samples and N meals recorded over transplant time. That would show both the depth of sampling and emphasize the temporal nature of the dataset 
 # the histogram of the N stool samples over transplant time
 stool_hist <- meta %>% 
-  gghistogram(x = 'sdrt', xlab = 'Transplant day', ylab = 'Stool samples', color = stool_line_color, fill = stool_line_color, alpha = 1) +
+  ggplot(aes(x = sdrt)) +
+  geom_histogram(alpha = 0.5, fill = stool_line_color, color = stool_line_color) +
+  labs(x = 'Transplant day', y = 'Stool samples') +
   scale_x_continuous( breaks = seq(-10, 50, 20)) + 
   annotate("text", x = 20, y = 110, label = "1,009\nstool samples", hjust = 0, size = 2.5) +
   theme_classic(base_size = 8) +
-  theme(aspect.ratio=1.5,   axis.title=element_text(size=axis_title_size))
+  theme(aspect.ratio=1/1.5,   axis.title=element_text(size=axis_title_size))
 stool_hist   
 ```
 
@@ -157,15 +159,16 @@ stool_hist
 # the histogram of the N meals over transplant time
 diet_hist <- dtb %>% 
   distinct(pid, Meal, fdrt) %>% 
-  gghistogram(x = 'fdrt', xlab = 'Transplant day', ylab = 'Meals recorded', color = diet_line_color, fill = diet_line_color, alpha = 1)+
+  gghistogram(x = 'fdrt', xlab = 'Transplant day', ylab = 'Meals recorded', 
+              color = diet_line_color, fill = diet_line_color, alpha = 0.5)+
     scale_x_continuous( breaks = seq(-10, 50, 20)) + 
   annotate("text", x = 5, y = 900, label = "173 patients,\n9,419 total meals\n40,702 food items", hjust = 0, size = 2.5) +
   theme_classic(base_size = 8) +
-  theme(aspect.ratio=1.5,
+  theme(aspect.ratio=1/1.5,
          axis.title=element_text(size=axis_title_size),
         #axis.text.x = element_blank(),
         axis.title.x = element_blank())
-
+    
 diet_hist
 ```
 # 1K: stool_alpha
@@ -623,33 +626,26 @@ fg9
 title <- ggdraw() + 
   draw_label("Fig. 1",fontface = 'bold',x = 0,hjust = 0) +
   theme(plot.margin = margin(0, 0, 0, 5))
-```
 
-```{r}
 # assemble the 4 UMAPs
-maps <- plot_grid(out2_umap, out2_caloric, umap_faith, umap_drt_high_to_low_bin,
-          nrow = 2, hjust = 0,
+middle_maps <- plot_grid(out2_umap, out2_caloric, umap_faith, umap_drt_high_to_low_bin,
+          nrow = 1, hjust = 0,
           align = 'hv',
           labels = c('C','D', 'E', "F"),
           axis = 'tblr')
 
-```
-
-```{r two_hist}
 # assemble the two hists
-two_hist <- plot_grid(diet_hist, NA, stool_hist, 
-                      rel_heights = c(1, -0.4, 1) ,
-          ncol = 1, hjust = 0.5,
+two_hist <- plot_grid(diet_hist,  stool_hist, 
+                      #rel_heights = c(1, -0.4, 1) ,
+          ncol = 2, hjust = 0.5,
           align = 'hv',
           axis = 'tblr') 
 
-```
 
-```{r assemble}
 # top row 
-top_row <- plot_grid(two_hist, tree, maps,
+top_row <- plot_grid(two_hist, tree, 
           nrow = 1, 
-         rel_widths = c(.8,1.5,1.5), 
+         rel_widths = c(.8,1.5), 
           labels = c('A', 'B', NA))
 
 bottom_row <- plot_grid(line_column,m_panel, fg_panel, 
@@ -660,10 +656,10 @@ bottom_row <- plot_grid(line_column,m_panel, fg_panel,
           rel_widths =  c(0.9,1.4,2))
 
 # assemble all macro_facets
-f1 <-  plot_grid(top_row, NA, bottom_row,NA, NA,
+f1 <-  plot_grid(top_row, middle_maps, bottom_row, 
                  align = 'hv',axis = 'tblr',
-                 labels = c(NA, NA, NA, NA, 'L'),
-                 rel_heights = c(1,0.1, 1,-0.12, 1),
+                 #labels = c(NA, NA, NA, NA, 'L'),
+                 rel_heights = c(1,1, 1),
                  ncol = 1)
 
 combined <- plot_grid(
