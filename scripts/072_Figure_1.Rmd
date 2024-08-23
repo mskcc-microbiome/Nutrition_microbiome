@@ -16,6 +16,7 @@ library(cowplot)
 library(ggimage)
 library(ggrastr)
 library(lemon)
+library(viridis)
 axis_text_size <- 10
 axis_title_size <- 10
 stip_txt_size <- 8
@@ -45,16 +46,12 @@ fpalette <- tribble(
   'fg_oils' , '#707B7C',  '8',
   'fg_sweets' , '#db2589' , '9'
 ) 
-library(vdbR)
-connect_database()
-list_table_from_database()
-get_table_from_database('asv_alpha_diversity_ag')
-get_table_from_database('shotgun_lookup_ad')
-get_table_from_database('fmt_arm_ag')
-get_table_from_database('fmt_nutrition_notes_el')
+# library(vdbR)
+# connect_database()
+# get_table_from_database('asv_alpha_diversity_ag')
 ```
 
-# fig1 data summaries
+# Data summaries
 
 The first 2 need to be redo, since the data has been updated.
 
@@ -140,7 +137,7 @@ smoothie <- dtb %>%
   pull(Food_code)
 ```
 
-# the top part 
+# 1A: stool_hist 
 
 ```{r stool_hist}
 # Tsoni says: I still think a little figure would be helpful. Perhaps best a small histogram of N samples and N meals recorded over transplant time. That would show both the depth of sampling and emphasize the temporal nature of the dataset
@@ -153,6 +150,8 @@ stool_hist <- meta %>%
   theme(aspect.ratio=1.5,   axis.title=element_text(size=axis_title_size))
 stool_hist   
 ```
+
+# 1A: diet_hist
 
 ```{r diet_hist}
 # the histogram of the N meals over transplant time
@@ -169,6 +168,7 @@ diet_hist <- dtb %>%
 
 diet_hist
 ```
+# 1K: stool_alpha
 
 ```{r stool_alpha}
 stool_alpha <- meta %>% 
@@ -205,6 +205,8 @@ pval <- 1-pnorm(abs(zscore))
 # the p value for the 1K
 pval
 ```
+
+# 1G-H: food2_line
 
 ```{r food2_line}
 day_calori <- dtb %>% 
@@ -283,7 +285,7 @@ pval <- 1-pnorm(abs(zscore))
 pval
 ```
 
-# UMAPs
+# 1C-F: UMAPs
 
 ```{r}
 # calculate the dominant food group of that day
@@ -312,7 +314,7 @@ color_key <- OUT %>%
   deframe()
 ```
 
-# color by the dominant food group
+## 1C: dominant food group
 
 ```{r}
 out2_umap <- OUT %>% 
@@ -324,7 +326,7 @@ out2_umap <- OUT %>%
   theme_classic() +
   #lemon::coord_capped_cart(bottom = 'both', left = 'both') +
   theme(line = element_blank(),
-        #legend.position = "none",
+        legend.position = "none",
         legend.title = element_blank(),
         axis.title=element_blank(),
         axis.text= element_blank(),
@@ -335,12 +337,11 @@ out2_umap <- OUT %>%
     legend.background = element_rect(fill='transparent'), #transparent legend bg
     legend.box.background = element_rect(fill='transparent') , aspect.ratio=1) +
   guides(colour = guide_legend(override.aes = list(alpha=1)))
-ggsave('../data/072_umap1_ras.pdf')
 ```
 
-# color by the daily cal intake
+## 1D: daily cal intake
 
-```{r}
+```{r} 
 # calculate daily caloric intake   
 cal <- dtb %>% 
   group_by(pid, fdrt) %>% 
@@ -355,7 +356,7 @@ out2_caloric <- out2_cal %>%
   theme_classic() +
   #lemon::coord_capped_cart(bottom = 'both', left = 'both') +
   theme(line = element_blank(),
-        #legend.position = "none",
+        legend.position = "none",
         legend.title = element_blank(),
         axis.title=element_blank(),
         axis.text= element_blank(),
@@ -366,11 +367,10 @@ out2_caloric <- out2_cal %>%
     panel.grid.minor = element_blank(), #remove minor gridlines
     legend.background = element_rect(fill='transparent'), #transparent legend bg
     legend.box.background = element_rect(fill='transparent') ,
-        aspect.ratio=1)
-ggsave('../data/072_cal_legend.pdf')
+        aspect.ratio=1)  
 ```
 
-# color by diet alpha diversity
+## 1E: diet alpha diversity
 
 ```{r}
 
@@ -380,7 +380,7 @@ faith <- read_csv('../data/162_all_faith_pid.csv')
 out_faith <- OUT %>% 
   full_join(faith)
 
-library(viridis)
+
 umap_faith <- out_faith %>% 
   #arrange(desc(n)) %>% 
   mutate(log10faith = log10(faith_pd + 1)) %>% 
@@ -393,7 +393,7 @@ umap_faith <- out_faith %>%
         axis.title=element_blank(),
         axis.text= element_blank(),
         axis.ticks = element_blank(),
-        #legend.position = 'none', 
+        legend.position = 'none', 
         aspect.ratio=1,
                  panel.background = element_rect(fill='gray97'), #transparent panel bg
     plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
@@ -402,11 +402,10 @@ umap_faith <- out_faith %>%
     legend.background = element_rect(fill='transparent'), #transparent legend bg
     legend.box.background = element_rect(fill='transparent') 
         )
-ggsave('../data/072_faith_legend.pdf')
 ```
 
 
-# color by the time relative to transplant
+## 1F: time relative to transplant
 
 ```{r}
 # cuztomizing the times bins of the drt
@@ -439,7 +438,7 @@ umap_drt_high_to_low_bin <- umap_time_df %>%
    theme_classic() +
    theme(
          line = element_blank(),
-         #legend.position = "none",
+         legend.position = "none",
          legend.title = element_blank(),
          axis.title=element_blank(),
          axis.text= element_blank(),
@@ -451,8 +450,9 @@ umap_drt_high_to_low_bin <- umap_time_df %>%
     legend.background = element_rect(fill='transparent'), #transparent legend bg
     legend.box.background = element_rect(fill='transparent') ,
         aspect.ratio=1)
-ggsave('../data/072_time_legend.pdf')
 ```
+
+# 1B: food_tree
 
 ```{r tree}
 # import the tree from pdf to a ggplot kind of object
@@ -461,7 +461,7 @@ tree <- ggdraw() +
   draw_image(p,   scale = 1) 
 ```
 
-# the macronutrients 3 by 2 grid
+# 1I: the macronutrients 3 by 2 grid
 
 ```{r}
 # the days that we know the patient didn't eat anythinng
@@ -547,7 +547,7 @@ m_panel <- dailymacro %>%
 m_panel
 ```
 
-# the food group  3 by 3 grid 
+# 1J: the food group  3 by 3 grid 
 
 ```{r 3X3}
 fg_all <- dtb %>%  
@@ -617,12 +617,12 @@ fg9 <- fg_total %>%
 fg9
 ```
  
-# Assembling all 
+# Final F1
 
 ```{r}
 title <- ggdraw() + 
   draw_label("Fig. 1",fontface = 'bold',x = 0,hjust = 0) +
-  theme(plot.margin = margin(0, 0, 0, 7))
+  theme(plot.margin = margin(0, 0, 0, 5))
 ```
 
 ```{r}
@@ -632,7 +632,7 @@ maps <- plot_grid(out2_umap, out2_caloric, umap_faith, umap_drt_high_to_low_bin,
           align = 'hv',
           labels = c('C','D', 'E', "F"),
           axis = 'tblr')
-maps
+
 ```
 
 ```{r two_hist}
@@ -645,15 +645,14 @@ two_hist <- plot_grid(diet_hist, NA, stool_hist,
 
 ```
 
-```{r top_row}
+```{r assemble}
 # top row 
 top_row <- plot_grid(two_hist, tree, maps,
           nrow = 1, 
-         rel_widths = c(.6,1.5,1.5), 
+         rel_widths = c(.8,1.5,1.5), 
           labels = c('A', 'B', NA))
-```
-```{r middle_row}
-middle_row <- plot_grid(line_column,m_panel, fg_panel, 
+
+bottom_row <- plot_grid(line_column,m_panel, fg_panel, 
           nrow = 1, 
           #align = 'h',
           labels = c(NA, 'I', 'J'),
@@ -661,22 +660,21 @@ middle_row <- plot_grid(line_column,m_panel, fg_panel,
           rel_widths =  c(0.9,1.4,2))
 
 # assemble all macro_facets
-f1 <-  plot_grid(top_row, NA, middle_row,NA, NA,
+f1 <-  plot_grid(top_row, NA, bottom_row,NA, NA,
                  align = 'hv',axis = 'tblr',
                  labels = c(NA, NA, NA, NA, 'L'),
-                 rel_heights = c(1,-0.2, 1,-0.12, 1),
+                 rel_heights = c(1,0.1, 1,-0.12, 1),
                  ncol = 1)
 
 combined <- plot_grid(
   title, f1,
   ncol = 1,
   # rel_heights values control vertical title margins
-  rel_heights = c(0.01, 1)
+  rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/F1_overview_raw_072_new_test.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', 
-      #plot = combined, 
       dpi = 300)   
 ```
 
@@ -707,89 +705,89 @@ ggsave('../data/F1_overview_raw_072_new_test.pdf',
 The last panel of the F1
 
 ```{r}
-full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv')
-
-byday_original <- dtb %>% 
-  group_by(pid, fdrt) %>% 
-  summarise(daycal = sum(Calories_kcal),
-            d_protein = sum(Protein_g),
-            d_fat = sum(Fat_g),
-            d_carb = sum(Carbohydrates_g),
-            d_fiber = sum(Fibers_g),
-            d_sugar = sum(Sugars_g)) %>% 
-  rename(drt = fdrt) %>% 
-  inner_join(full %>% 
-               rename(drt = sdrt) %>% 
-               select(pid,drt, simpson_reciprocal,  Blautia, Enterococcus, intensity), by = c("pid", "drt")) %>% 
-  ungroup()
+# full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv')
+# 
+# byday_original <- dtb %>% 
+#   group_by(pid, fdrt) %>% 
+#   summarise(daycal = sum(Calories_kcal),
+#             d_protein = sum(Protein_g),
+#             d_fat = sum(Fat_g),
+#             d_carb = sum(Carbohydrates_g),
+#             d_fiber = sum(Fibers_g),
+#             d_sugar = sum(Sugars_g)) %>% 
+#   rename(drt = fdrt) %>% 
+#   inner_join(full %>% 
+#                rename(drt = sdrt) %>% 
+#                select(pid,drt, simpson_reciprocal,  Blautia, Enterococcus, intensity), by = c("pid", "drt")) %>% 
+#   ungroup()
 ```
 ```{r}
-macro_panel <- byday_original %>% 
-  mutate(simpson_reciprocal_nlog  = log(simpson_reciprocal)) %>% 
-  rename(`log10(Blautia)` = Blautia,
-         `log10(Enterococcus)` = Enterococcus,
-         `log(Simpson reciprocal)` = simpson_reciprocal_nlog) %>% 
-  dplyr::select(`log(Simpson reciprocal)`, `log10(Blautia)`, `log10(Enterococcus)`,  daycal:d_sugar ) %>% 
-  mutate(daycal = daycal/1000) %>%  # now divide the value by 1000 to save some space in x axis text!!! 
-  gather('yaxis', 'value', `log(Simpson reciprocal)`:`log10(Enterococcus)`) %>% 
-  mutate(yaxis = factor(yaxis, levels = c('log(Simpson reciprocal)','log10(Blautia)','log10(Enterococcus)'))) %>% 
-  gather('xaxis', 'number', daycal:d_sugar) %>% 
-  mutate(xaxis = factor(xaxis, levels = c('daycal','d_carb','d_sugar','d_fiber','d_protein','d_fat'))) %>% 
-  mutate(xaxis = if_else(str_detect(xaxis, '^d_'), str_replace(xaxis, 'd_',''), str_replace(xaxis, '^day','')),
-         xaxis = if_else(str_detect(xaxis, 'cal'), str_replace(xaxis, 'cal','calorie'), xaxis),
-         xaxis = if_else(str_detect(xaxis, 'carb'), str_replace(xaxis, 'carb','carbohydrate'), xaxis),
-         xaxis = str_to_title(xaxis),
-         xaxis = str_glue('{xaxis}')) %>% 
-  mutate(xaxis = factor(xaxis, levels = c('Calorie','Carbohydrate','Sugar','Fiber','Protein','Fat')))
+# macro_panel <- byday_original %>% 
+#   mutate(simpson_reciprocal_nlog  = log(simpson_reciprocal)) %>% 
+#   rename(`log10(Blautia)` = Blautia,
+#          `log10(Enterococcus)` = Enterococcus,
+#          `log(Simpson reciprocal)` = simpson_reciprocal_nlog) %>% 
+#   dplyr::select(`log(Simpson reciprocal)`, `log10(Blautia)`, `log10(Enterococcus)`,  daycal:d_sugar ) %>% 
+#   mutate(daycal = daycal/1000) %>%  # now divide the value by 1000 to save some space in x axis text!!! 
+#   gather('yaxis', 'value', `log(Simpson reciprocal)`:`log10(Enterococcus)`) %>% 
+#   mutate(yaxis = factor(yaxis, levels = c('log(Simpson reciprocal)','log10(Blautia)','log10(Enterococcus)'))) %>% 
+#   gather('xaxis', 'number', daycal:d_sugar) %>% 
+#   mutate(xaxis = factor(xaxis, levels = c('daycal','d_carb','d_sugar','d_fiber','d_protein','d_fat'))) %>% 
+#   mutate(xaxis = if_else(str_detect(xaxis, '^d_'), str_replace(xaxis, 'd_',''), str_replace(xaxis, '^day','')),
+#          xaxis = if_else(str_detect(xaxis, 'cal'), str_replace(xaxis, 'cal','calorie'), xaxis),
+#          xaxis = if_else(str_detect(xaxis, 'carb'), str_replace(xaxis, 'carb','carbohydrate'), xaxis),
+#          xaxis = str_to_title(xaxis),
+#          xaxis = str_glue('{xaxis}')) %>% 
+#   mutate(xaxis = factor(xaxis, levels = c('Calorie','Carbohydrate','Sugar','Fiber','Protein','Fat')))
 ```
 
 ```{r}
-library(facetscales)
-Blautia_lim <- floor(min(byday_original$Blautia))
-entero_lim <- floor(min(byday_original$Enterococcus))
-simpson_reciprocal_nlog_lim <- max(log(byday_original$simpson_reciprocal))
-
-scales_y <- list(
-  `log(Simpson reciprocal)` = scale_y_continuous(limits = c(0, simpson_reciprocal_nlog_lim), breaks = seq(0, simpson_reciprocal_nlog_lim, 1)),
-  `log10(Blautia)` = scale_y_continuous(limits = c(Blautia_lim, 0), breaks = seq(Blautia_lim, 0, 2)),
-  `log10(Enterococcus)` = scale_y_continuous(limits = c(entero_lim, 0), breaks = seq(entero_lim, 0, 2))
-)
-
-# to use the max observed in the data
-cal_lim <- max(byday_original$daycal)/1000
-protein_lim <- max(byday_original$d_protein)
-d_fat_lim <- max(byday_original$d_fat)
-d_carb_lim <- max(byday_original$d_carb)
-d_fiber_lim <- max(byday_original$d_fiber)
-d_sugar_lim <- max(byday_original$d_sugar)
-
-scales_x <- list(
-  `Calorie` = scale_x_continuous(limits = c(0, cal_lim), breaks = seq(0, cal_lim, 1)),
-  `Protein` = scale_x_continuous(limits = c(0, protein_lim), breaks = seq(0, protein_lim, 50)),
-  `Fat` = scale_x_continuous(limits = c(0, d_fat_lim), breaks = seq(0, d_fat_lim, 100)),
-  `Carbohydrate` = scale_x_continuous(limits = c(0, d_carb_lim), breaks = seq(0, d_carb_lim, 250)),
-  `Fiber` = scale_x_continuous(limits = c(0,d_fiber_lim), breaks = seq(0, d_fiber_lim, 20)),        
-  `Sugar` = scale_x_continuous(limits = c(0, d_sugar_lim), breaks = seq(0, d_sugar_lim, 100) )
-)
+# library(facetscales)
+# Blautia_lim <- floor(min(byday_original$Blautia))
+# entero_lim <- floor(min(byday_original$Enterococcus))
+# simpson_reciprocal_nlog_lim <- max(log(byday_original$simpson_reciprocal))
+# 
+# scales_y <- list(
+#   `log(Simpson reciprocal)` = scale_y_continuous(limits = c(0, simpson_reciprocal_nlog_lim), breaks = seq(0, simpson_reciprocal_nlog_lim, 1)),
+#   `log10(Blautia)` = scale_y_continuous(limits = c(Blautia_lim, 0), breaks = seq(Blautia_lim, 0, 2)),
+#   `log10(Enterococcus)` = scale_y_continuous(limits = c(entero_lim, 0), breaks = seq(entero_lim, 0, 2))
+# )
+# 
+# # to use the max observed in the data
+# cal_lim <- max(byday_original$daycal)/1000
+# protein_lim <- max(byday_original$d_protein)
+# d_fat_lim <- max(byday_original$d_fat)
+# d_carb_lim <- max(byday_original$d_carb)
+# d_fiber_lim <- max(byday_original$d_fiber)
+# d_sugar_lim <- max(byday_original$d_sugar)
+# 
+# scales_x <- list(
+#   `Calorie` = scale_x_continuous(limits = c(0, cal_lim), breaks = seq(0, cal_lim, 1)),
+#   `Protein` = scale_x_continuous(limits = c(0, protein_lim), breaks = seq(0, protein_lim, 50)),
+#   `Fat` = scale_x_continuous(limits = c(0, d_fat_lim), breaks = seq(0, d_fat_lim, 100)),
+#   `Carbohydrate` = scale_x_continuous(limits = c(0, d_carb_lim), breaks = seq(0, d_carb_lim, 250)),
+#   `Fiber` = scale_x_continuous(limits = c(0,d_fiber_lim), breaks = seq(0, d_fiber_lim, 20)),        
+#   `Sugar` = scale_x_continuous(limits = c(0, d_sugar_lim), breaks = seq(0, d_sugar_lim, 100) )
+# )
 ```
 
 
 
 ```{r}
-macro_facets <- macro_panel %>% 
-     ggplot() +
-  rasterise(geom_point(aes(x = number, y = value), alpha = 0.02,size = 1 , shape = 16), dpi = 300) +
-  geom_smooth(aes(x = number, y = value), method = "lm", colour = 'darkblue' ,  size = 1, fill = 'gray59') +
-  labs( x = '',title = '', y = '') +
-  stat_cor(aes(x = number, y = value), method = "spearman",  label.sep = ", ",label.x.npc = "left", label.y.npc = "bottom", cor.coef.name = c("rho"), size = 2, p.accuracy = 0.01, r.accuracy = 0.01) +
-  facet_grid_sc(rows = vars(yaxis), cols = vars(xaxis), scales = list(y = scales_y, x = scales_x)) +
-  theme_classic(base_size = 11) +
-  theme(aspect.ratio = 1,
-        panel.background = element_rect(fill = "gray97"),axis.title=element_text(size=axis_title_size),
-        plot.title = element_text(size=axis_title_size),
-        panel.grid.major = element_blank(), 
-        strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
-        panel.grid.minor = element_blank()
-       )
-macro_facets
+# macro_facets <- macro_panel %>% 
+#      ggplot() +
+#   rasterise(geom_point(aes(x = number, y = value), alpha = 0.02,size = 1 , shape = 16), dpi = 300) +
+#   geom_smooth(aes(x = number, y = value), method = "lm", colour = 'darkblue' ,  size = 1, fill = 'gray59') +
+#   labs( x = '',title = '', y = '') +
+#   stat_cor(aes(x = number, y = value), method = "spearman",  label.sep = ", ",label.x.npc = "left", label.y.npc = "bottom", cor.coef.name = c("rho"), size = 2, p.accuracy = 0.01, r.accuracy = 0.01) +
+#   facet_grid_sc(rows = vars(yaxis), cols = vars(xaxis), scales = list(y = scales_y, x = scales_x)) +
+#   theme_classic(base_size = 11) +
+#   theme(aspect.ratio = 1,
+#         panel.background = element_rect(fill = "gray97"),axis.title=element_text(size=axis_title_size),
+#         plot.title = element_text(size=axis_title_size),
+#         panel.grid.major = element_blank(), 
+#         strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+#         panel.grid.minor = element_blank()
+#        )
+# macro_facets
 ```
