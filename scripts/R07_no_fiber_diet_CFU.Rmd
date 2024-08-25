@@ -173,7 +173,9 @@ differences <- dat_entero_wide %>%
   
 
 ```
-# Final mouse graph
+# Final mouse graph 
+
+## p1:healthy mice
 
 ```{r}
 library(cowplot)
@@ -182,7 +184,7 @@ chow <- read_rds('../data/08_chow_days.RDS')
 chow_auc <- read_rds('../data/08_chow_auc.RDS')
 glucose <- read_rds('../data/05_f3_sugars_days.RDS')
 long <- read_rds('../data/05_f3_five_days.RDS')
-transplant <- read_rds('../data/02_transplant_CFU_plot.RDS')
+
 
 
 title <- ggdraw() + 
@@ -195,11 +197,7 @@ title <- ggdraw() +
   theme(
     plot.margin = margin(0, 0, 0, 5)
   )  
-```
 
-# run
-
-```{r}
 # the hjust is to adjust the position of the label A, B....
 chowones <- plot_grid(chow,chow_auc, 
                  label_size = 12, ncol = 2, labels = c('A','B'), hjust = 3.7,
@@ -220,6 +218,41 @@ combined <- plot_grid(
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/07_diet_mice.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
+```
+## p2: transplant mice
+
+```{r}
+transplant <- read_rds('../data/02_transplant_CFU_plot.RDS')
+
+title2 <- ggdraw() + 
+  draw_label(
+    "Fig. S_X (Continued)",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 5)
+  )  
+
+
+
+S_mouse2 <- plot_grid(NA, transplant,
+                  rel_heights = c(-0.2,1),
+                  #hjust = -1.9,
+                 label_size = 12, ncol = 1,
+                align = 'vh', axis = 'lrtb')
+
+ 
+combined <- plot_grid(
+  title2, S_mouse2,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/07_diet_mice_p2.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
 ```
 
