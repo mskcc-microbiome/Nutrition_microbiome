@@ -22,10 +22,11 @@ axis_text_size <- 10
 axis_title_size <- 10
 ```
 
-### simpson reciprocal ~ ave_fiber + ave_fat + ave_Sugars + empirical + intensity + TPN + EN + ...
+# alpha diversity and macronutrients (fat) model
 
 ```{r}
 # to change the df a little bit 
+# the ave_XXX value were already divided by 100
 full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv') %>% 
   mutate(abx = if_else(empirical == 'TRUE', 1, 0),
          TPN = if_else(TPN == 'TRUE', 1, 0),
@@ -81,7 +82,7 @@ model_alpha_macro_fat  <- brm( alpha_macro_fat,
                control = list(adapt_delta = 0.99),
               cores = ncores,
               chains = 2, 
-              seed = 123, sample_prior = T, file = '../data/090_alpha_macro_fat_interaction_model')
+              seed = 125, sample_prior = T, file = '../data/090_alpha_macro_fat_interaction_model')
 
 
 post_res <- suppressWarnings(posterior_samples(model_alpha_macro_fat))
@@ -93,5 +94,123 @@ prior_df %>%
 
 ```
 
+# conditional effects plot 
 
+```{r}
+full_original <- full %>%
+  mutate(ave_fiber = ave_fiber*100,
+       ave_fat = ave_fat*100,
+       ave_Protein = ave_Protein*100,
+       ave_Sugars = ave_Sugars*100,
+       ave_carb = ave_carb*100,
+       ave_cal = ave_cal*1000
+       )%>% 
+  #mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>%
+  mutate(pid = factor(pid)) %>% 
+  mutate(
+         TPN = if_else(TPN == 1, T, F),
+         EN = if_else(EN == 1, T, F)) %>% 
+  mutate(intensityAblative = if_else(intensity == 'ablative', T, F),
+         intensityNonablative = if_else(intensity == 'nonablative', T, F),
+         intensityReduced = if_else(intensity == 'reduced', T, F))
+
+alpha_macro_fat_original <- log(simpson_reciprocal) ~ 0 +
+               empirical+
+               intensityAblative + 
+                intensityNonablative +
+                intensityReduced +
+                ave_fiber:empirical +
+                ave_fat:empirical  +
+                ave_Sugars:empirical  +
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)  
+ 
+get_prior(alpha_macro_fat_original,data = full_original )
+
+
+priors_alpha_macro_fat__original <- c(
+             # for the macronutrients terms
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:ave_fiber"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:ave_fat"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:ave_Sugars"),
+            # for the interaction terms
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:ave_fiber"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:ave_fat"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:ave_Sugars"),
+            # for the TPN 
+            prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "ENTRUE"),
+            # for the empirical 
+            prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE"),
+            prior(normal(0, 0.5), class = 'b', coef = "empiricalFALSE"),
+            # for the intensity 
+            prior(normal(2, .1), class = 'b', coef = "intensityAblativeTRUE"),
+            prior(normal(2, .1), class = 'b', coef = "intensityReducedTRUE"),
+            prior(normal(2, .1), class = 'b', coef = "intensityNonablativeTRUE"))
+
+# vet the prior 
+model_alpha_macro_fat_original  <- brm( alpha_macro_fat_original,  
+              data = full_original, 
+              warmup = 1000, iter = 3000, 
+              prior = priors_alpha_macro_fat__original,
+               control = list(adapt_delta = 0.99),
+              cores = ncores,
+              chains = 2, 
+              seed = 125, sample_prior = T, file = '../data/090_model_alpha_macro_fat_interaction_original')
+
+dat_conditional_macro <- conditional_effects(model_alpha_macro_fat_original, surface = T)
+
+condi_dat_macro <- dat_conditional_macro %>% 
+  keep(.p = str_detect(names(.), ':')) %>% 
+  bind_rows(.id = 'grp')     
+
+```
+```{r}
+# to make the conditional plot like F2
+library(wesanderson) 
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+conditional_macro <- condi_dat_macro %>% 
+  mutate(grp = str_replace(grp, '\\:empirical','')) %>% 
+  left_join(key %>% select(grp = fg1_name, shortname)) %>% 
+  mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
+                 'Oils',
+                 'Fruits',
+                 'Meats',
+                 'Legumes',
+                 'Eggs',
+                 'Milk',
+                 'Grains',
+                 'Sweets'))))
+palette <- wes_palette("Royal1", 2)
+# the color for the strip background
+strip_color <- wes_palette("Royal1", 3)[3]
+```
+
+```{r}
+conditional3 <- condi_dat_macro %>%   
+  mutate(var = if_else(str_detect(grp, 'fiber'), 'Fiber', if_else(str_detect(grp, 'fat'), 'Fat', 'Sugars'))) %>% 
+  ggplot() +
+  geom_smooth(aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
+              stat = "identity",
+              alpha = .6, linewidth = 1.5)+ 
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ var, nrow = 1, scales = 'free_x') +
+  labs(y = 'Predicted log(diversity)', x = 'Macronutreints consumed (grams)') +
+  theme_classic() +
+  theme(legend.position = 'none', legend.title = element_text(size = 8, face="bold"),
+        legend.text = element_text( size=8, face="bold"),
+        legend.background=element_rect(fill = alpha("white", 0)),
+       legend.key=element_rect(fill = alpha("white", 0)),
+       panel.background = element_rect(fill = "#90EE9030"),
+        aspect.ratio = 1/1.5, 
+        strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+     axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
+  guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
+conditional3     
+```
 
