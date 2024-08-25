@@ -39,7 +39,7 @@ chow_days <- chow %>%
             xlab = '', ylab = 'Chow consumption (grams)\nper mouse per day',
             add = 'jitter', 
             outlier.shape = NA,
-            palette = c('gray32','deeppink2')) 
+            palette = c('gray32','deeppink2')) + theme_light() + theme(legend.position = 'none')
 chow_days %>% write_rds('../data/08_chow_days.RDS')
 ```
 ```{r}
@@ -59,21 +59,22 @@ chow_AUC_wide <- chow_AUC %>%
          trap_6_9 = (Day6  + Day9 )*3/2,
          trap = trap_3_6 + trap_6_9,
          groups = paste(abx_treatment,
-                         diet_treatment,sep="+")) %>% 
-  mutate(groups = factor(groups, levels = c('biapenem+vehicle','biapenem+sucrose')))
+                         diet_treatment,sep="\n+\n")) %>% 
+  mutate(groups = factor(groups, levels = c('biapenem\n+\nvehicle','biapenem\n+\nsucrose')))
 ```
 
 
 ```{r}
 chow_AUC_plot <- ggboxplot(chow_AUC_wide,
-          x="groups",add = 'jitter', title = 'Chow consumption AUC day 3,6,9',
+          x="groups",add = 'jitter', title = 'Chow consumption AUC',
           y="trap", color  = 'groups', add.params = list(alpha = 0.8, shape = 16)) +
   ylab("Trapezoidal\nAUC")+xlab('') +
    scale_color_manual(values = c('gray32','deeppink2')) +
   stat_compare_means(comparisons = list( 
-                        c("biapenem+vehicle", "biapenem+sucrose")),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+                        c("biapenem\n+\nvehicle", "biapenem\n+\nsucrose")),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  theme_light() +
   theme(axis.title=element_text(size=10), axis.text =  element_text(size = 10),legend.position = 'none',aspect.ratio=1/2, axis.ticks.x = element_blank())
-
+chow_AUC_plot
 chow_AUC_plot %>% write_rds('../data/08_chow_auc.RDS')
 ```
 
