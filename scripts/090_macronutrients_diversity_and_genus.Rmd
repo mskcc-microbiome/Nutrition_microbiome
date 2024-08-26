@@ -25,6 +25,14 @@ axis_title_size <- 10
 # alpha diversity and macronutrients (fat) model
 
 ```{r}
+clr_res <- read_csv('../data/171_genus_CLR_res.csv')
+
+clr_wide <- clr_res %>% 
+  spread('genus','clr')
+```
+
+
+```{r}
 # to change the df a little bit 
 # the ave_XXX value were already divided by 100
 full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv') %>% 
@@ -34,7 +42,11 @@ full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
   mutate(      ave_fiber_e= ave_fiber*abx,
                 ave_fat_e=ave_fat*abx,
-                ave_Sugars_e=ave_Sugars*abx)
+                ave_Sugars_e=ave_Sugars*abx) %>% 
+  select(sampleid:ave_carb, intensityAblative:ave_Sugars_e) %>% 
+  full_join(clr_wide)
+
+ 
 ```
 
 
@@ -205,3 +217,99 @@ conditional3 <- condi_dat_macro %>%
 conditional3  %>% write_rds('../data/090_conditional3.RDS') 
 ```
 
+# macro genera     
+
+```{r}
+priors <- c(  # for the macro nutrients
+            prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
+            prior(normal(0, 1), class = 'b', coef = "ave_fat"),
+            prior(normal(0, 1), class = 'b', coef = "ave_Sugars"),
+            # for the interaction terms
+            prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
+            prior(normal(0, 1), class = 'b', coef = "ave_fat_e"),
+            prior(normal(0, 1), class = 'b', coef = "ave_Sugars_e"),
+            # for the TPN 
+            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "EN"),
+            # for the empirical 
+            prior(normal(0, 0.5), class = 'b', coef = "abx")
+            )
+
+```
+
+```{r}
+# I want to only include the genus that are more prevalent and abundant, and most likely exist in human gut
+cts <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
+  filter(sampleid %in% meta$sampleid) 
+thre <- seq(0.0001, 0.002, 0.0001)
+thre %>% 
+  set_names(thre) %>% 
+  map_dfr(function(num){
+    cts %>% 
+    group_by(genus) %>% 
+    count(relab > num) %>% 
+    rename(criteria = names(.)[2]) %>% 
+    filter(criteria == 'TRUE') %>% 
+    arrange(-n) %>% 
+    filter(genus != 'NA') %>% 
+    mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
+    filter(perc > 10) %>% 
+      nrow
+  }) %>% 
+  gather('thre', 'num')
+
+target_genera <-  cts %>% 
+  group_by(genus) %>% 
+  count(relab > 0.002) %>% 
+  rename(criteria = names(.)[2]) %>% 
+  filter(criteria == 'TRUE') %>% 
+  arrange(-n) %>% 
+  filter(genus != 'NA') %>% 
+  mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
+  filter(perc > 10) %>% 
+  pull(genus) 
+#target_genera %>% write_csv('../data/087_more_abundant_0.002_genus_33.csv')
+```
+  
+ 
+```{r}
+macro_genus_interaction <- target_genera %>% 
+  set_names(target_genera) %>% 
+  purrr::map(function(genus) {
+    print(str_glue('{genus} is RUNNING!\n'))
+    mod =  brm( as.formula(str_glue(
+              '{genus}  ~ 
+              0 +
+                ave_fiber_e +
+                ave_fat_e +
+                ave_Sugars_e +
+                ave_fiber +
+                ave_fat +
+                ave_Sugars +
+               abx+
+               intensity +
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)')),  
+                data = full, 
+              warmup = 1000, iter = 3000, 
+              prior = priors,
+              cores = ncores, 
+              chains = 2, 
+              control = list(adapt_delta = 0.99),
+              seed = 456, file = '../data/090_target_genus_macro_model_post_interaction') 
+  })
+
+post_df <- macro_genus_interaction %>% 
+  imap(~ (suppressWarnings(posterior_samples(.x)) ))  %>% 
+  bind_rows(.id = 'genus')  
+post_df %>% 
+  write_csv('../data/090_target_genus_macro_model_post_interaction.csv')
+
+
+```
+
+ 
+ 
