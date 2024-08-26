@@ -173,22 +173,13 @@ condi_dat_macro <- dat_conditional_macro %>%
 # to make the conditional plot like F2
 library(wesanderson) 
 key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
-conditional_macro <- condi_dat_macro %>% 
-  mutate(grp = str_replace(grp, '\\:empirical','')) %>% 
-  left_join(key %>% select(grp = fg1_name, shortname)) %>% 
-  mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
-                 'Oils',
-                 'Fruits',
-                 'Meats',
-                 'Legumes',
-                 'Eggs',
-                 'Milk',
-                 'Grains',
-                 'Sweets'))))
+
 palette <- wes_palette("Royal1", 2)
 # the color for the strip background
 strip_color <- wes_palette("Royal1", 3)[3]
 ```
+
+### plot     
 
 ```{r}
 conditional3 <- condi_dat_macro %>%   
@@ -206,11 +197,11 @@ conditional3 <- condi_dat_macro %>%
         legend.text = element_text( size=8, face="bold"),
         legend.background=element_rect(fill = alpha("white", 0)),
        legend.key=element_rect(fill = alpha("white", 0)),
-       panel.background = element_rect(fill = "#90EE9030"),
+       panel.background = element_rect(fill = "#6B8E2320"),
         aspect.ratio = 1/1.5, 
-        strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+        strip.background = element_rect(color="white", fill='#6B8E2340', size=1.5,linetype="solid"),
      axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
   guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
-conditional3     
+conditional3  %>% write_rds('../data/090_conditional3.RDS') 
 ```
 

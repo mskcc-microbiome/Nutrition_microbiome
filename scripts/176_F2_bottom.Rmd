@@ -133,9 +133,9 @@ fg_temporal <- cleaned_fg %>%
   left_join(cross0) %>% 
   ggplot() +
    stat_pointinterval(aes(x = coeff, y = shortname, col = Cross), .width = .95, fatten_point = 1.2) +
-  geom_rect(data = interaction_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = interaction_fill), alpha = .1) +
-  geom_rect(data = blue_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = blue_fill) , alpha = .1) +
-  scale_fill_manual(values=c("interaction_fill" = "lightblue", "blue_fill" = "royalblue")) +
+  geom_rect(data = interaction_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = interaction_fill), alpha = .2) +
+  geom_rect(data = blue_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = blue_fill) , alpha = .25) +
+  scale_fill_manual(values=c("interaction_fill" = "tan2", "blue_fill" = "#FAEFD1")) +
   scale_color_manual(values = c("#EC0000", "black")) +
   scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
   geom_vline(xintercept = 0, col = 'blue', size = zero_line_size) +
@@ -296,7 +296,7 @@ macro_temporal <- cleaned_macro %>%
         #axis.text.y = element_text( size = 10),
         axis.text.y = element_markdown(),
         #panel.background = element_rect(fill = "#d8dcec",colour = "#d8dcec",size = 0.5, linetype = "solid"),
-        aspect.ratio=1/1.5)
+        aspect.ratio=1/1.2)
 macro_temporal
 ```
 # 2C intensity
@@ -410,7 +410,7 @@ conditional9 <- conditional %>%
         legend.background=element_rect(fill = alpha("white", 0)),
        legend.key=element_rect(fill = alpha("white", 0)),
         aspect.ratio = 1/1.5, 
-        strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+        strip.background = element_rect(color="white", fill='#ffecdc', size=1.5,linetype="solid"),
      axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
   guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
 #conditional9          
@@ -434,7 +434,7 @@ condiall
 ```
 
 
-# 2F
+# 2F raw
 
 ```{r}
 # making a df for annotating the number of samples and patients in the two groups
@@ -448,33 +448,7 @@ num_annot <- META %>%
   rename(sample_num = n) %>% 
   mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed')) %>% 
   mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
-num_annot
 ```
-```{r}
-# Sample data (replace with your actual data)
-data <- data.frame(
-  x = rnorm(30),
-  y = rnorm(30),
-  group1 = rep(c("A", "B"), each = 15),
-  group2 = rep(c("X", "Y"), 15)
-)
-
-# Base plot with facet_grid
-p <- ggplot(data, aes(x, y)) +
-  geom_point() +
-  facet_grid(group1 ~ group2)
-
-# Data frame with labels and facet variables
-annotation_data <- data.frame(
-  group1 = c("A", "B"),
-  group2 = c("X", "Y"),
-  label = c("Annotation for A-X", "Annotation for B-Y")
-)
-
-p + geom_text(data = annotation_data, aes(label = label), 
-              x = Inf, y = Inf, hjust = 1.1, vjust = 1.5)
-```
-
 
 ```{r raw_sweets}
 # the raw data 
@@ -491,13 +465,13 @@ rawsweets <- META %>%
            cor.coef = TRUE, # Add correlation coefficient.
            cor.coeff.args = list(method = "spearman",  label.sep = "\n", cor.coef.name = c("rho"),p.accuracy = 0.01, r.accuracy = 0.01,label.x.npc = "left", label.y.npc = "bottom", size = 3.5)) +
   geom_text(data = num_annot, aes(label = lbl), 
-              x = Inf, y = Inf, hjust = 1.1, vjust = 1.5) +
+              x = Inf, y = Inf, hjust = 0.6, vjust = 1.5) +
   #scale_x_sqrt() +
   scale_y_sqrt() +
   scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
   scale_colour_manual('antibiotics',values = palette, labels=c('not exposed', 'exposed')) +
   facet_wrap(~ antibiotics, labeller = 'label_both', dir = 'h') +
-  theme(aspect.ratio = 1, 
+  theme(aspect.ratio = 1/1.15, 
         legend.position = 'none',
           strip.background = element_blank(),
         strip.text.x = element_blank(), 
@@ -531,7 +505,7 @@ forlegend <- conditional %>%
   guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
 ```
 
-# Final F2    
+# Final F2      
 
 ```{r}
 title <- ggdraw() + 
