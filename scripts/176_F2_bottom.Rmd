@@ -9,17 +9,21 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+# params
+
 ```{r}
 library(tidyverse)
 library(ggpubr)
 library(cowplot)
+library(ggtext)
 library(tidybayes)
 axis_text_size <- 10
 axis_title_size <- 10
+zero_line_size = .8
 META <- read_csv('../data/153_combined_META.csv')
 ```
 
-## 2D
+# 2D
 
 ```{r}
 macro <- read_csv('../data/090_model_alpha_macro_fat_post_interaction.csv')
@@ -113,7 +117,7 @@ blue_terms <- tibble(
          blue_fill = 'blue_fill')
 ```
 
-### plot
+### fg plot
 
 ```{r}
 cross0 <- cleaned_fg %>%
@@ -133,15 +137,17 @@ fg_temporal <- cleaned_fg %>%
   geom_rect(data = blue_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = blue_fill) , alpha = .1) +
   scale_fill_manual(values=c("interaction_fill" = "lightblue", "blue_fill" = "royalblue")) +
   scale_color_manual(values = c("#EC0000", "black")) +
-  geom_vline(xintercept = 0, col = 'black', linetype = 'dashed') +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  geom_vline(xintercept = 0, col = 'blue', size = zero_line_size) +
   labs(x = 'ln(diversity) change', y = '') +
   theme_classic() +
   theme(legend.position = 'none') +
   theme(axis.text = element_text( size = 10),
+        axis.text.y = element_markdown(),
         plot.background = element_rect(fill='transparent', color=NA), 
         axis.title=element_text(size=10), 
         aspect.ratio=1.5)      
-fg_temporal       
+fg_temporal         
 ```
 
 
@@ -244,12 +250,6 @@ cleaned_macro %>% filter(str_detect(shortname, 'abx')) %>%
          .lower = round(.lower, 2),
          .upper = round(.upper, 2))
 
-```
- 
-
-### plot
- 
-```{r}
 interaction_terms_macro <- tibble(
   shortname = macro_order$shortname
 ) %>% 
@@ -268,35 +268,45 @@ blue_terms_macro <- tibble(
   mutate(xmin = -Inf, xmax = Inf,
          blue_fill = 'blue_fill')
 
+```
+ 
+
+#### macro plot
+ 
+```{r}
 macro_temporal <- cleaned_macro %>% 
   filter(grp == 'temporal') %>% 
   mutate(shortname = factor(shortname, levels = macro_order$shortname)) %>% 
   left_join(cross0_macro)  %>% 
   ggplot() +
   stat_pointinterval(aes(x = coeff, y = shortname, col = Cross),.width = .95, fatten_point = 1.2) +
- geom_rect(data = interaction_terms_macro, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = interaction_fill), alpha = .1) +
+ geom_rect(data = interaction_terms_macro, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = interaction_fill), alpha = .3) +
   geom_rect(data = blue_terms_macro, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = blue_fill) , alpha = .1) +
-  scale_fill_manual(values=c("interaction_fill" = "lightblue", "blue_fill" = "royalblue")) +
-  geom_vline(xintercept = 0, col = 'blue', linetype = 'dashed') +
+  scale_fill_manual(values=c("interaction_fill" = "#6B8E2320", "blue_fill" = "#6B8E2340")) +
+  geom_vline(xintercept = 0, col = 'blue', size = zero_line_size) +
   labs(x = 'ln(diversity) change', y = '') +
+  # doing magic to change the text appearance for interaction terms!
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
   theme_classic() +
   theme(legend.position = 'none') +
   scale_color_manual(values = c("#EC0000", "black")) +
-  theme(axis.text.y = element_text( size = 10),
+  theme(
         plot.background = element_rect(fill='transparent', color=NA), 
         axis.title=element_text(size=10), 
+        #axis.text.y = element_text( size = 10),
+        axis.text.y = element_markdown(),
         #panel.background = element_rect(fill = "#d8dcec",colour = "#d8dcec",size = 0.5, linetype = "solid"),
         aspect.ratio=1/1.5)
 macro_temporal
 ```
-
+# 2C intensity
 
 ```{r macro_pt}
 macro_pt <- cleaned_macro %>% 
   filter(grp == 'patient') %>% 
   mutate(shortname = factor(shortname, levels = c('Nonablative','Reduced','Ablative'))) %>% 
   ggplot(aes(x = coeff, y = shortname)) +
-  stat_pointinterval(.width = c(.66, .95), fatten_point = 1.2) +
+  stat_pointinterval(.width = .95, fatten_point = 1.2) +
   labs(x = 'Conditioning intercept [ln(diversity)]', y = '') +
    xlim(1.5, 2.5) +
   scale_x_continuous( breaks = seq(1.4, 2.4, 0.2)) + 
@@ -320,7 +330,7 @@ macro_side
 ```
 
 
-## 2A
+# 2A
 
 ```{r f2a}
 twoscore <- read_csv('../data/086_twoscore_procrustes.csv') 
@@ -349,7 +359,7 @@ ggsave('../data/f2a_176.pdf',
 ```
 
 
-## 2B
+# 2B
 
 ```{r diagram}
 p <- '../data/cartoon_of_model.png'
@@ -380,7 +390,7 @@ palette <- wes_palette("Royal1", 2)
 strip_color <- wes_palette("Royal1", 3)[3]
 ``` 
 
-## 2G condi fg
+# 2G condi fg
 
 ```{r conditional9}      
 conditional9 <- conditional %>%   
@@ -406,7 +416,7 @@ conditional9 <- conditional %>%
 #conditional9          
 ``` 
 
-## 2H condi macro
+# 2H condi macro
 
 ```{r}
 conditional3 <- read_rds('../data/090_conditional3.RDS')
@@ -424,7 +434,47 @@ condiall
 ```
 
 
-## 2F
+# 2F
+
+```{r}
+# making a df for annotating the number of samples and patients in the two groups
+
+num_annot <- META %>% 
+  split(.$empirical) %>% 
+  imap_dfr(function(df, name_) {
+    df %>% distinct(pid) %>% nrow
+  }) %>% gather('empirical','pt_num') %>% 
+  full_join(META %>% count(empirical) %>% mutate(empirical = as.character(empirical))) %>% 
+  rename(sample_num = n) %>% 
+  mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed')) %>% 
+  mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
+num_annot
+```
+```{r}
+# Sample data (replace with your actual data)
+data <- data.frame(
+  x = rnorm(30),
+  y = rnorm(30),
+  group1 = rep(c("A", "B"), each = 15),
+  group2 = rep(c("X", "Y"), 15)
+)
+
+# Base plot with facet_grid
+p <- ggplot(data, aes(x, y)) +
+  geom_point() +
+  facet_grid(group1 ~ group2)
+
+# Data frame with labels and facet variables
+annotation_data <- data.frame(
+  group1 = c("A", "B"),
+  group2 = c("X", "Y"),
+  label = c("Annotation for A-X", "Annotation for B-Y")
+)
+
+p + geom_text(data = annotation_data, aes(label = label), 
+              x = Inf, y = Inf, hjust = 1.1, vjust = 1.5)
+```
+
 
 ```{r raw_sweets}
 # the raw data 
@@ -440,7 +490,9 @@ rawsweets <- META %>%
            conf.int = TRUE, # Add confidence interval
            cor.coef = TRUE, # Add correlation coefficient.
            cor.coeff.args = list(method = "spearman",  label.sep = "\n", cor.coef.name = c("rho"),p.accuracy = 0.01, r.accuracy = 0.01,label.x.npc = "left", label.y.npc = "bottom", size = 3.5)) +
-  scale_x_sqrt() +
+  geom_text(data = num_annot, aes(label = lbl), 
+              x = Inf, y = Inf, hjust = 1.1, vjust = 1.5) +
+  #scale_x_sqrt() +
   scale_y_sqrt() +
   scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
   scale_colour_manual('antibiotics',values = palette, labels=c('not exposed', 'exposed')) +
@@ -449,25 +501,11 @@ rawsweets <- META %>%
         legend.position = 'none',
           strip.background = element_blank(),
         strip.text.x = element_blank(), 
-     axis.text=element_text(size=8), axis.title=element_text(size=8)) 
+     axis.text=element_text(size=9), axis.title=element_text(size=9)) 
 rawsweets
 ```
 
-```{r}
-# the samples and the patients in the two abx groups
-# number of samples
-META %>% 
-  count(empirical)
-```
 
-```{r}
-# number of patients
-META %>% 
-  split(.$empirical) %>% 
-  map_df(function(df) {
-    df %>% distinct(pid) %>% nrow
-  }) %>% gather
-```
 
 ```{r}
 # for the legend
@@ -501,9 +539,9 @@ title <- ggdraw() +
     x = 0,hjust = 0 ) +
   theme( plot.margin = margin(0, 0, 0, 5))
 
-f2_top <-  plot_grid(f2a,diagram,NA,
+f2_top <-  plot_grid(f2a,diagram,macro_pt,
                      labels = c('A','B', 'C'),
-                rel_widths = c(0.6,1.2, 0.5),
+                rel_widths = c(0.6,1.2, 0.6),
                  nrow = 1)
 
 middle_right <-  plot_grid(macro_temporal,NA, rawsweets,
