@@ -89,40 +89,40 @@ beta_all <- bc %>%
 beta_4 <- beta_all %>% 
   mutate(experiment_no = str_glue('Expe. {experiment_no}'),
          day  = str_glue('D{day}')) %>% 
-  ggscatter(x = 'V1', y = 'V2', color = 'treatment',  alpha = 0.9, shape = 16) +
-  facet_grid( experiment_no~  day) +
+  ggscatter(x = 'V1', y = 'V2', color = 'abx_treatment', shape = 'diet_treatment', alpha = 0.9) +
+  facet_grid( .~  day) +
   theme_light() +
-  scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2'), name = '') +
+  scale_color_manual(values = c('#C93312', '#899DA4'), name = 'abx_treatment') +
   xlab(paste0("PC 1 [",percent_var[1],"%]")) +
   ylab(paste0("PC 2 [",percent_var[2],"%]")) +
   theme_light() +
-  theme(aspect.ratio=1, legend.position = 'right',
+  theme(aspect.ratio=1, legend.position = 'bottom',
         panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
-
+beta_4  
 beta_4_plot <- beta_4 +theme(legend.position = 'none')
 ```
 
 ```{r}
 # to find the stool sample weight of these mice samples
 # thanks to Madhu sending over the tables!
-dat1 <- read_excel('../data/Angel Rebuttal_Exp2_Healthy mice Diet_Fructose_Sucrose_Glucose_v2.xlsx') %>% 
-  rename(sampleid  = ...14) %>% 
-  filter(!is.na(sampleid)) %>% 
-  filter(!is.na(Stool_weight_mg)) %>% 
-  select(sampleid, Stool_weight_mg)
-
-dat2 <- read_excel('../data/Angel Rebuttal_Exp2_Healthy mice Diet_Fructose_Sucrose_Glucose_v2.xlsx')%>% 
-  rename(sampleid  = ...14) %>% 
-  filter(!is.na(sampleid)) %>% 
-  filter(!is.na(Stool_weight_mg)) %>% 
-  select(sampleid, Stool_weight_mg)
-
-all_weights <- bind_rows(dat1, dat2) %>% distinct()
-
-meta_weight <- meta %>% left_join(all_weights ) %>% filter(!is.na(Stool_weight_mg)) %>% clean_names()
-
-meta_weight %>% filter(!is.na(Stool_weight_mg)) %>% count(abx_treatment, diet_treatment)
-meta  %>% count(abx_treatment, diet_treatment)
+# dat1 <- read_excel('../data/Angel Rebuttal_Exp2_Healthy mice Diet_Fructose_Sucrose_Glucose_v2.xlsx') %>% 
+#   rename(sampleid  = ...14) %>% 
+#   filter(!is.na(sampleid)) %>% 
+#   filter(!is.na(Stool_weight_mg)) %>% 
+#   select(sampleid, Stool_weight_mg)
+# 
+# dat2 <- read_excel('../data/Angel Rebuttal_Exp2_Healthy mice Diet_Fructose_Sucrose_Glucose_v2.xlsx')%>% 
+#   rename(sampleid  = ...14) %>% 
+#   filter(!is.na(sampleid)) %>% 
+#   filter(!is.na(Stool_weight_mg)) %>% 
+#   select(sampleid, Stool_weight_mg)
+# 
+# all_weights <- bind_rows(dat1, dat2) %>% distinct()
+# 
+# meta_weight <- meta %>% left_join(all_weights ) %>% filter(!is.na(Stool_weight_mg)) %>% clean_names()
+# 
+# meta_weight %>% filter(!is.na(Stool_weight_mg)) %>% count(abx_treatment, diet_treatment)
+# meta  %>% count(abx_treatment, diet_treatment)
 ```
 
   
@@ -150,22 +150,22 @@ healthy_abso <- read_csv('../data/absolute.abundance.csv') %>%
 
 ```{r}
 # plotting the data in boxplot
-abso_entero_healthy_days <- healthy_abso %>%    
-  ggboxplot(x = 'xvar', y = 'log10_abs_copy',add = 'jitter', 
-             xlab = '', ylab = 'log10(Enterococcus copy numbers)',, add.params = list(alpha = 0.5, shape = 16),
-            width = 0.6,color  = 'grp')+
-   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(
-    c('biapenem__vehicle__3','biapenem__sucrose__3'), 
-    #c('biapenem__vehicle__6','biapenem__sucrose__6'),
-    c('PBS__vehicle__3','PBS__sucrose__3'),
-    c('PBS__vehicle__3','biapenem__vehicle__3')
-    ),
-    label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
-  #scale_y_log10(breaks = c(1 %o% 10^(-1:8)),  labels = trans_format("log10", math_format(10^.x))) +
-  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
-  theme_light() +
-  theme(axis.text.x =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
+# abso_entero_healthy_days <- healthy_abso %>%    
+#   ggboxplot(x = 'xvar', y = 'log10_abs_copy',add = 'jitter', 
+#              xlab = '', ylab = 'log10(Enterococcus copy numbers)',, add.params = list(alpha = 0.5, shape = 16),
+#             width = 0.6,color  = 'grp')+
+#    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+#   stat_compare_means(comparisons = list(
+#     c('biapenem__vehicle__3','biapenem__sucrose__3'), 
+#     #c('biapenem__vehicle__6','biapenem__sucrose__6'),
+#     c('PBS__vehicle__3','PBS__sucrose__3'),
+#     c('PBS__vehicle__3','biapenem__vehicle__3')
+#     ),
+#     label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+#   #scale_y_log10(breaks = c(1 %o% 10^(-1:8)),  labels = trans_format("log10", math_format(10^.x))) +
+#   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+#   theme_light() +
+#   theme(axis.text.x =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
 #abso_entero_healthy_days
   
 # this data is looking really weird!!!!, so it doesn't have much to do with the stool weight, the gene copy number is already weird, a lesson for future sequencing of mice samples
@@ -310,25 +310,29 @@ sig_res = read_tsv(str_glue('../data/R01_maaslin2_output_ALL_grp4/significant_re
 
 ```
 
-### volcano d3
+### RUN volcano d3
 
 ```{r}
 set.seed(1)
 coeff_upper <- 1
 coeff_lower <- -1
 # to use the volcano plot to highlight the results on day 3
-all_res <- read_tsv('../data/R01_maaslin2_output_ALL_grp4/all_results.tsv') %>% 
+all_res_sugar <- read_tsv('../data/R01_maaslin2_output_ALL_grp4/all_results.tsv') %>% 
   mutate(genus = str_extract(feature, 'g__.+s__'),
          species = str_extract(feature, 's__.+$'),
          genus = str_replace(genus, 'g__',''),
          species = str_replace(species, 's__',''),
          genus = str_replace(genus, '\\.s__',''),
-         cleaned_name = str_glue('{genus} {species}'))
+         cleaned_name = str_glue('{genus} {species}')) %>% 
+  separate(feature, into = c('seq_id','taxa'), sep = '\\.', remove = F) %>% 
+  # create a column with the feature name have seq id new line and then the actual taxa
+  mutate(feature_formattted = str_replace(feature, '\\.','\n')) %>% 
+  relocate(feature_formattted, .after = feature)
 
 # A coefficient of 2 means an 2²-fold change (approximately a 4-fold increase) in relative abundance.
 # A coefficient of 3 means an 2³-fold change (approximately a 8-fold increase) in relative abundance.
  
-sugar_vol_d3 <- all_res %>%
+sugar_vol_d3 <- all_res_sugar %>%
   filter(metadata == 'treatmentbiapenem_sucrose:day3') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
@@ -339,17 +343,17 @@ sugar_vol_d3 <- all_res %>%
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
   geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, cleaned_name, "")), color = 'red') +
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, cleaned_name, "")), color = 'blue') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
   theme(aspect.ratio = 1/2, legend.position = 'none')
-
+sugar_vol_d3
 ```
 
 ### volcano d6
 
 ```{r}
 # asv at day 6
-sugar_vol_d6 <-all_res %>%
+sugar_vol_d6 <-all_res_sugar %>%
   filter(metadata == 'treatmentbiapenem_sucrose:day6') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
@@ -360,20 +364,16 @@ sugar_vol_d6 <-all_res %>%
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
   geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, cleaned_name, "")), color = 'red') +
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, cleaned_name, "")), color = 'blue') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
   theme(aspect.ratio = 1/2, legend.position = 'none')
 
 ```
 
-
-
-
-
 ### a table for all q < 0.05 results
 
 ```{r}
-sugar_effects_table <- all_res %>% 
+sugar_effects_table <- all_res_sugar %>% 
   filter(metadata == 'treatmentbiapenem_sucrose:day6' | metadata == 'treatmentbiapenem_sucrose:day3') %>% 
   filter(qval < 0.05) %>% 
   select(-value) %>% 
@@ -391,10 +391,12 @@ sugar_asvs <- sugar_effects_table %>%
 sugar_asvs_relab <- healthyall %>% 
   mutate(feature = str_replace(Taxon, '\\:','.'),
          feature = str_replace(feature, '\\;','.')) %>% 
-  filter(feature %in% sugar_asvs$feature)
+  filter(feature %in% sugar_asvs$feature) %>% 
+  # create a column with the feature name have seq id new line and then the actual taxa
+  mutate(feature_formattted = str_replace(feature, '\\.','\n')) 
 
 sugar_asvs_relab_plots <- sugar_asvs_relab %>% 
-  split(.$feature) %>% 
+  split(.$feature_formattted) %>% 
   imap(function(df, name_){
     df %>% 
       filter(abx_treatment == 'biapenem') %>% 
@@ -408,28 +410,16 @@ sugar_asvs_relab_plots <- sugar_asvs_relab %>%
        geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
       geom_line(aes(group = u_mouse_id),alpha=0.3) +
    #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('0','3')),label= "p.value", method= 'wilcox.test',paired = T, tip.length = 0.04,exact=F) +
+  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.signif", method= 'wilcox.test',paired = T, vjust = 0.4,
+                     tip.length = 0.03,exact=F) +
   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
       facet_grid(. ~ diet_treatment) +
   theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
   })
+sugar_asvs_relab_plots
 ```
 
 
-```{r}
-# why some mice seem to not match
-# there are two experiments!
-test <- sugar_asvs_relab %>% 
-  filter(feature == 'seq1.g__Lactobacillus.s__johnsonii') %>% 
-  filter(abx_treatment == 'biapenem') %>% 
-  select( relab, mouse_no, day, diet_treatment, experiment_no) %>% 
-  split(.$diet_treatment) %>% 
-  map(~ spread(data= . ,'day','relab') %>%
-  rename(d0 = `0`, d3 = `3`,d6 = `6`))
-  
-  
-df <- test[[1]]
-```
 
 ## @abx effect
 
@@ -498,20 +488,24 @@ sig_res = read_tsv(str_glue('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_
 
 ```
 
-### volcano d3
+### RUN volcano d3
 
 ```{r}
 # to use the volcano plot to highlight the results on day 3
-all_res <- read_tsv('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects/all_results.tsv') %>% 
+all_res_abx <- read_tsv('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects/all_results.tsv') %>% 
   mutate(genus = str_extract(feature, 'g__.+s__'),
          species = str_extract(feature, 's__.+$'),
          genus = str_replace(genus, 'g__',''),
          species = str_replace(species, 's__',''),
          genus = str_replace(genus, '\\.s__',''),
-         cleaned_name = str_glue('{genus} {species}'))
+         cleaned_name = str_glue('{genus} {species}')) %>% 
+  separate(feature, into = c('seq_id','taxa'), sep = '\\.', remove = F) %>% 
+  # create a column with the feature name have seq id new line and then the actual taxa
+  mutate(feature_formattted = str_replace(feature, '\\.','\n')) %>% 
+  relocate(feature_formattted, .after = feature)
 
 
-abx_vol_d3 <- all_res %>%
+abx_vol_d3 <- all_res_abx %>%
   filter(metadata == 'treatmentbiapenem_vehicle:day3') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
@@ -522,15 +516,15 @@ abx_vol_d3 <- all_res %>%
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
   geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, feature, "")), color = 'red') +
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, feature, "")), color = 'blue') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
   theme(aspect.ratio = 1/2, legend.position = 'none')
 ```
 
 ### volcano d6  
 
 ```{r}
-abx_vol_d6 <- all_res %>% 
+abx_vol_d6 <- all_res_abx %>% 
   filter(metadata == 'treatmentbiapenem_vehicle:day6') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
   mutate(neglog10_q = -log10(qval)) %>%
@@ -543,15 +537,15 @@ abx_vol_d6 <- all_res %>%
   geom_vline(xintercept =  0, color = 'black') + 
   geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
   geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, feature, "")), color = 'red') +
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, feature, "")), color = 'blue') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
   theme(aspect.ratio = 1/2, legend.position = 'none')
 ```
 
 ### a table for all q < 0.05 results
 
 ```{r}
-abx_effects_table <- all_res %>% 
+abx_effects_table <- all_res_abx %>% 
   filter(metadata == 'treatmentbiapenem_vehicle:day6' | metadata == 'treatmentbiapenem_vehicle:day3') %>% 
   filter(qval < 0.05) %>% 
   select(-value) %>% 
@@ -568,10 +562,12 @@ abx_asvs <- abx_effects_table %>%
 abx_asvs_relab <- healthyall %>% 
   mutate(feature = str_replace(Taxon, '\\:','.'),
          feature = str_replace_all(feature, '\\;','.')) %>% 
-  filter(feature %in% abx_asvs$feature)
+  filter(feature %in% abx_asvs$feature)%>% 
+  # create a column with the feature name have seq id new line and then the actual taxa
+  mutate(feature_formattted = str_replace(feature, '\\.','\n')) 
 
 abx_asvs_relab_plots <- abx_asvs_relab %>% 
-  split(.$feature) %>% 
+  split(.$feature_formattted) %>% 
   imap(function(df, name_){
     df %>% 
       filter(diet_treatment == 'vehicle') %>% 
@@ -585,7 +581,7 @@ abx_asvs_relab_plots <- abx_asvs_relab %>%
        geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
       geom_line(aes(group = u_mouse_id),alpha=0.3) +
    #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.value", method= 'wilcox.test',paired = T, tip.length = 0.04,exact=F) +
+  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.signif", method= 'wilcox.test',paired = T, vjust = 0.4,tip.length = 0.03,exact=F) +
   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
       facet_grid(. ~ abx_treatment) +
   theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
@@ -720,18 +716,14 @@ title <- ggdraw() +
   )
 
 # the top row of the alpha and beta diversity
-top_2 <- plot_grid(alpha_healthy_days, beta_4_plot, nrow = 1, align = 'vh', axis = 'lrtb', rel_widths = c(1,1.1), labels = c('A','B'))
-top_2
-```
+top_2 <- plot_grid(alpha_healthy_days, beta_4_plot, nrow = 1, align = 'vh', axis = 'lrtb', rel_widths = c(1,1.5), labels = c('A','B'))
 
-
-```{r}
 abx_top <- abx_vol_d3 + abx_vol_d6 + 
   plot_annotation(title = "Differential abundance in DPBS + vehicle VS abx + vehicle", theme = theme(plot.title = element_text(hjust = 0.5)))
 
 abx_relabs <- plot_grid(plotlist = abx_asvs_relab_plots, nrow = 1, align = 'vh', axis = 'lrtb')
 
-p1 <- plot_grid(top_2, abx_top, abx_relabs, nrow = 3)
+p1 <- plot_grid(top_2, abx_top, abx_relabs, nrow = 3, labels = c(NA, 'C', 'D'))
  
 combined <- plot_grid(
   title, p1,
@@ -765,7 +757,7 @@ sugar_top_plot <- sugar_vol_d3 + sugar_vol_d6 +
   plot_annotation(title = "Differential abundance in abx + sucrose VS abx + vehicle", theme = theme(plot.title = element_text(hjust = 0.5)))
 
 sugar_relabs <- plot_grid(plotlist = sugar_asvs_relab_plots, nrow = 2, align = 'vh', axis = 'lrtb')
-sugars <- plot_grid(sugar_top_plot,sugar_relabs, nrow = 2 , align = 'vh', axis = 'lrtb', rel_heights = c(1,2))
+sugars <- plot_grid(sugar_top_plot,sugar_relabs, nrow = 2 , align = 'vh', axis = 'lrtb', rel_heights = c(1,2), labels = c('E','F'))
 
  
 combined <- plot_grid(
