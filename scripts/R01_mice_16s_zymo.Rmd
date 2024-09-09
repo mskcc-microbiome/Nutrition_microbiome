@@ -50,9 +50,114 @@ alpha_healthy_days <-meta %>%
   scale_y_sqrt() +
   theme_light() +
   theme(axis.text =  element_text(size = 10, angle = 0, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
-alpha_healthy_days
+
 ```
+
+
+```{r}
+# the same version as above but with p value spelled out
+meta %>% 
+  mutate(day = factor(day)) %>% 
+  arrange(abx_treatment,desc(diet_treatment),  day) %>% 
+  mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
+  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>%    
+  ggboxplot(x = 'xvar', y = 'simpson_reciprocal',add = 'jitter', 
+             xlab = '', ylab = 'alpha diversity(simpson reciprocal)',, add.params = list(alpha = 0.5, shape = 16),
+            width = 0.6,color  = 'grp')+
+   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  stat_compare_means(comparisons = list(
+    c('biapenem__vehicle__3','biapenem__sucrose__3'), 
+    c('PBS__vehicle__3','PBS__sucrose__3'),
+    c('PBS__vehicle__3','biapenem__vehicle__3')
+    ),
+    label= "p.value", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+  scale_y_sqrt() +
+  theme_light()
+```
+```{r}
+# it would be good to have a metric of the effect size of the alpha reduction because of the abx treatment
+  # the difference of the median in the two groups
+median_d3 <- meta %>% filter(day == 3) %>% 
+  group_by(abx_treatment, diet_treatment) %>% 
+  summarise(median_trt_d3 = median(simpson_reciprocal)) %>% 
+  ungroup()
+
+median_pbs_d3 <- median_d3 %>% 
+  filter(abx_treatment == 'PBS' & diet_treatment == 'vehicle') %>% 
+  pull(median_trt_d3)
+
+median_abx_d3 <- median_d3 %>% 
+  filter(abx_treatment == 'biapenem' & diet_treatment == 'vehicle') %>% 
+  pull(median_trt_d3)
+
+# the difference 
+median_pbs_d3 - median_abx_d3
+```
+
+
 sucrose-only doesn’t reduce diversity on day 3, compared with vehicle, but biapenem-only does.  However, sucrose doesn’t further reduce diversity beyond the biapenem effect on day 3. 
+
+## delta
+
+```{r}
+# what we actually care is the difference between day 3 and day 0 in the two groups
+alpha_wide <- meta %>% 
+  select(experiment_no:day, mouse_no,abx_treatment:simpson_reciprocal) %>% 
+  mutate(day = str_glue('d{day}')) %>% 
+  spread('day','simpson_reciprocal') %>% 
+  mutate(delta_0_3 = d3 - d0,
+         delta_0_6 = d6 - d0) %>% 
+  gather('grp','deltas', delta_0_3:delta_0_6)
+```
+sucrose_only doesn't have much effects. abx_only has a much bigger reduction in the alpha diversity after abx trt
+
+## delta plots
+
+```{r}
+
+delta_plots <- alpha_wide %>% 
+  split(.$grp) %>% 
+  imap(function(df, name_){
+    df %>% 
+      ggboxplot(y = 'deltas', title = str_glue('{name_}'), add = 'jitter', xlab = '') +
+      facet_grid(abx_treatment ~ diet_treatment) +theme_cleveland() + theme(axis.text.x = element_blank())
+  })
+
+library(cowplot)
+deltas <- plot_grid(plotlist = delta_plots)
+ggsave('../data/01_delta_plots.pdf')
+```
+
+
+```{r}
+# I want to test if I can use t test for this one
+abx_vehicle <- alpha_wide %>% filter(abx_treatment == 'biapenem' & diet_treatment == 'vehicle' & grp  == 'delta_0_3')
+shapiro.test(x = abx_vehicle$deltas)
+# a  p value < 0.05 indicates NOT normally distributed! so I can only use wilcox ranksum test !
+ 
+
+
+
+```
+
+## onesided tests
+
+```{r}
+# to just split them to smaller dfs and compute the one sided wilcox with zero alone
+onesided <- alpha_wide %>% 
+  split(list(.$abx_treatment, .$diet_treatment,.$grp, .$experiment_no)) %>% 
+  map_dfr(function(df){
+    test = wilcox.test(df$deltas, mu = 0, alternative = "less")
+    return(pvalue = test$p.value)
+  }) %>% gather('comparison','pvalue') %>% 
+  mutate(padj = p.adjust(pvalue)) %>% 
+  mutate(less = if_else(padj < 0.05, T, F))
+
+
+```
+
 
 # beta diversity 
 
@@ -241,6 +346,180 @@ ggsave('../data/R01_h_bar4.jpg', width = 8, height = 12)
 
 # Maaslin2 asv
 
+## @abx effect
+
+```{r}
+# use the PBS_vehicle as the reference level
+df_target <- meta  %>%
+  select(-group, -tube_no, -investigator) %>%
+  mutate(experiment_no = as.character(experiment_no),
+         day = as.character(day)) %>% 
+  mutate(treatment = str_glue('{abx_treatment}_{diet_treatment}'),
+       treatment = factor(treatment, levels = c( 'PBS_vehicle','PBS_sucrose', 'biapenem_vehicle','biapenem_sucrose'))) 
+
+asv_target <- healthyall %>%
+  inner_join(df_target %>% select(sampleid, treatment)) %>% 
+  select(Taxon, sampleid, relab, treatment, day, experiment_no)
+
+asv_target_sample_n <- asv_target %>% distinct(sampleid) %>% nrow
+
+kept_asv <- asv_target %>%
+  group_by(Taxon) %>%
+  count(relab > 0.0001) %>%
+  rename(criteria = names(.)[2]) %>%
+  filter(criteria == 'TRUE') %>%
+  mutate(perc = round(n/asv_target_sample_n*100, 0)) %>%
+  filter(perc > 10) %>%
+  pull(Taxon)
+
+asv_relab_target_fil <-asv_target %>%
+  filter( Taxon %in% kept_asv) %>%
+  spread('Taxon','relab', fill = 0) %>% 
+  mutate(day = factor(day),
+         experiment_no = factor(experiment_no))
+```
+
+```{r}
+# the setup for the Maaslin2
+metadata <- asv_relab_target_fil %>% select(sampleid:experiment_no) %>% column_to_rownames('sampleid')
+formula <- ~ treatment * day + experiment_no
+design_matrix <- model.matrix(formula, data = metadata)
+metadata <- cbind(metadata, design_matrix)
+
+paste(colnames(metadata) , collapse = ", ")
+```
+
+```{r}
+# Create a MaAsLin2 input feature data file (ASV table)
+feature_data <- asv_relab_target_fil %>% 
+  select(sampleid, starts_with('seq')) %>% 
+  column_to_rownames('sampleid')
+
+fit_res <- Maaslin2(
+  input_data = feature_data, 
+  input_metadata = metadata,
+  output = str_glue("../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects"),  # Output directory
+  fixed_effects = c('treatmentPBS_sucrose', 'treatmentbiapenem_vehicle', 'treatmentbiapenem_sucrose', 'day3', 'day6', 'experiment_no2', 'treatmentPBS_sucrose:day3', 'treatmentbiapenem_vehicle:day3', 'treatmentbiapenem_sucrose:day3', 'treatmentPBS_sucrose:day6', 'treatmentbiapenem_vehicle:day6', 'treatmentbiapenem_sucrose:day6'), 
+  random_effects = NULL,  # No random effects in this case
+  normalization = "TSS",  # Total sum scaling normalization
+  transform = "LOG",  # Log transformation actually log2
+  analysis_method = "LM",  # Linear model
+  max_significance = 0.05,
+  min_abundance = 0.0001,  # Minimum abundance threshold
+  min_prevalence = 0.10,  # Minimum prevalence threshold,
+  cores = 10
+)
+sig_res = read_tsv(str_glue('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects/significant_results.tsv'))
+
+```
+
+### RUN volcano d3
+
+```{r}
+set.seed(1)
+coeff_upper <- 1
+coeff_lower <- -1
+# to use the volcano plot to highlight the results on day 3
+all_res_abx <- read_tsv('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects/all_results.tsv') %>% 
+  mutate(genus = str_extract(feature, 'g__.+s__'),
+         species = str_extract(feature, 's__.+$'),
+         genus = str_replace(genus, 'g__',''),
+         species = str_replace(species, 's__',''),
+         genus = str_replace(genus, '\\.s__',''),
+         cleaned_name = str_glue('{genus} {species}')) %>% 
+  separate(feature, into = c('seq_id','taxa'), sep = '\\.', remove = F) %>% 
+  # create a column with the feature name have seq id new line and then the actual taxa
+  mutate(feature_formattted = str_replace(feature, '\\.','\n')) %>% 
+  relocate(feature_formattted, .after = feature)
+
+
+abx_vol_d3 <- all_res_abx %>%
+  filter(metadata == 'treatmentbiapenem_vehicle:day3') %>% 
+  mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
+  mutate(neglog10_q = -log10(qval)) %>%
+  ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
+            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
+            title = 'Between day 0 and day 3') +
+  scale_color_manual(values = c('blue', 'black', 'red')) +
+  geom_vline(xintercept =  0, color = 'black') + 
+  geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
+  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
+  theme(aspect.ratio = 1/2, legend.position = 'none')
+```
+
+
+
+### volcano d6  
+
+```{r}
+abx_vol_d6 <- all_res_abx %>% 
+  filter(metadata == 'treatmentbiapenem_vehicle:day6') %>% 
+  mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
+  mutate(neglog10_q = -log10(qval)) %>%
+  ggscatter(x = 'coef', y = 'neglog10_q', 
+            color = 'sig_', 
+            alpha = 0.5, shape = 16, 
+            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
+            title = 'Between day 0 and day 6') +
+  scale_color_manual(values = c( 'black', 'red')) +
+  geom_vline(xintercept =  0, color = 'black') + 
+  geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
+  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
+  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
+  theme(aspect.ratio = 1/2, legend.position = 'none')
+```
+
+### a table for all q < 0.05 results
+
+```{r}
+abx_effects_table <- all_res_abx %>% 
+  filter(metadata == 'treatmentbiapenem_vehicle:day6' | metadata == 'treatmentbiapenem_vehicle:day3') %>% 
+  filter(qval < 0.05) %>% 
+  select(-value) %>% 
+  arrange(metadata) %>% 
+  mutate(coef = round(coef, 2))
+```
+
+### relab plot for these few highlighed asv
+
+```{r}
+abx_asvs <- abx_effects_table %>% 
+  filter(coef > 1 | coef < -1) %>% 
+  distinct(feature)
+
+abx_asvs_relab <- healthyall %>% 
+  mutate(feature = str_replace(Taxon, '\\:','.'),
+         feature = str_replace_all(feature, '\\;','.')) %>% 
+  filter(feature %in% abx_asvs$feature)%>% 
+  # create a column with the feature name have seq id new line and then the actual taxa
+  mutate(feature_formattted = str_replace(feature, '\\.','\n')) 
+
+abx_asvs_relab_plots <- abx_asvs_relab %>% 
+  split(.$feature_formattted) %>% 
+  imap(function(df, name_){
+    df %>% 
+      filter(diet_treatment == 'vehicle') %>% 
+      mutate(abx_treatment = factor(abx_treatment , levels = c('PBS','biapenem')),
+             u_mouse_id = str_glue('{experiment_no}_{mouse_no}')) %>% 
+  ggboxplot(x = 'day', y = 'relab',outlier.shape = NA,
+             xlab = 'Day', ylab = '',, add.params = list(alpha = 0.5, shape = 16),
+            title = str_glue('{name_}'),
+            #color  = 'grp',
+            width = 0.6)+
+       geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
+      geom_line(aes(group = u_mouse_id),alpha=0.3) +
+   #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.value", method= 'wilcox.test',paired = T, vjust = 0.4,tip.length = 0.03,exact=F) +
+  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+      facet_grid(. ~ abx_treatment) +
+  theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
+  })
+abx_asvs_relab_plots
+```
+
 ##  @sugar effect on top of abx effect
 
 ```{r}
@@ -313,9 +592,7 @@ sig_res = read_tsv(str_glue('../data/R01_maaslin2_output_ALL_grp4/significant_re
 ### RUN volcano d3
 
 ```{r}
-set.seed(1)
-coeff_upper <- 1
-coeff_lower <- -1
+
 # to use the volcano plot to highlight the results on day 3
 all_res_sugar <- read_tsv('../data/R01_maaslin2_output_ALL_grp4/all_results.tsv') %>% 
   mutate(genus = str_extract(feature, 'g__.+s__'),
@@ -410,7 +687,7 @@ sugar_asvs_relab_plots <- sugar_asvs_relab %>%
        geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
       geom_line(aes(group = u_mouse_id),alpha=0.3) +
    #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.signif", method= 'wilcox.test',paired = T, vjust = 0.4,
+  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.value", method= 'wilcox.test',paired = T, vjust = 0.4,
                      tip.length = 0.03,exact=F) +
   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
       facet_grid(. ~ diet_treatment) +
@@ -421,173 +698,7 @@ sugar_asvs_relab_plots
 
 
 
-## @abx effect
 
-```{r}
-# use the PBS_vehicle as the reference level
-df_target <- meta  %>%
-  select(-group, -tube_no, -investigator) %>%
-  mutate(experiment_no = as.character(experiment_no),
-         day = as.character(day)) %>% 
-  mutate(treatment = str_glue('{abx_treatment}_{diet_treatment}'),
-       treatment = factor(treatment, levels = c( 'PBS_vehicle','PBS_sucrose', 'biapenem_vehicle','biapenem_sucrose'))) 
-
-asv_target <- healthyall %>%
-  inner_join(df_target %>% select(sampleid, treatment)) %>% 
-  select(Taxon, sampleid, relab, treatment, day, experiment_no)
-
-asv_target_sample_n <- asv_target %>% distinct(sampleid) %>% nrow
-
-kept_asv <- asv_target %>%
-  group_by(Taxon) %>%
-  count(relab > 0.0001) %>%
-  rename(criteria = names(.)[2]) %>%
-  filter(criteria == 'TRUE') %>%
-  mutate(perc = round(n/asv_target_sample_n*100, 0)) %>%
-  filter(perc > 10) %>%
-  pull(Taxon)
-
-asv_relab_target_fil <-asv_target %>%
-  filter( Taxon %in% kept_asv) %>%
-  spread('Taxon','relab', fill = 0) %>% 
-  mutate(day = factor(day),
-         experiment_no = factor(experiment_no))
-```
-
-```{r}
-# the setup for the Maaslin2
-metadata <- asv_relab_target_fil %>% select(sampleid:experiment_no) %>% column_to_rownames('sampleid')
-formula <- ~ treatment * day + experiment_no
-design_matrix <- model.matrix(formula, data = metadata)
-metadata <- cbind(metadata, design_matrix)
-
-paste(colnames(metadata) , collapse = ", ")
-```
-
-```{r}
-# Create a MaAsLin2 input feature data file (ASV table)
-feature_data <- asv_relab_target_fil %>% 
-  select(sampleid, starts_with('seq')) %>% 
-  column_to_rownames('sampleid')
-
-fit_res <- Maaslin2(
-  input_data = feature_data, 
-  input_metadata = metadata,
-  output = str_glue("../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects"),  # Output directory
-  fixed_effects = c('treatmentPBS_sucrose', 'treatmentbiapenem_vehicle', 'treatmentbiapenem_sucrose', 'day3', 'day6', 'experiment_no2', 'treatmentPBS_sucrose:day3', 'treatmentbiapenem_vehicle:day3', 'treatmentbiapenem_sucrose:day3', 'treatmentPBS_sucrose:day6', 'treatmentbiapenem_vehicle:day6', 'treatmentbiapenem_sucrose:day6'), 
-  random_effects = NULL,  # No random effects in this case
-  normalization = "TSS",  # Total sum scaling normalization
-  transform = "LOG",  # Log transformation actually log2
-  analysis_method = "LM",  # Linear model
-  max_significance = 0.05,
-  min_abundance = 0.0001,  # Minimum abundance threshold
-  min_prevalence = 0.10,  # Minimum prevalence threshold,
-  cores = 10
-)
-sig_res = read_tsv(str_glue('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects/significant_results.tsv'))
-
-```
-
-### RUN volcano d3
-
-```{r}
-# to use the volcano plot to highlight the results on day 3
-all_res_abx <- read_tsv('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects/all_results.tsv') %>% 
-  mutate(genus = str_extract(feature, 'g__.+s__'),
-         species = str_extract(feature, 's__.+$'),
-         genus = str_replace(genus, 'g__',''),
-         species = str_replace(species, 's__',''),
-         genus = str_replace(genus, '\\.s__',''),
-         cleaned_name = str_glue('{genus} {species}')) %>% 
-  separate(feature, into = c('seq_id','taxa'), sep = '\\.', remove = F) %>% 
-  # create a column with the feature name have seq id new line and then the actual taxa
-  mutate(feature_formattted = str_replace(feature, '\\.','\n')) %>% 
-  relocate(feature_formattted, .after = feature)
-
-
-abx_vol_d3 <- all_res_abx %>%
-  filter(metadata == 'treatmentbiapenem_vehicle:day3') %>% 
-  mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
-  mutate(neglog10_q = -log10(qval)) %>%
-  ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
-            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
-            title = 'Between day 0 and day 3') +
-  scale_color_manual(values = c('blue', 'black', 'red')) +
-  geom_vline(xintercept =  0, color = 'black') + 
-  geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
-  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
-  theme(aspect.ratio = 1/2, legend.position = 'none')
-```
-
-### volcano d6  
-
-```{r}
-abx_vol_d6 <- all_res_abx %>% 
-  filter(metadata == 'treatmentbiapenem_vehicle:day6') %>% 
-  mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
-  mutate(neglog10_q = -log10(qval)) %>%
-  ggscatter(x = 'coef', y = 'neglog10_q', 
-            color = 'sig_', 
-            alpha = 0.5, shape = 16, 
-            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
-            title = 'Between day 0 and day 6') +
-  scale_color_manual(values = c( 'black', 'red')) +
-  geom_vline(xintercept =  0, color = 'black') + 
-  geom_vline(xintercept =  c(coeff_upper, coeff_lower), color = 'gray', linetype = 'dashed') + 
-  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
-  theme(aspect.ratio = 1/2, legend.position = 'none')
-```
-
-### a table for all q < 0.05 results
-
-```{r}
-abx_effects_table <- all_res_abx %>% 
-  filter(metadata == 'treatmentbiapenem_vehicle:day6' | metadata == 'treatmentbiapenem_vehicle:day3') %>% 
-  filter(qval < 0.05) %>% 
-  select(-value) %>% 
-  arrange(metadata)
-```
-
-### relab plot for these few highlighed asv
-
-```{r}
-abx_asvs <- abx_effects_table %>% 
-  filter(coef > 1 | coef < -1) %>% 
-  distinct(feature)
-
-abx_asvs_relab <- healthyall %>% 
-  mutate(feature = str_replace(Taxon, '\\:','.'),
-         feature = str_replace_all(feature, '\\;','.')) %>% 
-  filter(feature %in% abx_asvs$feature)%>% 
-  # create a column with the feature name have seq id new line and then the actual taxa
-  mutate(feature_formattted = str_replace(feature, '\\.','\n')) 
-
-abx_asvs_relab_plots <- abx_asvs_relab %>% 
-  split(.$feature_formattted) %>% 
-  imap(function(df, name_){
-    df %>% 
-      filter(diet_treatment == 'vehicle') %>% 
-      mutate(abx_treatment = factor(abx_treatment , levels = c('PBS','biapenem')),
-             u_mouse_id = str_glue('{experiment_no}_{mouse_no}')) %>% 
-  ggboxplot(x = 'day', y = 'relab',outlier.shape = NA,
-             xlab = 'Day', ylab = '',, add.params = list(alpha = 0.5, shape = 16),
-            title = str_glue('{name_}'),
-            #color  = 'grp',
-            width = 0.6)+
-       geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
-      geom_line(aes(group = u_mouse_id),alpha=0.3) +
-   #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.signif", method= 'wilcox.test',paired = T, vjust = 0.4,tip.length = 0.03,exact=F) +
-  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
-      facet_grid(. ~ abx_treatment) +
-  theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
-  })
-abx_asvs_relab_plots
-```
 
 
 # Maaslin2 family
@@ -700,6 +811,13 @@ famly_d6
 ```
 
 # Final graphs 
+
+```{r}
+# the legend for the pcoa
+pcoa_leg <-  plot_grid(ggpubr::get_legend(beta_4))
+ggsave('../data/01_pcoa_leg.pdf')
+```
+
 
 ## page1
 
