@@ -1,0 +1,111 @@
+---
+title: "The PROPHYLACTIC abx and empirical abx"
+author: "Anqi Dai"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(cowplot) 
+```
+
+bar plot by day. For each day what % of samples being exposed in the three categories
+
+1. No antibacterial whatsoever
+2. ciprofloxacin only (the two fluoroquinolones that we use for these patients are cipro and levo.  mostly cipro)
+3. Any Broad-spectrum (PO vanco, metronidazole, pip-tazo, cefepime, or ‘penem drugs). If still on cipro but getting a broad spectrum, classify as broad-spectrum-exposed.
+4. other anti-bacterial
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv')
+
+# loading the cleaned med data
+med <- read_csv('../data/191_medication_cleaned_all_with_type.csv')
+```
+
+# plotting
+
+```{r}
+# properly annotate these samples into groups
+# total number of samples per day 
+total_by_day <- meta %>% 
+  select(pid, sampleid, sdrt) %>% 
+  group_by(sdrt) %>% 
+  summarise(daytotal = n())
+
+exposure_grps <- med %>% 
+  distinct(sampleid, med_exposure_type, sdrt) %>% 
+  count(sdrt, med_exposure_type) %>% 
+  inner_join(total_by_day) %>% 
+  mutate(perc = round(n/daytotal*100, 2)) %>% 
+  mutate(med_exposure_type = factor(med_exposure_type, levels = c('broad_spectrum','fluoroquinolones','other_antibacterial','no_abx')))
+  
+exposure_grps
+```
+
+```{r}
+# plot them in percentage as a stacked bar plot 
+library(RColorBrewer)
+perc_ <- ggplot(exposure_grps, aes(x = sdrt, y = perc, fill = med_exposure_type)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(values = c( "tomato", "steelblue","goldenrod3","gray"))  +
+  geom_vline( xintercept =  0 , color = 'black', linetype = 'dashed', size = 1) +
+  labs(x = "Transplant day", y = "Percentage", fill = "Exposure group") +
+  theme_minimal() 
+
+# I see so if I plot stat = identity it will be percentage in the bar plot 
+# also plot this in absolute numbers
+count_ <- ggplot(exposure_grps, aes(x = sdrt, y = n, fill = med_exposure_type)) +
+  geom_bar(position = "stack", stat = "identity") +
+  scale_fill_manual(values = c( "tomato", "steelblue","goldenrod3","gray"))  +
+    geom_vline( xintercept =  0 , color = 'black', linetype = 'dashed', size = 1) +
+  labs(x = "Transplant day", y = "Count", fill = "Exposure group") +
+  theme_minimal()
+```
+
+
+```{r}
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S3",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+plot_ <- plot_grid(count_, perc_, nrow = 2, align = 'vh', axis = 'lrtb', labels = c('A','B'))
+
+ 
+combined <- plot_grid(
+  title, plot_,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,5,1), "cm"))
+
+ggsave('../data/14_group4_antibiotics.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+
+```
+
+
+
+
+
+
+
+
+
+
+
