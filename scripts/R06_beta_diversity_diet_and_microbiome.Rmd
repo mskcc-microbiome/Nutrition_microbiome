@@ -189,6 +189,9 @@ pval = ret$coefficients[2,5]
 #   geom_density(alpha = 0.2, fill = "red") +
 #   labs(title = "Distribution of Residuals", x = "Residuals", y = "Density")
 ```
+
+# Partial_residual plot
+
 ```{r}
 library(ggpmisc)
 Partial_residual <- joined %>% 
@@ -238,13 +241,19 @@ Partial_residual
 # No I was not! this one is not accounting for patient individual differences. 
 ```
 
+# sbeta_example
 
 ```{r}
+# finding the example pt that I wanna highlight in the plot
+s_num <- beta_ %>% count(pid)
+selected <- 'P104'
+this_earliest <- beta_ %>% filter(pid == selected) %>% slice_min(sdrt) %>% pull(sdrt)
+
 # would be good to do a visualization of the beta diversity of the food and stool 
 # too hard to do the whole thing in ggplot, so start with a scatter plot and then fininsh in illustrator 
 sbeta_example <-  beta_ %>% 
-  mutate(highlightpt = if_else(pid == 'P11', T, F),
-         highlight_time = if_else(pid == 'P11' & sdrt == -2, T, F)) %>% 
+  mutate(highlightpt = if_else(pid == selected, T, F),
+         highlight_time = if_else(pid == selected & sdrt == this_earliest, T, F)) %>% 
   arrange(highlightpt)
 
 sbeta_example_pcoa <- sbeta_example %>% 
@@ -260,6 +269,9 @@ sbeta_example_pcoa <- sbeta_example %>%
 
 sbeta_example_pcoa
 ```
+
+# dbeta_example
+
 ```{r}
 # the visualization for the pcoa of the diet data
 # import the ordination results
@@ -302,7 +314,9 @@ dbeta_example_pcoa
 # are there correlation within each pt own diet
 library(vegan)
 
-
+diet_dist_matrix <- read_tsv('../data/R06_p2d_fc_unweighted_unifrac_distance_matrix/distance-matrix.tsv') %>% 
+  rename(sampleid = ...1) %>% 
+  full_join(meta %>% select(pid, sampleid))
 
 diet_matrix <- diet_dist_matrix %>% 
   select(-pid) %>% 
@@ -336,11 +350,13 @@ three <- adonis2(stool_matrix ~ stool_dist_df$pid + stool_dist_df$timebin + stoo
  
 Yes there is strong within individual correlation as well. 
 
+# final plot
+
 ```{r}
 # to combine them together as one single supp figure
  title <- ggdraw() + 
   draw_label(
-    "Fig. S_X",
+    "Fig. S4",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -350,13 +366,13 @@ Yes there is strong within individual correlation as well.
   )
 
 
-S_X <- plot_grid(dbeta_example_pcoa, sbeta_example_pcoa, Partial_residual, 
+S4 <- plot_grid(dbeta_example_pcoa, sbeta_example_pcoa, Partial_residual, 
                  label_size = 12, ncol = 1,labels = c('A','B','C'),
                 align = 'vh', axis = 'lrtb')
 
  
 combined <- plot_grid(
-  title, S_X,
+  title, S4,
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.05, 1)
@@ -364,5 +380,60 @@ combined <- plot_grid(
 
 ggsave('../data/06_distance_to_earliest.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
+```
+
+# loop 
+
+```{r}
+# maybe I should just loop through every patient and see what looks the best???
+pts <- s_num %>%  filter(n %in% 2:5) %>% distinct(pid) %>% pull(pid)
+produce_2 <- pts %>% 
+  set_names(pts) %>% 
+  imap(function(pid_, name_){
+selected <- pid_
+this_earliest <- beta_ %>% filter(pid == selected) %>% slice_min(sdrt) %>% pull(sdrt)
+
+# would be good to do a visualization of the beta diversity of the food and stool 
+# too hard to do the whole thing in ggplot, so start with a scatter plot and then fininsh in illustrator 
+sbeta_example <-  beta_ %>% 
+  mutate(highlightpt = if_else(pid == selected, T, F),
+         highlight_time = if_else(pid == selected & sdrt == this_earliest, T, F)) %>% 
+  arrange(highlightpt)
+
+sbeta_example_pcoa <- sbeta_example %>% 
+  ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
+            title = 'Microbiome Bray curtis distance PCoA') +
+  scale_color_manual(name = "", values = c('gray','red'),
+                       labels = c("Other patients", str_glue('{pid_}'))) +
+  scale_shape_manual(name = "", values = c(16,17),
+                       labels = c("Later time points", "Earliest timepoint")) +
+    xlab(paste0("PCo 1 [",percent_var_stool[1],"%]")) +
+  ylab(paste0("PCo 2 [",percent_var_stool[2],"%]")) +
+  theme(aspect.ratio =  1)
+
+dbeta_example <-  dpcoa %>% 
+  mutate(highlightpt = if_else(pid == selected, T, F),
+         highlight_time = if_else(pid == selected & sdrt == this_earliest, T, F)) %>% 
+  arrange(highlightpt)
+
+dbeta_example_pcoa <- dbeta_example %>% 
+  ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
+            title = 'Diet unweighted unifrac distance PCoA') +
+  scale_color_manual(name = "", values = c('gray','red'),
+                       labels = c("Other patients", str_glue('{pid_}'))) +
+  scale_shape_manual(name = "", values = c(16,17),
+                       labels = c("Later time points", "Earliest timepoint")) +
+    xlab(paste0("PCo 1 [",percent_var_diet1,"%]")) +
+  ylab(paste0("PCo 2 [",percent_var_diet2,"%]")) +
+  theme(aspect.ratio =  1)
+
+
+S_ <- plot_grid(dbeta_example_pcoa, sbeta_example_pcoa, 
+                 label_size = 12, ncol = 1,labels = c('A','B'),
+                align = 'vh', axis = 'lrtb')
+
+ggsave(str_glue('../data/06_d_to_earliest_{pid_}.pdf'),
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = S_, dpi = 300) 
+  })
 ```
 
