@@ -246,7 +246,7 @@ Partial_residual
 ```{r}
 # finding the example pt that I wanna highlight in the plot
 s_num <- beta_ %>% count(pid)
-selected <- 'P104'
+selected <- 'P52'
 this_earliest <- beta_ %>% filter(pid == selected) %>% slice_min(sdrt) %>% pull(sdrt)
 
 # would be good to do a visualization of the beta diversity of the food and stool 
@@ -260,13 +260,13 @@ sbeta_example_pcoa <- sbeta_example %>%
   ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
             title = 'Microbiome Bray curtis distance PCoA') +
   scale_color_manual(name = "", values = c('gray','red'),
-                       labels = c("Other patients", "Patient 11")) +
+                       labels = c("Other patients", str_glue('{selected}'))) +
   scale_shape_manual(name = "", values = c(16,17),
                        labels = c("Later time points", "Earliest timepoint")) +
     xlab(paste0("PCo 1 [",percent_var_stool[1],"%]")) +
   ylab(paste0("PCo 2 [",percent_var_stool[2],"%]")) +
-  theme(aspect.ratio =  1)
-
+  theme(aspect.ratio =  1, legend.position = 'right')
+ 
 sbeta_example_pcoa
 ```
 
@@ -293,23 +293,25 @@ percent_var_diet2 <- variance_explained %>% mutate(pco2 = round(PC2*100, 1)) %>%
 
 
 dbeta_example <-  dpcoa %>% 
-  mutate(highlightpt = if_else(pid == 'P11', T, F),
-         highlight_time = if_else(pid == 'P11' & sdrt == -2, T, F)) %>% 
+  mutate(highlightpt = if_else(pid == selected, T, F),
+         highlight_time = if_else(pid == selected & sdrt == this_earliest, T, F)) %>% 
   arrange(highlightpt)
 
 dbeta_example_pcoa <- dbeta_example %>% 
   ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
             title = 'Diet unweighted unifrac distance PCoA') +
   scale_color_manual(name = "", values = c('gray','red'),
-                       labels = c("Other patients", "Patient 11")) +
+                       labels = c("Other patients",  str_glue('{selected}'))) +
   scale_shape_manual(name = "", values = c(16,17),
                        labels = c("Later time points", "Earliest timepoint")) +
     xlab(paste0("PCo 1 [",percent_var_diet1,"%]")) +
   ylab(paste0("PCo 2 [",percent_var_diet2,"%]")) +
-  theme(aspect.ratio =  1)
+  theme(aspect.ratio =  1, legend.position = 'right')
  
 dbeta_example_pcoa
 ```
+# within pt correlation 
+
 ```{r}
 # are there correlation within each pt own diet
 library(vegan)
