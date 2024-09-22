@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(ggtext)
 library(ggpubr)
 library(brms)   
 library(tidybayes)
@@ -18,6 +19,9 @@ library(cowplot)
 library(brmstools)
 library(ochRe)
 library(bayesplot)
+library(ggimage)
+library(ggrastr)
+library(gtsummary)
 options(mc.cores = parallel::detectCores())
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
@@ -25,6 +29,21 @@ ncores <- parallel::detectCores()
 key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
 axis_text_size <- 10
 axis_title_size <- 10
+alpha_val <- 0.05
+point_size <- 0.2
+scatter_col <- 'gray14'
+pick_point_size <- 1
+pick_line_size <- 0.5
+example_pt_line_size <- 0.3
+diet_line_color <- '#E41A1C'
+stool_line_color <- 'blue'
+strip_color <- 'gray91'
+umap_pt_size <- 0.2
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+transplant_day <- 0
+dayzeroline_size <- 1
+scatter_transparency <- 0.05
+day0_line_color <- 'gray40'
 ```
 
 ```{r}
@@ -33,7 +52,7 @@ dtb <- read_csv('../data/152_combined_DTB.csv') %>%
 
 g9 <- dtb %>% 
   filter(str_detect(Food_code, '^9')) %>% 
-  distinct(Food_code, description)
+  distinct(Food_code, description,Meal)
 ```
 
 
@@ -41,10 +60,18 @@ g9 <- dtb %>%
 
 ```{r}
 nutritional_codes <- g9 %>% 
-  filter(str_detect(description, 'Nutritional|ONS formula')) %>% 
+  filter(str_detect(description, 'Nutrition') | str_detect(Meal, 'Enteral nutrition')) %>% 
+  filter(description != 'Nutrition bar (PowerBar)') %>% 
   pull(Food_code)
-```
 
+# what are these foods codes
+g9 %>% 
+  filter(str_detect(description, 'Nutrition') | str_detect(Meal, 'Enteral nutrition')) %>% 
+  filter(description != 'Nutrition bar (PowerBar)') %>% 
+  distinct(Food_code, description) %>% 
+  gt()  %>% 
+  gt::gtsave(filename = "../data/03_what_ONS.png")
+```
 
 ```{r}
 dtb_ONS <- dtb %>% 
@@ -72,6 +99,45 @@ total_per_group <- fgrps_df %>%
     fgrp1 == 'N' ~ 'fg_ONS'
   ))
 ```
+
+## timecourse sub2
+
+```{r}
+# make a plot similar to F1 timecourse
+# so this is not related to stool sample yet. 
+total_daily_sub2 <- total_per_group %>% 
+  ungroup() %>% 
+  select(-fgrp1) %>% 
+  filter(fg1_name %in% c('fg_ONS','fg_sweets')) %>% 
+  spread('fg1_name','grp_tol', fill = 0) %>% 
+  gather('fg1_name','grp_tol', fg_ONS:fg_sweets) %>% 
+  mutate(fg1_name = str_replace(fg1_name, 'fg_',''))
+  
+daily_sub2_panel <- total_daily_sub2 %>% 
+     ggplot() +
+  rasterise(geom_point(aes(x = fdrt, y = grp_tol), alpha = 0.2,size = point_size , shape = 16), dpi = 300) +
+  geom_smooth(aes(x = fdrt, y = grp_tol), method = "loess", formula = 'y ~ x', colour = diet_line_color ,  size = 1, fill = 'hotpink') +
+  geom_vline(xintercept = transplant_day, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
+  labs( x = 'Transplant day',title = '', y = 'Grams') +
+  facet_wrap(~ fg1_name, 
+             scales = 'free_y',
+             nrow = 1 ) +
+  scale_x_continuous( breaks = seq(0, 50, 20)) + 
+  scale_y_sqrt() +
+  theme_classic() +
+  theme(axis.text=element_text(size=10),
+       strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+        strip.text.x = element_text(size = 10), 
+        axis.title=element_text(size=axis_title_size),
+        plot.title = element_text(size=axis_title_size),
+        aspect.ratio=1)
+
+daily_sub2_panel
+```
+
+
+
+
 ```{r}
 meta <- read_csv('../data/153_combined_META.csv')
 
@@ -233,7 +299,7 @@ fg_order <- c( 'Vegetables','abx * Vegetables',
 
 matchingtb <- read_rds('../data/196_matching_shortname.rds') %>% 
   mutate(shortname = as.character(shortname)) %>% 
-  select(-ymin, -ymax) %>% 
+  dplyr::select(-ymin, -ymax) %>% 
   add_row(item = 'b_fg_ONS_e', shortname = 'abx * ONS', grp = 'temporal', xmin = -Inf, xmax = Inf, fill_ = 'interaction_fill') %>% 
   add_row(item = 'b_fg_ONS', shortname = 'ONS', grp = 'temporal', xmin = -Inf, xmax = Inf, fill_ = 'blue_fill') %>% 
   mutate(shortname = factor(shortname, levels = fg_order)) %>% 
@@ -242,38 +308,307 @@ matchingtb <- read_rds('../data/196_matching_shortname.rds') %>%
          ymax = id + 0.5) 
 
 fg <- read_csv('../data/R03_interaction_conditional_model_ONS.csv') %>% 
-  select(starts_with('b_')) %>% 
+  dplyr::select(starts_with('b_')) %>% 
   gather('item', 'coeff') %>% 
   inner_join(matchingtb)
 ```
 
+## caterpillar plot
+
 ```{r}
-# cross0 <- fg %>%
-#    filter(grp == 'temporal') %>% 
-#   group_by(item) %>% 
-#   summarise(q2.5 = quantile(coeff, probs = 0.025),
-#             q97.5 = quantile(coeff, probs = 0.975)) %>% 
-#   mutate(Cross = if_else(q2.5 >= 0 | q97.5 <= 0, F, T))
+cross0 <- fg %>%
+   filter(grp == 'temporal') %>%
+  group_by(item) %>%
+  summarise(q2.5 = quantile(coeff, probs = 0.025),
+            q97.5 = quantile(coeff, probs = 0.975)) %>%
+  mutate(Cross = if_else(q2.5 >= 0 | q97.5 <= 0, F, T))
 
 post_ONS <- fg %>% 
   filter(grp == 'temporal') %>% 
   left_join(cross0) %>% 
   ggplot() +
- stat_interval(aes(x = coeff, y = shortname),.width = c(.66, .95), fatten_point = 1.2) +
-  scale_color_brewer(palette = 'RdPu', name = 'CI level') +
-  geom_rect(data = matchingtb, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill_), alpha = .2) +
-  scale_fill_manual(values=c("interaction_fill" = "lightblue", "blue_fill" = "royalblue")) +
-  geom_vline(xintercept = 0, col = 'blue', linetype = 'twodash', size = 1) +
+ stat_pointinterval(aes(x = coeff, y = shortname, color = Cross),.width = 0.95, fatten_point = 1.2) +
+  geom_rect(data = matchingtb, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill_), alpha = .1) +
+  scale_fill_manual(values=c("interaction_fill" = "tan2", "blue_fill" = "#FAEFD1")) +
+  geom_vline(xintercept = 0, col = 'blue',  size = 1) +
   labs(x = 'ln(diversity) change', y = '') +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
   theme_classic() +
-  scale_color_manual(values = c( "#d89060", "#a84830")) +
+  scale_color_manual(values = c( "red", "black")) +
   guides(fill = "none") +
-  theme(axis.text = element_text( size = 10),
+  theme(axis.text = element_text( size = 10), axis.text.y = element_markdown(),
         plot.background = element_rect(fill='transparent', color=NA), legend.position = 'none',
         axis.title=element_text(size=10), 
         aspect.ratio=1.5)
 
-post_ONS
+post_ONS 
+# decided to only. show this plot to answer this question, after discussing with Anna, yes, the ONS is sig because it probably captures patients sickness in itself 
 ```
 
+
+## marginal effects
+
+```{r}
+meta_ONS_original <- meta_ONS %>% 
+  mutate(fg_egg = fg_egg*100,
+         fg_fruit = fg_fruit*100,
+         fg_grain = fg_grain*100,
+         fg_legume = fg_legume*100,
+         fg_meat = fg_meat*100,
+         fg_milk = fg_milk*100,
+         fg_oils = fg_oils*100,
+         fg_sweets = fg_sweets*100,
+         fg_veggie = fg_veggie*100,
+         fg_ONS = fg_ONS*100) %>% 
+  mutate(TPN = if_else(TPN == 1, T, F),
+         EN = if_else(EN == 1, T, F))
+
+mod_ONS_original <-  log(simpson_reciprocal) ~ 0 +
+                intensity+
+                empirical+
+               fg_fruit:empirical+
+                fg_meat:empirical+
+                fg_milk:empirical+
+                fg_oils:empirical+
+                fg_egg:empirical+
+                fg_grain:empirical+
+                fg_sweets:empirical+
+                fg_legume:empirical+
+                fg_veggie:empirical+
+                fg_ONS:empirical+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+
+get_prior(mod_ONS_original,data = meta_ONS_original )
+
+div_priors_ONS_original <- c(# for the food group variables 
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_veggie"),
+             prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_ONS"),
+            # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_veggie"),
+             prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_ONS"),
+            # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "ENTRUE"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE"),
+            # for the intensity
+            prior(normal( 2, .1), class = 'b', coef = "intensityablative"),
+            prior(normal( 2, .1), class = 'b', coef = "intensityreduced"),
+            prior(normal( 2, .1), class = 'b', coef = "intensitynonablative")
+            )
+
+# vet the prior 
+model_ONS_original  <- brm( mod_ONS_original,  
+              data = meta_ONS_original, 
+              warmup = 1000, iter = 3000, 
+              prior = div_priors_ONS_original,
+               control = list(adapt_delta = 0.99),
+              cores = ncores,
+              chains = 2, 
+              seed = 125, sample_prior = T, file = '../data/R03_mod_ONS_original')
+
+dat_conditional_ONS <- conditional_effects(model_ONS_original, surface = T)
+
+condi_dat_ONS <- dat_conditional_ONS %>% 
+  keep(.p = str_detect(names(.), ':')) %>% 
+  bind_rows(.id = 'grp')   %>% 
+  mutate(grp = str_replace(grp, '\\:empirical','')) %>% 
+  left_join(key %>% dplyr::select(grp = fg1_name, shortname) %>% add_row(grp = 'fg_ONS', shortname = 'ONS')) %>% 
+  mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
+                 'Oils',
+                 'Fruits',
+                 'Meats',
+                 'Legumes',
+                 'Eggs',
+                 'Milk',
+                 'Grains',
+                 'Sweets',
+                 'ONS'))))   
+ 
+```
+
+```{r}
+# to make the conditional plot like F2
+library(wesanderson) 
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+palette <- wes_palette("Royal1", 2)
+# the color for the strip background
+strip_color <- wes_palette("Royal1", 3)[3]
+```
+
+### marginal plot     
+
+```{r}
+conditional10 <- condi_dat_ONS %>%   
+  ggplot() +
+  geom_smooth(aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
+              stat = "identity",
+              alpha = .3, linewidth = 1.5)+ 
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ shortname, nrow = 2, scales = 'free_x') +
+  ylim(0, 3.3) +
+  labs(y = 'Predicted log(diversity)', x = 'Food group consumed (grams)') +
+  theme_classic() +
+  theme(legend.position = 'none', legend.title = element_text(size = 8, face="bold"),
+        legend.text = element_text( size=8, face="bold"),
+        panel.background = element_rect(fill = "#FAEFD140"),
+        legend.background=element_rect(fill = alpha("white", 0)),
+       legend.key=element_rect(fill = alpha("white", 0)),
+        aspect.ratio = 1/1.5, 
+        strip.background = element_rect(color="white", fill='#ffecdc', size=1.5,linetype="solid"),
+     axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
+  guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
+
+conditional10
+```
+### exposure samples and pt  
+
+```{r}
+# making a df for annotating the number of samples and patients in the two groups
+
+num_annot <- meta_ONS %>% 
+  split(.$empirical) %>% 
+  imap_dfr(function(df, name_) {
+    df %>% distinct(pid) %>% nrow
+  }) %>% gather('empirical','pt_num') %>% 
+  full_join(meta_ONS %>% count(empirical) %>% mutate(empirical = as.character(empirical))) %>% 
+  rename(sample_num = n) %>% 
+  mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed')) %>% 
+  mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
+```
+
+```{r raw_ONS}
+# the raw data 
+raw_ONS <- meta_ONS %>% 
+  mutate(log_div = log(simpson_reciprocal)) %>% 
+  mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed'),
+         antibiotics = factor(antibiotics, levels = c('not exposed','exposed'))) %>% 
+  ggscatter(x = 'fg_ONS', y = 'log_div', color = 'antibiotics',
+            ylab = 'log(diversity)',xlab = 'ONS consumed (grams)',
+            alpha = 0.5, shape = 16, size = 1,
+            add = "reg.line",  # Add regressin line
+           add.params = list(color = 'antibiotics', fill = 'antibiotics', alpha = 0.3, size = 1.5), # Customize line
+           conf.int = TRUE, # Add confidence interval
+           cor.coef = TRUE, # Add correlation coefficient.
+           cor.coeff.args = list(method = "spearman",  label.sep = "\n", cor.coef.name = c("rho"),p.accuracy = 0.01, r.accuracy = 0.01,label.x.npc = "left", label.y.npc = "bottom", size = 3.5)) +
+  geom_text(data = num_annot, aes(label = lbl), 
+              x = Inf, y = Inf, hjust = 0.6, vjust = 1.5) +
+  #scale_x_sqrt() +
+  scale_y_sqrt() +
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics',values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ antibiotics, labeller = 'label_both', dir = 'h') +
+  theme(aspect.ratio = 1/1.15, 
+        legend.position = 'none',
+          strip.background = element_blank(),
+        strip.text.x = element_blank(), 
+     axis.text=element_text(size=9), axis.title=element_text(size=9)) 
+raw_ONS
+```
+
+## group2_exposure num
+
+```{r}
+# in the above plot, how many samples from how many patients actually had nonzero exposure to these
+group2_exposure <- meta_ONS %>% 
+  dplyr::select(sampleid, pid, fg_ONS,fg_sweets) %>% 
+  gather('grp','gram', fg_ONS, fg_sweets) %>% 
+  filter(gram > 0) %>% 
+  split(.$grp) %>% 
+  imap_dfr(function(df, name_){
+    num_pt = df %>% distinct(pid) %>% nrow
+    
+    num_samples = df  %>% nrow
+    
+    return(list(grp = name_, num_pt = num_pt, num_samples = num_samples))
+  }) %>% 
+  mutate(Food_group = c('ONS (Oral nutritional supplement)','Non-ONS sweets')) %>% 
+  rename(patient_number = num_pt ,
+         stool_sample_number = num_samples) %>% 
+  dplyr::select(Food_group, patient_number, stool_sample_number) %>% 
+  gt()  %>% 
+  gt::gtsave(filename = "../data/03_group2_exposure.png")
+  
+
+```
+
+## final plot
+
+```{r}
+ title <- ggdraw() + 
+  draw_label(
+    "Fig. S8",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+```
+
+
+```{r}
+ONS_food <- ggdraw() + draw_image("../data/03_what_ONS.png", scale =1.2)
+
+ONS_timecourse <- daily_sub2_panel
+
+ONS_exposure_number <- ggdraw() + draw_image("../data/03_group2_exposure.png", scale = 0.6)
+
+ONS_caterpillar <- post_ONS
+
+top <- plot_grid(ONS_food, ONS_timecourse,   nrow = 1, align = 'vh', axis = 'lrtb', labels = c('A','B'), rel_widths = c(1.5, 2))
+middle <- plot_grid(ONS_exposure_number,   nrow = 1, align = 'vh', axis = 'lrtb', labels = c('C'))
+bottom <- plot_grid(ONS_caterpillar,  nrow = 1, align = 'vh', axis = 'lrtb', labels = c('D'))
+plot_ <- plot_grid(top, NA, middle, bottom,  nrow = 4, align = 'vh', axis = 'lrtb', rel_heights = c(1,-0.1, 0.3, 1))
+ 
+combined <- plot_grid(
+  title, plot_,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/03_ONS.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+
+```
+
+
+
+```{r}
+# maybe just plot them in one plot 
+meta_ONS %>%    
+  mutate(fg_ONS = fg_ONS*100) %>%  
+  ggscatter(x = 'sdrt', y = 'fg_ONS',  alpha = 0.3) +
+  scale_y_sqrt()          
+```
+```{r}
+meta_ONS %>%    
+  mutate(fg_sweets = fg_sweets*100) %>%  
+  ggscatter(x = 'sdrt', y = 'fg_sweets',  alpha = 0.3) +
+  scale_y_sqrt()      
+```
 
