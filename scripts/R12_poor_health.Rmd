@@ -1,0 +1,308 @@
+---
+title: "The confounding effects of poor health"
+author: "Anqi Dai"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(brms)   
+library(cowplot)
+library(ggridges)
+library(tidybayes)
+library(ggtext)
+library(brmstools)
+library(bayesplot)
+options(mc.cores = parallel::detectCores())
+ncores <- parallel::detectCores()
+rstan::rstan_options(auto_write = TRUE)
+zero_line_size <- .8
+```
+
+# pre-d0 subset model
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv')%>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) %>% 
+  # only 
+  filter(sdrt < 0) %>% 
+  mutate(fg_egg = fg_egg/100,
+         fg_fruit = fg_fruit/100,
+         fg_grain = fg_grain/100,
+         fg_legume = fg_legume/100,
+         fg_meat = fg_meat/100,
+         fg_milk = fg_milk/100,
+         fg_oils = fg_oils/100,
+         fg_sweets = fg_sweets/100,
+         fg_veggie = fg_veggie/100) %>% 
+ mutate(abx = if_else(empirical == 'TRUE', 1, 0),
+         TPN = if_else(TPN == 'TRUE', 1, 0),
+         EN = if_else(EN == 'TRUE', 1, 0)) %>% 
+  mutate(      fg_fruit_e= fg_fruit*abx,
+                fg_meat_e=fg_meat*abx,
+                fg_milk_e=fg_milk*abx,
+                fg_oils_e=fg_oils*abx,
+                fg_egg_e=fg_egg*abx,
+                fg_grain_e=fg_grain*abx,
+                fg_sweets_e=fg_sweets*abx,
+                fg_legume_e=fg_legume*abx,
+                fg_veggie_e = fg_veggie*abx)
+  
+
+meta %>% filter(sdrt < 0 ) %>% count(empirical)
+
+meta %>% summary
+```
+
+
+```{r}
+mod_original <- log(simpson_reciprocal) ~ 0 +
+                intensity+
+               fg_fruit_e+
+                fg_meat_e+
+                fg_milk_e+
+                fg_oils_e+
+                fg_egg_e+
+                fg_grain_e+
+                fg_sweets_e+
+                fg_legume_e+
+                fg_veggie_e+
+                abx+
+               fg_fruit+
+                fg_meat+
+                fg_milk+
+                fg_oils+
+                fg_egg+
+                fg_grain+
+                fg_sweets+
+                fg_legume+
+                fg_veggie+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+
+div_priors_original <- c(# for the food group variables
+          prior(normal(0, 1), class = 'b', coef = "fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "fg_veggie"),
+            # interaction terms
+                prior(normal(0, 1), class = 'b', coef = "fg_egg_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_fruit_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_grain_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_legume_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_meat_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_milk_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_oils_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_sweets_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_veggie_e"),
+                      # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "EN"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "abx"),
+            # for the intensity
+            prior(normal( 2, .1), class = 'b', coef = "intensityablative"),
+            prior(normal( 2, .1), class = 'b', coef = "intensityreduced"),
+            prior(normal( 2, .1), class = 'b', coef = "intensitynonablative")
+            )
+
+model_div_original <- brm( mod_original,  
+              data = meta , 
+              warmup = 1000, iter = 3000, 
+              prior = div_priors_original,
+              cores = ncores, 
+              chains = 2, 
+               control = list(adapt_delta = 0.99),
+              seed = 123, sample_prior = T, file = '../data/12_interaction_model_diversity_pre_transplant')
+
+
+post_res <- suppressWarnings(posterior_samples(model_div_original)) 
+post_res %>%  write_csv('../data/12_interaction_model_diversity_pre_transplant.csv')
+```
+
+```{r}
+# if using pre-conditioning samples only
+matchingtb <- read_rds('../data/196_matching_shortname.rds')
+
+ 
+```
+
+Assessing the fit of a brms model involves a combination of quantitative and qualitative approaches. Here's a comprehensive strategy to determine if your model is a good fit: 
+
+1. Convergence Diagnostics:
+
+Rhat Values: Check that all Rhat values are close to 1 (ideally less than 1.01). This indicates that the chains have converged and are sampling from the same posterior distribution.
+Effective Sample Size (ESS): Ensure that ESS values are sufficiently high (generally, a minimum of 100 per chain is recommended). Low ESS suggests that the chains are not exploring the posterior space effectively.
+Trace Plots: Visually inspect the trace plots (plot(fit)) to see if the chains are mixing well and show no divergent trends.
+2. Posterior Predictive Checks (PPCs):
+
+Visual Inspection: Use pp_check(fit) to compare the observed data to simulated data from the posterior predictive distribution. This helps you assess whether the model can generate data that resembles the observed data.
+Test Statistics: Compare the observed test statistics (e.g., mean, standard deviation, quantiles) to the distributions of the same statistics calculated from the posterior predictive samples. Significant discrepancies may indicate model misfit.
+3. Model Comparison:
+
+Leave-One-Out Cross-Validation (LOO): Use loo(fit) to estimate the expected log pointwise predictive density (elpd) of your model. Higher elpd values indicate better predictive accuracy.
+WAIC: Similar to LOO, WAIC is another information criterion for model comparison. Again, higher values suggest better predictive performance.
+Compare Models: Use loo_compare() to directly compare the elpd or WAIC values of different models. This helps you select the model with the best predictive ability.
+4. Residual Analysis:
+
+Posterior Predictive Residuals: Examine the distribution of residuals (resid(fit)) to assess if they are approximately normally distributed (for Gaussian models) or if they show any patterns that suggest model misspecification.
+Additional Considerations:
+
+Domain Expertise: Evaluate the model's results in the context of your research question and prior knowledge. Do the estimates make sense? Are the relationships between variables plausible?
+Sensitivity Analysis: Assess the robustness of your results by varying prior distributions or model specifications. If the results change substantially, it might indicate that your conclusions are not reliable.
+Important Note: There is no single definitive test for model fit. It's essential to consider multiple lines of evidence and use your judgment to determine if the model adequately represents the data and answers your research question.
+
+Let me know if you have any specific questions about interpreting these diagnostics or want to discuss your particular model.
+
+```{r}
+# assessing the fit of the model
+post_pred <- pp_check(model_div_original, type = "boxplot", nreps = 10, notch = FALSE, alpha = 0)
+post_pred
+
+# yes they are about same distribution  
+```
+# raw exposure    
+  
+```{r}
+# what about the raw data that shows how many sample size are in each group
+library(wesanderson) 
+palette <- wes_palette("Royal1", 2)
+meta <- read_csv('../data/153_combined_META.csv')
+```
+
+```{r}
+# making a df for annotating the number of samples and patients in the two groups
+
+num_annot <- meta %>% 
+  filter(sdrt < 0)  %>% 
+  split(.$empirical) %>% 
+  imap_dfr(function(df, name_) {
+    df %>% distinct(pid) %>% nrow
+  }) %>% gather('empirical','pt_num') %>% 
+  full_join(meta %>% filter(sdrt < 0)  %>% count(empirical) %>% mutate(empirical = as.character(empirical))) %>% 
+  rename(sample_num = n) %>% 
+  mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed')) %>% 
+  mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
+```
+
+
+```{r}
+pre_transplant_samples <- meta %>% 
+  filter(sdrt < 0) %>% 
+  mutate(log_div = log(simpson_reciprocal)) %>% 
+  mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed'),
+         antibiotics = factor(antibiotics, levels = c('not exposed','exposed'))) %>% 
+  ggscatter(x = 'fg_sweets', y = 'log_div', color = 'antibiotics',
+            ylab = 'log(diversity)',xlab = 'Sweets consumed (grams)',
+            alpha = 0.7, shape = 16, size = 1,
+            add = "reg.line",  # Add regressin line
+           add.params = list(color = 'antibiotics', fill = 'antibiotics', alpha = 0.1, size = 1.5), # Customize line
+           conf.int = TRUE, # Add confidence interval
+           cor.coef = TRUE, # Add correlation coefficient.
+           cor.coeff.args = list(method = "spearman",  label.sep = "\n", cor.coef.name = c("rho"),p.accuracy = 0.01, r.accuracy = 0.01,label.x.npc = "left", label.y.npc = "bottom", size = 3.5)) +
+  geom_text(data = num_annot, aes(label = lbl), 
+              x = Inf, y = Inf, hjust = 1.2, vjust = 1.1) +
+  #scale_x_sqrt() +
+  scale_y_sqrt() +
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics',values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ antibiotics, labeller = 'label_both', dir = 'h') +
+  theme(aspect.ratio = 1/1.15, 
+        legend.position = 'none',
+          #strip.background = element_blank(),
+        #strip.text.x = element_blank(), 
+     axis.text=element_text(size=9), axis.title=element_text(size=9)) 
+pre_transplant_samples
+
+
+```
+
+
+# caterpillar
+
+```{r}
+# for pre-transplant model:
+post_res_pre_transplant <- read_csv('../data/12_interaction_model_diversity_pre_transplant.csv') %>% 
+  select(starts_with('b_')) %>% 
+  gather('item', 'coeff') %>% 
+  inner_join(matchingtb)
+
+cross0 <- post_res_pre_transplant %>%
+   filter(grp == 'temporal') %>% 
+  group_by(item) %>% 
+  summarise(q2.5 = quantile(coeff, probs = 0.025),
+            q97.5 = quantile(coeff, probs = 0.975)) %>% 
+  mutate(Cross = if_else(q2.5 >= 0 | q97.5 <= 0, F, T))
+
+post_res_pre_transplant_temporal <- post_res_pre_transplant %>% 
+  filter(grp == 'temporal') %>% 
+  left_join(cross0) %>% 
+  ggplot() +
+ stat_pointinterval(aes(x = coeff, y = shortname,  col = Cross),.width = .95, fatten_point = 1.2) +
+  scale_color_brewer(palette = 'RdPu', name = 'CI level') +
+  geom_rect(data = matchingtb, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill_), alpha = .2) +
+  scale_fill_manual(values=c("interaction_fill" = "tan2", "blue_fill" = "#FAEFD1")) +
+  scale_color_manual(values = c("#EC0000", "black")) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  geom_vline(xintercept = 0, col = 'blue', size = zero_line_size) +
+  labs(x = 'ln(diversity) change', y = '') +
+  theme_classic() +
+  theme(legend.position = 'none') +
+  theme(axis.text = element_text( size = 10),
+        axis.text.y = element_markdown(),
+        plot.background = element_rect(fill='transparent', color=NA), 
+        axis.title=element_text(size=10), 
+        aspect.ratio=1.5)  
+
+post_res_pre_transplant_temporal
+
+```
+# final graph
+
+```{r}
+library(cowplot)
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S10",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+pre_transplant_subset <-  plot_grid(pre_transplant_samples,post_res_pre_transplant_temporal,
+                align = 'v',axis = 'lrtb',labels = c('A','B'),rel_heights = c(1,2),
+                 nrow = 2)
+
+combined <- plot_grid(
+  title, pre_transplant_subset,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 0.5)
+)+theme(plot.margin = unit(c(1,1,2,1), "cm"))
+
+ggsave('../data/S10_poor_health_pre_transplant_R12.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+```
+
+
+
+
