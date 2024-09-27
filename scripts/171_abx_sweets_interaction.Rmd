@@ -340,3 +340,148 @@ post_res_genera %>% distinct(shortname)
 post_res_genera %>% write_csv('../data/171_post_res_genera.csv')
 ```
  
+# marginal Enterococcus
+
+```{r}
+clr_res <- read_csv('../data/171_genus_CLR_res.csv')
+clr_Enterococcus <- clr_res %>% 
+  filter(genus %in% c('Enterococcus')) %>%
+  spread('genus','clr')
+
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) %>% 
+  inner_join(clr_Enterococcus)
+
+entero_model_original <- Enterococcus ~ 0 +
+             intensity+
+                empirical+
+               fg_fruit:empirical+
+                fg_meat:empirical+
+                fg_milk:empirical+
+                fg_oils:empirical+
+                fg_egg:empirical+
+                fg_grain:empirical+
+                fg_sweets:empirical+
+                fg_legume:empirical+
+                fg_veggie:empirical+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+get_prior(formula = entero_model_original, data = meta)
+
+  
+priors_enterococcus_original <- c(# for the food group variables
+           prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_veggie"),
+            # interaction terms
+           # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_veggie"),
+            # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "ENTRUE"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
+            
+            )
+```
+
+
+```{r}
+mod_entero =  brm(entero_model_original,  
+                data = meta, 
+              warmup = 1000, iter = 3000, 
+              prior = priors_enterococcus_original,
+              cores = ncores, 
+              chains = 2, 
+              control = list(adapt_delta = 0.99),
+              seed = 456, file = '../data/171_mod_entero_interaction_original')
+```
+
+
+```{r}
+dat_conditional_mod_entero <- conditional_effects(mod_entero, surface = T)
+
+condi_dat_mod_entero <- dat_conditional_mod_entero %>% 
+  keep(.p = str_detect(names(.), ':')) %>% 
+  bind_rows(.id = 'grp') %>% 
+  mutate(grp = str_replace(grp, '\\:empirical','')) %>% 
+  left_join(key %>% select(grp = fg1_name, shortname)) %>% 
+  mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
+                 'Oils',
+                 'Fruits',
+                 'Meats',
+                 'Legumes',
+                 'Eggs',
+                 'Milk',
+                 'Grains',
+                 'Sweets'))))
+
+library(wesanderson) 
+# the color for the strip background
+palette <- wes_palette("Royal1", 2)
+strip_color <- wes_palette("Royal1", 3)[3]
+```
+
+
+```{r}
+conditional9_entero <- condi_dat_mod_entero %>%   
+  ggplot() +
+  geom_smooth(aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
+              stat = "identity",
+              alpha = .3, linewidth = 1.5)+ 
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ shortname, nrow = 3, scales = 'free_x') +
+  labs(y = 'Predicted CLR(Enterococcus)', x = 'Food group consumed (grams)') +
+  theme_classic() +
+  theme(legend.position = 'top', legend.title = element_text(size = 8, face="bold"),
+        legend.text = element_text( size=8, face="bold"),
+        legend.background=element_rect(fill = alpha("white", 0)),
+       legend.key=element_rect(fill = alpha("white", 0)),
+        aspect.ratio = 1, 
+        strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+     axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
+  guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
+#conditional9_entero   
+
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S13",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+combined <- plot_grid(
+  title, conditional9_entero,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(2,2,5,2), "cm"))
+
+ggsave('../data/S13_conditional9_entero_171.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+
+```
