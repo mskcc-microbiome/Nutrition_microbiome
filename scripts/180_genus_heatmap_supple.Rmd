@@ -1,0 +1,245 @@
+---
+title: "make the supp for the genus heatmap"
+author: "Anqi Dai"
+date: '`r Sys.Date()`'
+output: html_document
+--- 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)  
+```
+
+```{r}
+library(tidyverse) 
+library(ggpubr)
+library(dendextend)
+library(ggtext)
+library(ggdendro)
+library(cowplot)
+axis_text_size <- 9
+axis_title_size <- 9
+```
+
+# the genus heatmap with hclust
+
+I need a different matrix with only the perc positive to make the dendrogram
+
+```{r}
+# I want to only include the genus that are more prevalent and abundant, and most likely exist in human gut
+selected <- read_csv('../data/087_more_abundant_0.002_genus_33.csv') 
+
+```
+
+
+```{r}
+post_df <- read_csv('../data/171_genus_foodgroup_model_post_extra_few_interaction.csv',  col_select = c(1:25)) %>% 
+  select(genus, starts_with('b_')) %>% 
+  select(-starts_with('b_intensity')) %>% 
+  gather('item', 'coeff', names(.)[2]:names(.)[ncol(.)]) %>% 
+  filter(genus %in% selected$genus)
+post_df
+```
+## dengrogram 
+ 
+```{r}
+post_matrix <- post_df %>% 
+  filter(coeff > 0) %>% 
+  count(genus, item) %>% 
+  mutate(posperc = n/4000) %>% 
+  select(-n) %>% 
+  spread('item','posperc') %>% 
+  column_to_rownames('genus')
+
+hclust_obj <- hclust(dist(post_matrix), method = "complete")
+dendrogram <- as.dendrogram(hclust_obj)
+dendro <- ggdendrogram(dendrogram, rotate = TRUE) +
+  theme(axis.text.x=element_blank(), plot.margin = unit(c(-3,0,-7,-1), "cm"))
+#ggsave('../data/180_dendro.pdf', width = 10, height = 10) 
+genus_odr <- dendrogram %>% labels
+dendro
+```
+
+# data for heatmap
+
+```{r}
+# I wanna redefine sig level to be 90%, 95%, 99%  
+# I wanna redefine a color block threshold to be 80%
+matchingtb <- read_rds('../data/196_matching_shortname.rds')
+
+post_res_genera <- post_df %>% 
+  group_by(genus, item) %>% 
+  summarise(q50 = round(median(coeff), 2),
+            q5 = round(quantile(coeff, probs = 0.05), 2),
+            q95 = round(quantile(coeff, probs = 0.95), 2),
+            q2.5 = round(quantile(coeff, probs = 0.025), 2),
+            q97.5 = round(quantile(coeff, probs = 0.975), 2),
+            q0.5 = round(quantile(coeff, probs = 0.005), 2),
+            q99.5 = round(quantile(coeff, probs = 0.995), 2)
+            ) %>% 
+  ungroup() %>% 
+  mutate(mark = if_else(q99.5 <= 0 | q0.5 >= 0, '***', if_else(q97.5 <= 0 | q2.5 >= 0, '**', if_else(q95 <= 0 | q5 >= 0, '*', '')))) %>% 
+  filter(str_detect(item, 'fg'))%>% 
+  inner_join(matchingtb %>% select(item, shortname))
+summary(post_res_genera$q50)
+
+
+  
+genera <- post_res_genera %>% 
+  filter(!item %in% c('nonablative','reduced','ablative')) %>% 
+  mutate(genus = factor(genus, levels = genus_odr))
+
+library(cowplot)
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S14",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(plot.margin = margin(0, 0, 0, 3))
+
+# I wanna look at out of the 248 things that have reached at least 90% what is the distribution of the q50
+a90 <- genera %>% 
+  filter(str_detect(mark, '\\*'))
+
+
+# Define a diverging color palette (blue-white-red)
+diverging_palette <- scale_fill_gradient2(
+  low = "blue", 
+  mid = "white", 
+  high = "red", 
+  midpoint = 0,  # Center the color scale at zero
+  limits = c(-max(abs(a90$q50)), max(abs(a90$q50)))  # Set limits based on absolute max
+)
+```
+
+# supp figure heatmap
+
+```{r} 
+genus_fg_main <- genera %>%  
+  mutate(q50 = if_else(!str_detect(mark , '\\*'), 0, q50)) %>% 
+  ggplot( aes(x = shortname, y = genus)) +
+  geom_tile(aes(fill = q50,  x = shortname, y =  genus), alpha = 1, color='gray50', width=0.95, height=0.95) +
+  geom_text(aes(label = mark, x = shortname,y =  genus),
+            nudge_y = -0.1, nudge_x = 0,size = 3) +
+  scale_x_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  diverging_palette +
+  theme(axis.title.x = element_blank(),axis.title.y = element_blank(),
+        axis.text.y = element_markdown(face = "italic"),
+        axis.text.x = element_markdown(angle = 45, hjust = 1),
+        legend.position = 'top', legend.text = element_text(size = 8), 
+        panel.background=element_rect(colour="black"),
+        legend.key = element_rect( colour = "gray50"))
+genus_fg_main    
+```
+
+
+```{r} 
+dendropart <- plot_grid(
+  NA, dendro,NA, ncol = 1,rel_heights = c(-.48,.495, -.48),
+ align = 'hv', axis = 'lrtb'
+) +theme(plot.margin = unit(c(0,-3,0,0), "cm")) 
+
+final_plot <- plot_grid(
+  genus_fg_main, dendropart,
+ nrow = 1, ncol = 2,rel_widths = c(2.7,1.5),
+ align = 'hv', axis = 'lrtb'
+) 
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+) +theme(plot.margin = unit(c(1,.5,1,.5), "cm"))
+
+ggsave('../data/S14_fg_genus_heatmap_180.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', 
+      plot = combined, 
+      dpi = 300)
+
+```
+
+## macro & genus
+
+```{r}
+post_df_macro <- read_csv('../data/090_target_genus_macro_model_post_interaction.csv', num_threads = 10, col_select = c(1:25)) %>% 
+  select(genus, starts_with('b_')) %>% 
+  select(-starts_with('b_intensity')) %>% 
+  gather('item', 'coeff', names(.)[2]:names(.)[ncol(.)]) %>% 
+  filter(genus %in% selected$genus)
+post_df_macro
+
+macro_res_genera <- post_df_macro %>% 
+  group_by(genus, item) %>% 
+  summarise(q50 = median(coeff),
+            q5 = quantile(coeff, probs = 0.05),
+            q95 = quantile(coeff, probs = 0.95),
+            q2.5 = quantile(coeff, probs = 0.025),
+            q97.5 = quantile(coeff, probs = 0.975),
+            #q1.25 = quantile(coeff, probs = 0.0125),
+            #q98.75 = quantile(coeff, probs = 0.9875),
+            q0.5 = quantile(coeff, probs = 0.005),
+            q99.5 = quantile(coeff, probs = 0.995)
+            ) %>% 
+  ungroup() %>% 
+  mutate(mark = if_else(q99.5 < 0 | q0.5 > 0, '***', if_else(q97.5 < 0 | q2.5 > 0, '**', if_else(q95 < 0 | q5 > 0, '*', '')))) %>% 
+  filter(str_detect(item, 'ave'))
+
+# color the cells based on the q50
+
+# Define a diverging color palette (blue-white-red)
+diverging_palette <- scale_fill_gradient2(
+  low = "blue", 
+  mid = "white", 
+  high = "red", 
+  midpoint = 0,  # Center the color scale at zero
+  limits = c(-max(abs(macro_res_genera$q50)), max(abs(macro_res_genera$q50)))  # Set limits based on absolute max
+)
+```
+
+```{r}
+genus_macro_main <- macro_res_genera %>% 
+  mutate(q50 = if_else(!str_detect(mark , '\\*'), 0, q50)) %>% 
+  ggplot( aes(x = item, y = genus)) +
+  geom_tile(aes(fill = q50,  x = item, y =  genus), alpha = 1, color='gray50', width=0.95, height=0.95) +
+  geom_text(aes(label = mark, x = item,y =  genus),
+            nudge_y = -0.1, nudge_x = 0,size = 3) +
+  #theme_pubr() +
+  diverging_palette +
+  theme(axis.title.x = element_blank(),axis.title.y = element_blank(),
+        axis.text.x = element_text(angle=45, hjust=1, size=10),
+        axis.text.y=element_text(size=10),
+        legend.position = 'top',
+        panel.background=element_rect(colour="black"),
+        legend.key = element_rect( colour = "gray50")) 
+#genus_macro_main
+```
+
+```{r}
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S_X",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(plot.margin = margin(0, 0, 0, 5))
+
+combined <- plot_grid(
+  title,NA, genus_macro_main,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05,0.057, .5)
+) +theme(plot.margin = unit(c(1,.5,1,.5), "cm"))
+
+ggsave('../data/S_X_genus_macro_heatmap_180.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', 
+      plot = combined, 
+      dpi = 300)
+```
+
+```{r}
+paste0(target_genera, collapse = ', ')
+```
+
