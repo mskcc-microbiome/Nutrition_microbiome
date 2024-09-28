@@ -32,7 +32,7 @@ selected <- read_csv('../data/087_more_abundant_0.002_genus_33.csv')
 
 
 ```{r}
-post_df <- read_csv('../data/171_genus_foodgroup_model_post_extra_few_interaction.csv',  col_select = c(1:25)) %>% 
+post_df <- read_csv('../data/171_target_genus_fg_model_post_interaction.csv',  col_select = c(1:25)) %>% 
   select(genus, starts_with('b_')) %>% 
   select(-starts_with('b_intensity')) %>% 
   gather('item', 'coeff', names(.)[2]:names(.)[ncol(.)]) %>% 

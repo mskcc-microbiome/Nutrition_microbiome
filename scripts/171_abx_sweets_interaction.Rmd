@@ -121,6 +121,11 @@ clr_res <- clr(cts_all + 0.5) %>%
   gather('sampleid','clr', names(.)[2]:names(.)[ncol(.)])
 
 clr_res %>% write_csv('../data/171_genus_CLR_res.csv')
+```
+
+
+```{r}
+clr_res <- read_csv('../data/171_genus_CLR_res.csv')
 
 clr_wide <- clr_res %>% 
   spread('genus','clr')
@@ -227,6 +232,7 @@ target_genera <-  cts %>%
   filter(perc > 10) %>% 
   pull(genus)
 ```
+
 # fg genera
 
 ```{r}
@@ -267,14 +273,14 @@ ret_genus_interaction <- target_genera %>%
               cores = ncores, 
               chains = 2, 
               control = list(adapt_delta = 0.99),
-              seed = 456, file = '../data/171_target_genus_foodgroup_model_post_interaction') 
+              seed = 456) 
   })
 
 post_df <- ret_genus_interaction %>% 
   imap(~ (suppressWarnings(posterior_samples(.x)) ))  %>% 
   bind_rows(.id = 'genus')  
 post_df %>% 
-  write_csv('../data/171_genus_foodgroup_model_post_extra_few_interaction.csv')
+  write_csv('../data/171_target_genus_fg_model_post_interaction.csv')
 
 
 ```
