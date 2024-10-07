@@ -16,6 +16,7 @@ library(janitor)
 library(scales)
 library(ggrepel)
 library(cowplot)
+library(kableExtra)
 ```
 B+S  (Biapenem + Sucrose) PS (PBS + Sucrose) BP (Biapenem +Plain Hydrogel) and PP (PBS + Plain Hydrogel)
 
@@ -254,5 +255,88 @@ combined <- plot_grid(
 
 ggsave('../data/07_diet_mice_p2.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
+```
+
+# the diet nutritional info
+
+```{r}
+# the no fiber diet and the control diet info
+# just enter from the pdf by hand 
+control_d <- tibble(
+  `Energy (Kcal/g)` = 4.11,
+  `Fiber percent of ration` = '4.4%',
+  `Calories provided by protein` = '24.495%',
+  `Calories provided by fat` = '13.122%',
+  `Calories provided by carbohydrates` = '62.382%'
+) %>% 
+  gather('Control diet','value')
+
+
+nofiber_d <- tibble(
+  `Energy (Kcal/g)` = 4.10,
+  `Fiber percent of ration` = 0,
+  `Calories provided by protein` = '17.4%',
+  `Calories provided by fat` = '15.4%',
+  `Calories provided by carbohydrates` = '67.2%'
+) %>% 
+  gather('No fiber diet','value')
+```
+
+```{r}
+# save them to tables and then combine
+control_d %>% 
+  kable() %>% 
+  kable_styling(full_width = F) %>%  # Apply default styling
+  row_spec(0, bold = TRUE) %>% 
+  save_kable(
+  '../data/07_control_d_tb.jpg',
+  bs_theme = "simplex",
+  self_contained = TRUE,
+  extra_dependencies = NULL,
+  latex_header_includes = NULL,
+  keep_tex = FALSE,
+  density = 300
+)
+
+nofiber_d %>% 
+  kable() %>% 
+  kable_styling(full_width = F) %>%  # Apply default styling
+  row_spec(0, bold = TRUE) %>% 
+  save_kable(
+  '../data/07_nofiber_d_tb.jpg',
+  bs_theme = "simplex",
+  self_contained = TRUE,
+  extra_dependencies = NULL,
+  latex_header_includes = NULL,
+  keep_tex = FALSE,
+  density = 300
+)
+
+nofiber <- ggdraw() + draw_image("../data/07_nofiber_d_tb.jpg", scale = 0.8)
+controldiet <- ggdraw() + draw_image("../data/07_control_d_tb.jpg", scale = 0.8)
+ 
+
+title <- ggdraw() + 
+  draw_label(
+    "Table SX",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+table_diets <- plot_grid(nofiber, controldiet, labels = c('A','B'), nrow = 1)
+
+combined <- plot_grid(
+  title, table_diets,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,10,1), "cm"))
+
+ggsave('../data/Table_SX_two_diets_composition_R07.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300) 
 ```
 
