@@ -16,10 +16,15 @@ library(gtsummary)
 
 
 ```{r}
-PTB <- read_csv('../data/003_combined_PTB_pid.csv')
+PTB <- read_csv('../data/003_combined_PTB_pid.csv') %>% 
+  separate(modal_diet, into = c('cluster_id','cluster_name'), sep = '\\:') %>% 
+  mutate(cluster_id = if_else(cluster_id == 'cluster2', 'cluster 2', cluster_id))
+```
 
+
+```{r}
 final <- PTB %>% 
-  select(age, sex, Disease = disease.simple, source,  intensity, gvhd_ppx, modal_diet, day_exposed) %>% 
+  select(age, sex, Disease = disease.simple, source,  intensity, gvhd_ppx, cluster_id, day_exposed) %>% 
   mutate(Disease = case_when(
     Disease == 'NHL' ~ "Non-Hodgkin's lymphoma",
     # Myelodysplastic/myeloproliferative neoplasms
@@ -48,8 +53,8 @@ final <- PTB %>%
     intensity == 'reduced' ~ "Reduced intensity"
   )) %>% 
   mutate(gvhd_ppx = case_when(
-    gvhd_ppx == 'CNI-based' ~ "Calcineurin inhibitors (CNIs)",
-    gvhd_ppx == 'PTCy-based' ~ "Post-transplant cyclophosphamide (PTCy)",
+    gvhd_ppx == 'CNI-based' ~ "CNI-based",
+    gvhd_ppx == 'PTCy-based' ~ "PTCy-based",
     gvhd_ppx == 'TCD' ~ "T-cell depleted PBSC"
   ))  %>% 
   mutate(intensity = fct_reorder(intensity, intensity, .fun=length, .desc = T),
@@ -66,7 +71,7 @@ final %>%
   tbl_summary(
     #type = list(all_double() ~ "continuous"), 
     #statistic = list(all_continuous() ~ "{mean} ({sd})"),
-    by=modal_diet
+    by=cluster_id
   ) %>%
   bold_labels() %>% 
   as_gt() %>%
@@ -75,7 +80,7 @@ final %>%
 ```
 
 ```{r}
-table_ <- ggdraw() + draw_image("../data/11_patient_summary_clusters.png", scale = 0.8)
+table_ <- ggdraw() + draw_image("../data/11_patient_summary_clusters.png", scale = 0.7)
 
  title <- ggdraw() + 
   draw_label(
@@ -94,7 +99,7 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-)+theme(plot.margin = unit(c(1,.5,1,0.5), "cm"))
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/Table_SX_patient_summary__cluster_11.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  

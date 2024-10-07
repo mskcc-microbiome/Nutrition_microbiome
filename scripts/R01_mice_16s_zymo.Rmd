@@ -28,29 +28,31 @@ meta <- healthyall %>%
 ```
 # alpha diversity 
 
+## d3 VS d0
+
 ```{r}
-alpha_healthy_days <-meta %>% 
-  mutate(day = factor(day)) %>% 
+# what I really care is the change from day 0 to day 3 
+alpha_change <-  meta %>% 
+  mutate(day = factor(day), experiment_no = factor(experiment_no)) %>% 
   arrange(abx_treatment,desc(diet_treatment),  day) %>% 
   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
   mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>%    
   ggboxplot(x = 'xvar', y = 'simpson_reciprocal',add = 'jitter', 
-             xlab = '', ylab = 'alpha diversity(simpson reciprocal)',, add.params = list(alpha = 0.5, shape = 16),
-            width = 0.6,color  = 'grp')+
+             xlab = '', ylab = 'alpha diversity(simpson reciprocal)', add.params = list(shape ='experiment_no',alpha = 0.8), width = 0.6,color  = 'grp')+
    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
   stat_compare_means(comparisons = list(
-    c('biapenem__vehicle__3','biapenem__sucrose__3'), 
-    #c('biapenem__vehicle__6','biapenem__sucrose__6'),
-    c('PBS__vehicle__3','PBS__sucrose__3'),
-    c('PBS__vehicle__3','biapenem__vehicle__3')
-    ),
+    c('biapenem__vehicle__0','biapenem__vehicle__3'), 
+    c('biapenem__sucrose__0','biapenem__sucrose__3'),
+    c('PBS__vehicle__0','PBS__vehicle__3'),
+    c('PBS__sucrose__0','PBS__sucrose__3')
+    ),paired = T,
     label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
   scale_x_discrete(labels=rep(c(0,3,6),4)) + 
   scale_y_sqrt() +
   theme_light() +
   theme(axis.text =  element_text(size = 10, angle = 0, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
-
+alpha_change      
 ```
 
 
@@ -78,33 +80,7 @@ median_pbs_d3 - median_abx_d3
 
 sucrose-only doesn’t reduce diversity on day 3, compared with vehicle, but biapenem-only does.  However, sucrose doesn’t further reduce diversity beyond the biapenem effect on day 3. 
 
-## d3 VS d0
 
-```{r}
-# what I really care is the change from day 0 to day 3
-alpha_change <-  meta %>% 
-  mutate(day = factor(day)) %>% 
-  arrange(abx_treatment,desc(diet_treatment),  day) %>% 
-  mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
-  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>%    
-  ggboxplot(x = 'xvar', y = 'simpson_reciprocal',add = 'jitter', 
-             xlab = '', ylab = 'alpha diversity(simpson reciprocal)',, add.params = list(alpha = 0.5, shape = 16),
-            width = 0.6,color  = 'grp')+
-   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(
-    c('biapenem__vehicle__0','biapenem__vehicle__3'), 
-    c('biapenem__sucrose__0','biapenem__sucrose__3'),
-    c('PBS__vehicle__0','PBS__vehicle__3'),
-    c('PBS__sucrose__0','PBS__sucrose__3')
-    ),paired = T,
-    label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
-  scale_x_discrete(labels=rep(c(0,3,6),4)) + 
-  scale_y_sqrt() +
-  theme_light() +
-  theme(axis.text =  element_text(size = 10, angle = 0, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
-alpha_change 
-```
 
 
 ```{r}
@@ -125,19 +101,19 @@ sucrose_only doesn't have much effects. abx_only has a much bigger reduction in 
 ## fold change d3/d0 
 
 ```{r}
-alpha_wide %>% 
-  mutate(trt = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-  mutate(trt = factor(trt, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>% 
-  ggboxplot(x = 'trt', y = 'fc', add = 'jitter', color = 'trt', facet.by = 'grp') +
-   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(
-    c('PBS__vehicle','biapenem__vehicle'), 
-    c('biapenem__vehicle','biapenem__sucrose'),
-    c('PBS__vehicle','PBS__sucrose')
-    ),
-    label= "p.signif", method= 't.test',tip.length = 0.04,exact=T,correct=T) +
-  geom_hline(yintercept = 1, color = 'red') +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# alpha_wide %>% 
+#   mutate(trt = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+#   mutate(trt = factor(trt, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>% 
+#   ggboxplot(x = 'trt', y = 'fc', add = 'jitter', color = 'trt', facet.by = 'grp') +
+#    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+#   stat_compare_means(comparisons = list(
+#     c('PBS__vehicle','biapenem__vehicle'), 
+#     c('biapenem__vehicle','biapenem__sucrose'),
+#     c('PBS__vehicle','PBS__sucrose')
+#     ),
+#     label= "p.signif", method= 't.test',tip.length = 0.04,exact=T,correct=T) +
+#   geom_hline(yintercept = 1, color = 'red') +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 
@@ -146,27 +122,27 @@ alpha_wide %>%
 
 ```{r}
 
-delta_plots <- alpha_wide %>% 
-  split(.$grp) %>% 
-  imap(function(df, name_){
-    df %>% 
-      ggboxplot(y = 'deltas', title = str_glue('{name_}'), add = 'jitter', xlab = '') +
-      facet_grid(abx_treatment ~ diet_treatment) +theme_cleveland() + theme(axis.text.x = element_blank())
-  })
-
-library(cowplot)
-deltas <- plot_grid(plotlist = delta_plots)
-ggsave('../data/01_delta_plots.pdf')
+# delta_plots <- alpha_wide %>% 
+#   split(.$grp) %>% 
+#   imap(function(df, name_){
+#     df %>% 
+#       ggboxplot(y = 'deltas', title = str_glue('{name_}'), add = 'jitter', xlab = '') +
+#       facet_grid(abx_treatment ~ diet_treatment) +theme_cleveland() + theme(axis.text.x = element_blank())
+#   })
+# 
+# library(cowplot)
+# deltas <- plot_grid(plotlist = delta_plots)
+# ggsave('../data/01_delta_plots.pdf')
 ```
 
 
 ```{r}
-# I want to test if I can use t test for this one
-abx_vehicle <- alpha_wide %>% filter(abx_treatment == 'biapenem' & diet_treatment == 'vehicle' & grp  == 'delta_0_3')
-shapiro.test(x = abx_vehicle$deltas)
-# a  p value < 0.05 indicates NOT normally distributed! so I can only use wilcox ranksum test !
- 
-
+# # I want to test if I can use t test for this one
+# abx_vehicle <- alpha_wide %>% filter(abx_treatment == 'biapenem' & diet_treatment == 'vehicle' & grp  == 'delta_0_3')
+# shapiro.test(x = abx_vehicle$deltas)
+# # a  p value < 0.05 indicates NOT normally distributed! so I can only use wilcox ranksum test !
+#  
+# 
 
 
 ```
@@ -175,14 +151,14 @@ shapiro.test(x = abx_vehicle$deltas)
 
 ```{r}
 # to just split them to smaller dfs and compute the one sided wilcox with zero alone
-onesided <- alpha_wide %>% 
-  split(list(.$abx_treatment, .$diet_treatment,.$grp, .$experiment_no)) %>% 
-  map_dfr(function(df){
-    test = wilcox.test(df$deltas, mu = 0, alternative = "less")
-    return(pvalue = test$p.value)
-  }) %>% gather('comparison','pvalue') %>% 
-  mutate(padj = p.adjust(pvalue)) %>% 
-  mutate(less = if_else(padj < 0.05, T, F))
+# onesided <- alpha_wide %>% 
+#   split(list(.$abx_treatment, .$diet_treatment,.$grp, .$experiment_no)) %>% 
+#   map_dfr(function(df){
+#     test = wilcox.test(df$deltas, mu = 0, alternative = "less")
+#     return(pvalue = test$p.value)
+#   }) %>% gather('comparison','pvalue') %>% 
+#   mutate(padj = p.adjust(pvalue)) %>% 
+#   mutate(less = if_else(padj < 0.05, T, F))
 
 
 ```
@@ -221,12 +197,17 @@ beta_all <- bc %>%
 ```{r}
 # color by abx        
 beta_4 <- beta_all %>% 
+  mutate(day = factor(day), experiment_no = factor(experiment_no)) %>% 
+  arrange(abx_treatment,desc(diet_treatment),  day) %>% 
+  mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
+  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>%
   mutate(experiment_no = str_glue('Expe. {experiment_no}'),
          day  = str_glue('D{day}')) %>% 
-  ggscatter(x = 'V1', y = 'V2', color = 'abx_treatment', shape = 'diet_treatment', alpha = 0.9) +
+  ggscatter(x = 'V1', y = 'V2', color = 'grp', shape = 'experiment_no', alpha = 0.8, ) +
+  scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2'))  +
   facet_grid( .~  day) +
   theme_light() +
-  scale_color_manual(values = c('#C93312', '#899DA4'), name = 'abx_treatment') +
   xlab(paste0("PC 1 [",percent_var[1],"%]")) +
   ylab(paste0("PC 2 [",percent_var[2],"%]")) +
   theme_light() +
@@ -262,23 +243,23 @@ beta_4_plot <- beta_4 +theme(legend.position = 'none')
   
 ```{r}
 # the absolute copy numbers of enterococcus and plot them in boxplots
-healthy_abso <- read_csv('../data/absolute.abundance.csv') %>% 
-  rename(sampleid = customer_label) %>% 
-  select(sampleid, gene_copies_per_ul) %>% 
-  inner_join(meta_weight %>% select(sampleid, stool_weight_mg)) %>% 
-  mutate(gene_copies_per_gram = gene_copies_per_ul * 500 /(stool_weight_mg/1000)) %>%
-  inner_join(healthyall %>% 
-    filter(str_detect(Taxon, 'g__Enterococc')) %>% 
-    select(sampleid, day,relab,  abx_treatment:diet_treatment) %>% 
-      group_by(sampleid, day,abx_treatment, diet_treatment) %>% 
-    summarise(relab = sum(relab)) ) %>% 
-  mutate(abs_copy = gene_copies_per_gram * relab,
-         log10_abs_copy = log10(abs_copy + 1)) %>% 
-  mutate(day = factor(day)) %>% 
-  arrange(abx_treatment,desc(diet_treatment),  day) %>% 
-  mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
-  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) 
+# healthy_abso <- read_csv('../data/absolute.abundance.csv') %>% 
+#   rename(sampleid = customer_label) %>% 
+#   select(sampleid, gene_copies_per_ul) %>% 
+#   inner_join(meta_weight %>% select(sampleid, stool_weight_mg)) %>% 
+#   mutate(gene_copies_per_gram = gene_copies_per_ul * 500 /(stool_weight_mg/1000)) %>%
+#   inner_join(healthyall %>% 
+#     filter(str_detect(Taxon, 'g__Enterococc')) %>% 
+#     select(sampleid, day,relab,  abx_treatment:diet_treatment) %>% 
+#       group_by(sampleid, day,abx_treatment, diet_treatment) %>% 
+#     summarise(relab = sum(relab)) ) %>% 
+#   mutate(abs_copy = gene_copies_per_gram * relab,
+#          log10_abs_copy = log10(abs_copy + 1)) %>% 
+#   mutate(day = factor(day)) %>% 
+#   arrange(abx_treatment,desc(diet_treatment),  day) %>% 
+#   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
+#   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+#   mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) 
 ```
 
 
@@ -306,25 +287,25 @@ healthy_abso <- read_csv('../data/absolute.abundance.csv') %>%
 ```
 ```{r}
 # maybe just plot the relative abundance for enterococcus
-Entero_healthy <- healthyall %>% 
-    filter(str_detect(Taxon, 'g__Enterococc')) %>% 
-    select(sampleid, day,relab,  abx_treatment:diet_treatment) %>% 
-      group_by(sampleid, day,abx_treatment, diet_treatment) %>% 
-    summarise(relab = sum(relab)) %>% 
-  mutate(day = factor(day)) %>% 
-  arrange(abx_treatment,desc(diet_treatment),  day) %>% 
-  mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
-  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>% 
-  
-  ggboxplot(x = 'xvar', y = 'relab',add = 'jitter', 
-             xlab = '', ylab = 'Enterococcus relative abundance',, add.params = list(alpha = 0.5, shape = 16),
-            width = 0.6,color  = 'grp')+
-   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('biapenem__vehicle__3','biapenem__sucrose__3'), c('biapenem__vehicle__6','biapenem__sucrose__6')),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=F) +
-  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
-  theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
-Entero_healthy
+# Entero_healthy <- healthyall %>% 
+#     filter(str_detect(Taxon, 'g__Enterococc')) %>% 
+#     select(sampleid, day,relab,  abx_treatment:diet_treatment) %>% 
+#       group_by(sampleid, day,abx_treatment, diet_treatment) %>% 
+#     summarise(relab = sum(relab)) %>% 
+#   mutate(day = factor(day)) %>% 
+#   arrange(abx_treatment,desc(diet_treatment),  day) %>% 
+#   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
+#   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
+#   mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>% 
+#   
+#   ggboxplot(x = 'xvar', y = 'relab',add = 'jitter', 
+#              xlab = '', ylab = 'Enterococcus relative abundance',, add.params = list(alpha = 0.5, shape = 16),
+#             width = 0.6,color  = 'grp')+
+#    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+#   stat_compare_means(comparisons = list(c('biapenem__vehicle__3','biapenem__sucrose__3'), c('biapenem__vehicle__6','biapenem__sucrose__6')),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=F) +
+#   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
+#   theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
+# Entero_healthy
 ```
 
 
@@ -541,7 +522,6 @@ abx_asvs_relab_plots <- abx_asvs_relab %>%
        geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
       geom_line(aes(group = u_mouse_id),alpha=0.3) +
    #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.value", method= 'wilcox.test',paired = T, vjust = 0.4,tip.length = 0.03,exact=F) +
   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
       facet_grid(. ~ abx_treatment) +
   theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
@@ -863,7 +843,7 @@ title <- ggdraw() +
   )
 
 # the top row of the alpha and beta diversity
-top_2 <- plot_grid(alpha_healthy_days, beta_4_plot, nrow = 1, align = 'vh', axis = 'lrtb', rel_widths = c(1,1.5), labels = c('A','B'))
+top_2 <- plot_grid(alpha_change, beta_4_plot, nrow = 1, align = 'vh', axis = 'lrtb', rel_widths = c(1,1.5), labels = c('A','B'))
 
 abx_top <- abx_vol_d3 + abx_vol_d6 + 
   plot_annotation(title = "Differential abundance in DPBS + vehicle VS abx + vehicle", theme = theme(plot.title = element_text(hjust = 0.5)))
