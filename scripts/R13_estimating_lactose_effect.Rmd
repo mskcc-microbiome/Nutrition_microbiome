@@ -15,7 +15,9 @@ library(ggpubr)
 library(tidybayes)  
 library(brms)
 library(rstan)
+library(ggtext)
 library(janitor)
+library(cowplot)
 options(mc.cores = parallel::detectCores())
 ncores = parallel::detectCores()
 rstan_options(auto_write = TRUE)
@@ -120,87 +122,8 @@ full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.
                ave_sugar_moderate_e=sugar_moderate*abx,
                ave_sugar_other_e=sugar_other*abx
           )
-             
-
 ```
 
-# diversity model
-
-```{r}
-# alpha_macro_sugar_group <- log(simpson_reciprocal) ~ 0 +
-#                 ave_fiber_e +
-#                 ave_fat_e +
-#                 ave_sugar_high_e +
-#                 ave_sugar_low_e +
-#                 ave_sugar_moderate_e +
-#                 ave_sugar_other_e +
-#                 ave_fiber +
-#                 ave_fat +
-#                 sugar_high + 
-#                 sugar_low +
-#                 sugar_moderate +
-#                 sugar_other +
-#                abx+
-#                intensity +
-#                 TPN+
-#                 EN+
-#                (1 | pid) +
-#                 (1 | timebin)
-# get_prior(formula = alpha_macro_sugar_group, data = full)
-# 
-# priors_alpha_macro_sugar_group <- c(
-#             # for the macro nutrients
-#             prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
-#             prior(normal(0, 1), class = 'b', coef = "ave_fat"),
-#             prior(normal(0, 1), class = 'b', coef = "sugar_high"),
-#             prior(normal(0, 1), class = 'b', coef = "sugar_low"),
-#             prior(normal(0, 1), class = 'b', coef = "sugar_moderate"),
-#             prior(normal(0, 1), class = 'b', coef = "sugar_other"),
-#             # for the interaction terms
-#             prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
-#             prior(normal(0, 1), class = 'b', coef = "ave_fat_e"),
-#             prior(normal(0, 1), class = 'b', coef = "ave_sugar_high_e"),
-#             prior(normal(0, 1), class = 'b', coef = "ave_sugar_low_e"),
-#             prior(normal(0, 1), class = 'b', coef = "ave_sugar_moderate_e"),
-#             prior(normal(0, 1), class = 'b', coef = "ave_sugar_other_e"),
-#             # for the TPN 
-#             prior(normal(0, 0.1), class = 'b', coef = "TPN"),
-#             # for the EN
-#             prior(normal(0, 0.1), class = 'b', coef = "EN"),
-#             # for the empirical 
-#             prior(normal(0, 0.5), class = 'b', coef = "abx"),
-#             # for the intensity 
-#             prior(normal(2, .1), class = 'b', coef = "intensityablative"),
-#             prior(normal(2, .1), class = 'b', coef = "intensityreduced"),
-#             prior(normal(2, .1), class = 'b', coef = "intensitynonablative"))
-# 
-# # vet the prior 
-# model_alpha_macro_sugar_group  <- brm( alpha_macro_sugar_group,  
-#               data = full, 
-#               warmup = 1000, iter = 3000, 
-#               prior = priors_alpha_macro_sugar_group,
-#                control = list(adapt_delta = 0.99),
-#               cores = ncores,
-#               chains = 2, 
-#               seed = 123, sample_prior = T)
-# 
-# 
-# post_res <- suppressWarnings(posterior_samples(model_alpha_macro_sugar_group))
-# post_res %>%  write_csv('../data/13_model_alpha_macro_sugar_group_post_interaction.csv')
-# ```
-# ```{r}
-# # looking at the results
-# posterior <- spread_draws(model_alpha_macro_sugar_group, b_ave_fiber_e:b_ave_sugar_moderate_e)
-# 
-# post_coeff <- post_res %>% 
-#   select(starts_with('b_')) %>% 
-#   gather('item', 'coeff')
-# 
-# post_coeff %>% 
-#   ggplot(aes(x = coeff, y = item)) +
-#   stat_pointinterval(.width = c(.66, .95)) +
-#   geom_vline(xintercept = 0, col = 'red', linetype = 'dashed') 
-```
 
 # Enterococcus outcome model
 
@@ -212,9 +135,7 @@ enterococcus_cls <- read_csv('../data/171_genus_CLR_res.csv') %>%
 full_entero <- full %>% 
   inner_join(enterococcus_cls %>% select(-genus)) %>% 
   select(-Enterococcus)
-colnames(full_entero)
-```
-```{r}
+
 priors_Enterococcus_macro_sugar_group <- c(
             # for the macro nutrients
             prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
@@ -264,50 +185,148 @@ mod_entero <-  brm(Enterococcus_macro_sugar_group,
               cores = ncores, 
               chains = 2, 
               control = list(adapt_delta = 0.99),
-              seed = 456)
+              seed = 456, file = '13_entero_model_macro_sugar_group_post_interaction')
 
 post_res <- suppressWarnings(posterior_samples(mod_entero)) 
 post_res %>%  write_csv('../data/13_entero_model_macro_sugar_group_post_interaction.csv')
 ```
  
-    
-   
+# plotting    
+
 ```{r}
-# looking at the results
+matchingtb <- read_rds('../data/196_matching_shortname.rds')
+
 post_coeff <- post_res %>% 
   select(starts_with('b_')) %>% 
-  select(contains( 'sugar')) %>% 
+  #select(contains( 'sugar')) %>% 
   gather('item', 'coeff')
 
-post_coeff %>% 
-  ggplot(aes(x = coeff, y = item)) +
-  stat_pointinterval(.width = c(.66, .95)) +
-  geom_vline(xintercept = 0, col = 'red', linetype = 'dashed') 
+post_sugar_grp <-  post_coeff %>% 
+  filter(!str_detect(item, 'intensity')) %>% 
+  mutate(item = str_replace(item, 'b_ave_',''),
+         item = str_replace(item, 'b_','')) %>% 
+  mutate(shortname = case_when(
+        item ==  'fiber_e' ~ 'abx * Fiber',  
+    item == 'fiber' ~ 'Fiber',
+    item ==  'fat_e' ~ 'abx * Fat',
+    item ==  'fat' ~ 'Fat',
+    item == 'sugar_high_e' ~ 'abx * Sugar from milk products with high lactose content',
+    item == 'sugar_high' ~ 'Sugar from milk products with high lactose content',
+     item == 'sugar_low_e' ~ 'abx * Sugar from milk products with low lactose content',
+    item == 'sugar_low' ~ 'Sugar from milk products with low lactose content',
+     item == 'sugar_moderate_e' ~ 'abx * Sugar from milk products with moderate lactose content',
+    item == 'sugar_moderate' ~ 'Sugar from milk products with moderate lactose content',
+     item == 'sugar_other_e' ~ 'abx * Sugar from non-milk products',
+    item == 'sugar_other' ~ 'Sugar from non-milk products',
+    item ==  'nonablative' ~ 'Nonablative',
+    item ==  'reduced' ~ 'Reduced',
+    item ==  'ablative' ~ 'Ablative',
+    item ==  'TPN' ~ 'TPN',
+    item ==  'EN' ~ 'EN',
+    item ==  'abx' ~ 'abx'
+  )) 
+
+macro_order <- c('Fat','abx * Fat',
+                 'Fiber','abx * Fiber',
+                 'Sugar from non-milk products','abx * Sugar from non-milk products',
+                 'Sugar from milk products with low lactose content','abx * Sugar from milk products with low lactose content',
+                 'Sugar from milk products with moderate lactose content','abx * Sugar from milk products with moderate lactose content',
+                 'Sugar from milk products with high lactose content','abx * Sugar from milk products with high lactose content',
+                 "TPN" ,"EN" , 'abx')
+
+
+interaction_terms_macro <- tibble(
+  shortname = macro_order
+) %>% 
+  mutate(ymin = seq(1, nrow(.)) - 0.5,
+         ymax = seq(1, nrow(.)) + 0.5) %>% 
+  filter(str_detect(shortname, '\\*')) %>% 
+  mutate(xmin = -Inf, xmax = Inf,
+         interaction_fill = 'interaction_fill')
+
+blue_terms_macro <- tibble(
+  shortname = macro_order
+) %>% 
+  mutate(ymin = seq(1, nrow(.)) - 0.5,
+         ymax = seq(1, nrow(.)) + 0.5) %>% 
+  filter(!str_detect(shortname, '\\*')) %>% 
+  mutate(xmin = -Inf, xmax = Inf,
+         blue_fill = 'blue_fill')
+```
+
+
+```{r}
+zero_line_size = .8
+
+macro_lactose <- post_sugar_grp %>% 
+  mutate(shortname = factor(shortname, levels = macro_order)) %>% 
+  #left_join(cross0) %>% 
+  ggplot() +
+   stat_pointinterval(aes(x = coeff, y = shortname), .width = .95, fatten_point = 1.2) +
+  geom_rect(data = interaction_terms_macro, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = interaction_fill), alpha = .3) +
+  geom_rect(data = blue_terms_macro, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = blue_fill) , alpha = .1) +
+  scale_fill_manual(values=c("interaction_fill" = "#6B8E2320", "blue_fill" = "#6B8E2340")) +
+  #scale_color_manual(values = c("#EC0000", "black")) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  geom_vline(xintercept = 0, col = 'blue', size = zero_line_size) +
+  labs(x = 'CLR(Enterococcus) change', y = '') +
+  theme_classic() +
+  theme(legend.position = 'none') +
+  theme(axis.text = element_text( size = 10),
+        axis.text.y = element_markdown(),
+        plot.background = element_rect(fill='transparent', color=NA), 
+        axis.title=element_text(size=10), 
+        aspect.ratio=1.5)      
+macro_lactose   
 ```
 
 ```{r}
-# how many samples have exposure to lactose related stuff in the milk 
-sugar_summary <- full %>% 
-  select(sugar_high:sugar_other) %>% 
-  mutate(any_milk = ifelse(sugar_high > 0 | sugar_low > 0 | sugar_moderate > 0, T, F)) 
- 
-sugar_summary %>% count(any_milk)
+title <- ggdraw() + 
+  draw_label(
+    "Fig. R2",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+combined <- plot_grid(
+  title, macro_lactose,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(0,3,1,1), "cm")) 
+
+ggsave('../data/Fig_R2_macro_lactose_13.png',
+      width = 210, height = 157, units = "mm", device = 'png', plot = combined, dpi = 300)  
+```
+
+```{r}
+# # how many samples have exposure to lactose related stuff in the milk 
+# sugar_summary <- full %>% 
+#   select(sugar_high:sugar_other) %>% 
+#   mutate(any_milk = ifelse(sugar_high > 0 | sugar_low > 0 | sugar_moderate > 0, T, F)) 
+#  
+# sugar_summary %>% count(any_milk)
 ```
 
 
 ```{r}
-sugar_summary %>% 
-  gather('type','p2d_ave',sugar_high:sugar_other) %>% 
-  mutate(p2d_ave = 100*p2d_ave) %>% 
-  group_by(type) %>% 
-  ggboxplot(x = 'type', y = 'p2d_ave', add = 'jitter', add.params = list(alpha = 0.2) ) +
-  scale_y_sqrt()
-
-
-sugar_summary %>% 
-  gather('type','p2d_ave',sugar_high:sugar_other) %>% 
-  mutate(p2d_ave = 100*p2d_ave) %>% 
-  filter(p2d_ave > 0) %>% 
-  count(type) %>% 
-  mutate(perc = round(n/1009*100,2))
+# sugar_summary %>% 
+#   gather('type','p2d_ave',sugar_high:sugar_other) %>% 
+#   mutate(p2d_ave = 100*p2d_ave) %>% 
+#   group_by(type) %>% 
+#   ggboxplot(x = 'type', y = 'p2d_ave', add = 'jitter', add.params = list(alpha = 0.2) ) +
+#   scale_y_sqrt()
+# 
+# 
+# sugar_summary %>% 
+#   gather('type','p2d_ave',sugar_high:sugar_other) %>% 
+#   mutate(p2d_ave = 100*p2d_ave) %>% 
+#   filter(p2d_ave > 0) %>% 
+#   count(type) %>% 
+#   mutate(perc = round(n/1009*100,2))
 ```
