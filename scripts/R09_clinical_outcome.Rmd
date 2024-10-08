@@ -353,16 +353,25 @@ ggsave('../data/S11_clinical_outcome_supp_R09.pdf',
 # revised a-gvhd onset analysis
 
 ```{r}
-library(tidycmprsk)
-library(ggsurvfit)
+library(tidyverse)
+library(LCAtoolbox)
 library(gtsummary)
+library(ggsurvfit)
+library(tidycmprsk)
+library(survival)
+library(ggpubr)
 library(gt)
-library(tidyverse) 
+library(cowplot)
+library(survminer)
+library(patchwork)
 load('../data/df_main_Sep18.Rdata')
   
 df_main <- df_main %>% 
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
-  mutate(source_and_gvhdppx = str_glue('{source}+{gvhd_ppx}'))
+  mutate(source_and_gvhdppx = str_glue('{source}+{gvhd_ppx}')) %>%
+  mutate(modal_diet = as.character(modal_diet),
+         modal_diet = if_else(modal_diet == 'High intake', 'Higher-intake', 'Lower-intake/sugar-enriched'),
+         modal_diet = factor(modal_diet, levels = c('Lower-intake/sugar-enriched','Higher-intake'))) 
 
 df_main %>% count(type_gvhd_simple)
 ```
@@ -371,9 +380,10 @@ df_main %>% count(type_gvhd_simple)
 
 ```{r}
 # aGVHD onset cumulative incidence ~ modal_diet
-cuminc_cluster <- tidycmprsk::cuminc(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0)) %>%
+cuminc_cluster <- cuminc(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0)) %>%
   ggcuminc(linewidth = 0.8, outcome="aGVHD") +
   add_risktable()+
+   scale_color_manual(values = c(   "darkgoldenrod2", "darkslateblue"), name = '') +
   ylab("aGVHD onset cumulative incidence") +
   xlab("Days relative to HCT (Landmarked at day 12)")+
   ylim(c(0,0.8))
@@ -424,16 +434,18 @@ fitAGVHD <- crr(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet + day_exposed +
 # I tried the interactive version: modal_diet * day_exposed and the interaction term is not significant, so I can just have them as indenpendent ones. 
 ```
 
+## aGVHDonset : univariate
+
 ```{r}
 # aGVHDonset : univariate
 fitAGVHD <- crr(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0)) |> 
   tbl_regression(exponentiate = FALSE)|> 
   bold_p() |> 
   as_gt() |> 
-  gtsave(filename="../data/aGVHDonset_model_uni.html")  
+  gtsave(filename="../data/aGVHDonset_model_univariate.png")  
 ```
 
-## R3 figure
+## R3 figure 
 
 ```{r}
 # I think it would be a good idea to make this R only figure including the c i curve with the two clusters and the multivariate model with the crr
@@ -448,10 +460,13 @@ fitAGVHD <- crr(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet, data = df_main
     plot.margin = margin(0, 0, 0, 0)
   )
 
+aGVHDonset_model_uni <- ggdraw() + draw_image("../data/aGVHDonset_model_univariate.png", scale = 0.9)
 
-aGVHDonset_model_multi <- ggdraw() + draw_image("../data/aGVHDonset_model_multi.png", scale = 1)
+aGVHDonset_model_multi <- ggdraw() + draw_image("../data/aGVHDonset_model_multi.png", scale = 0.9)
 
-plot_ <- plot_grid(cuminc_cluster_plot, aGVHDonset_model_multi,   nrow = 2, align = 'vh', axis = 'lrtb', labels = c('A','B'), rel_widths = c(2, 2))
+bottom <- plot_grid(aGVHDonset_model_uni, aGVHDonset_model_multi,   nrow = 1, align = 'vh', axis = 'lrtb', labels = c('B', 'C'), rel_widths = c(2, 2))
+
+plot_ <- plot_grid(cuminc_cluster_plot, bottom,  nrow = 2, align = 'vh', axis = 'lrtb', labels = c('A', NA) )
 
 combined <- plot_grid(
   title, plot_,
@@ -462,5 +477,7 @@ combined <- plot_grid(
 
 ggsave('../data/Fig_R3_aGVHD_onset.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+ggsave('../data/Fig_R3_aGVHD_onset.png',
+      width = 210, height = 297, units = "mm", device = 'png', plot = combined, dpi = 300)  
 ```
 
