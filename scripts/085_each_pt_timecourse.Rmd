@@ -1,0 +1,255 @@
+---
+title: "Each patient data collection trajectory"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) 
+```
+
+Make a figure with panels with each patient's timecourse in daily caloric intake, diet and stool alpha diversity as a supplementary figure.
+
+```{r}
+library(ggpubr)
+library(tidyverse)
+library(cowplot)
+pt_line_size <- 0.2
+alpha_val <- 1
+point_size <- 0.5
+diet_line_color <- '#E41A1C'
+axis_text_size <- 5
+axis_title_size <- 8
+stool_line_color <- 'blue'
+faith_line_color <- 'black'
+axis_line_thickness <- 0.2
+```
+
+
+```{r}
+# the three datasets split to each patient
+dtb <- read_csv('../data/152_combined_DTB.csv')
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  split(.$pid)
+
+# scale the faith pd and the day cal by dividing by 1000 and then revert this to the original scale by the axis representation
+day_calori <- dtb %>% 
+  group_by(pid, fdrt) %>% 
+  summarise(daycal = sum(Calories_kcal))%>% 
+  split(.$pid)
+
+faith <- read_csv('../data/162_all_faith_pid.csv') %>% 
+  split(.$pid)
+
+cal_perday <-  dtb %>% 
+  group_by(pid, fdrt) %>% 
+  summarise(daycal = sum(Calories_kcal))
+
+# keep the patients that have stool data
+pids <- names(meta)
+
+# the range of the value 
+# use the same y axis scale
+# now the calories have some crazy values such as 4500 kcal today per day!
+range(read_csv('../data/162_all_faith_pid.csv')$faith_pd)
+range(cal_perday$daycal)
+range(meta$simpson_reciprocal)
+```
+
+```{r}
+# this is for the example patient!
+scale_factor <- 92 # 4600/50
+
+every_pt_list <-  pids %>% 
+  set_names(pids) %>% 
+  map(function(.x) {
+      ggplot()  +
+      geom_line(data = day_calori[[.x]], aes(x = fdrt, y = daycal), linetype = 'solid', size = pt_line_size, col = diet_line_color) +
+      # the diet faith 
+      geom_line(data = faith[[.x]], aes(x = fdrt, y = faith_pd), linetype = 'solid', size = pt_line_size, col = faith_line_color) +
+      # the stool data
+      geom_line(data = meta[[.x]], aes(x = sdrt, y = simpson_reciprocal*scale_factor), linetype = 'solid', size = pt_line_size, col = stool_line_color) +
+      theme_pubr() +
+    scale_y_continuous(name = "Daily calories, Faith div", 
+                       limits = c(0, 4600),
+    sec.axis = sec_axis(~./scale_factor, name = expression(Fecal~alpha~diversity))) +
+      labs(x = 'Transplant day', y = '') + 
+  theme(axis.text=element_text(size=axis_text_size),
+        axis.title=element_text(size=axis_title_size),
+        plot.title = element_text(size=axis_title_size),
+        axis.title.y = element_text(color = diet_line_color),
+        axis.line = element_line(colour = 'black', size = axis_line_thickness),
+        axis.title.y.right = element_text(color = stool_line_color),
+         axis.ticks = element_line(colour = "black", size = axis_line_thickness), 
+        aspect.ratio=1/2)
+  })
+
+```
+
+```{r}
+# to put the stool data in the same dimension as the diet data use a scaling factor to bring them to same level when plotting the y but then show on the  y axis scale that they are different
+
+
+whole_list <-  pids %>% 
+  set_names(pids) %>% 
+  map(function(.x) {
+      ggplot()  +
+      geom_line(data = day_calori[[.x]], aes(x = fdrt, y = daycal), linetype = 'solid', size = pt_line_size, col = diet_line_color) +
+      # the diet faith 
+      geom_line(data = faith[[.x]], aes(x = fdrt, y = faith_pd), linetype = 'solid', size = pt_line_size, col = faith_line_color) +
+      # the stool data
+      geom_line(data = meta[[.x]], aes(x = sdrt, y = simpson_reciprocal*scale_factor), linetype = 'solid', size = pt_line_size, col = stool_line_color) +
+      theme_pubr() +
+    scale_y_continuous(name = "", limits = c(0, 4600),
+    sec.axis = sec_axis(~./scale_factor)) +
+    labs(x = 'Transplant day', y = '', title = str_glue('{.x}')) + 
+      
+  theme(axis.text=element_text(size=7),
+        axis.title=element_text(size=5),
+        plot.title = element_text(size=8),
+        axis.title.y = element_text(color = diet_line_color),
+        axis.line = element_line(colour = 'black', size = axis_line_thickness),
+        axis.ticks = element_line(colour = "black", size = axis_line_thickness), 
+        axis.title.x = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y.right = element_text(color = stool_line_color),
+        aspect.ratio=1/2)
+  })
+
+# arrange the above into a facet-wrap
+```
+
+```{r}
+# to put those to two pages, and each page is A4 size 
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S2",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+all <- plot_grid(plotlist =   whole_list[1:40],
+                  ncol = 5)
+
+combined <- plot_grid(
+  title, all,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,2,1), "cm"))
+
+ggsave('../data/S2_all_patients_timecourse_1.pdf', 
+       width = 210, 
+       height = 297,
+         units = c("mm"), 
+         dpi = 300, plot = combined)     
+```
+
+
+```{r}
+# page 2:
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S2 (Continued)",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+all <- plot_grid(plotlist =   whole_list[41:80],
+                  ncol = 5)
+
+combined <- plot_grid(
+  title, all,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,2,1), "cm"))
+
+ggsave('../data/S2_all_patients_timecourse_2.pdf', 
+       width = 210, 
+       height = 297,
+         units = c("mm"), 
+         dpi = 300, plot = combined) 
+```
+
+```{r}
+# page 3
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S2 (Continued)",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+all <- plot_grid(plotlist =   whole_list[81:120],
+                  ncol = 5)
+
+combined <- plot_grid(
+  title, all,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,2,1), "cm"))
+
+ggsave('../data/S2_all_patients_timecourse_3.pdf', 
+       width = 210, 
+       height = 297,
+         units = c("mm"), 
+         dpi = 300, plot = combined) 
+```
+
+```{r}
+# page 4
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S2 (Continued)",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+all <- plot_grid(plotlist =   whole_list[121:158],
+                  ncol = 5)
+
+combined <- plot_grid(
+  title, all,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,4.5,1), "cm"))
+
+ggsave('../data/S2_all_patients_timecourse_4.pdf', 
+       width = 210, 
+       height = 297,
+         units = c("mm"), 
+         dpi = 300, plot = combined) 
+```
+
+```{r}
+# use one to be the example plot
+example <- every_pt_list[[1]]
+
+ggsave('../data/085_example_patient_timecourse.pdf', 
+        width = 60,
+       height = 60,
+         units = c("mm"),
+         dpi = 400, device = 'pdf',
+       plot = example)
+``` 
+
+
+
