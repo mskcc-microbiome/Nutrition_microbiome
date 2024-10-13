@@ -55,12 +55,55 @@ range(cal_perday$daycal)
 range(meta$simpson_reciprocal)
 ```
 
+# summary stats
+
+```{r}
+# the number of d days and s days, the engraftment day for the 158   
+
+# create and save the table about patients engraftment day 
+# load('../data/df_main_Sep18.Rdata')
+# link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
+# 
+# engraftment_day_annot <- df_main %>% 
+#   select(mrn, hct, ANEUT_500_DATE) %>% 
+#   mutate(engraftment_day = as.numeric(ANEUT_500_DATE - hct)) %>% 
+#   full_join(link) %>%
+#    select( pid, engraftment_day)
+# 
+# engraftment_day_annot %>% write_csv('../data/085_engraftment_day_annot.csv')
+
+engraftment_day_annot <- read_csv('../data/085_engraftment_day_annot.csv') %>% 
+  filter(pid %in% pids)
+
+# the number of d days and s days
+d_num <- dtb %>% 
+  filter(pid %in% pids) %>% 
+  distinct(pid,fdrt ) %>% 
+  count(pid, name = 'd_days')
+
+stb <- read_csv('../data/153_combined_META.csv')
+s_num <- stb %>% 
+  filter(pid %in% pids) %>% 
+  distinct(pid,sdrt ) %>% 
+  count(pid, name = 's_days')
+
+all_annot <- engraftment_day_annot %>% 
+  full_join(d_num) %>% 
+  full_join(s_num) %>% 
+  split(.$pid)
+
+```
+
+          
+
+# example pt
+
 ```{r}
 # this is for the example patient!
 scale_factor <- 92 # 4600/50
 
-every_pt_list <-  pids %>% 
-  set_names(pids) %>% 
+every_pt_list <-  c('P1') %>% 
+  c('P1') %>% 
   map(function(.x) {
       ggplot()  +
       geom_line(data = day_calori[[.x]], aes(x = fdrt, y = daycal), linetype = 'solid', size = pt_line_size, col = diet_line_color) +
@@ -68,6 +111,22 @@ every_pt_list <-  pids %>%
       geom_line(data = faith[[.x]], aes(x = fdrt, y = faith_pd), linetype = 'solid', size = pt_line_size, col = faith_line_color) +
       # the stool data
       geom_line(data = meta[[.x]], aes(x = sdrt, y = simpson_reciprocal*scale_factor), linetype = 'solid', size = pt_line_size, col = stool_line_color) +
+      geom_vline( data = all_annot[[.x]],mapping = aes(xintercept = engraftment_day), color = 'forestgreen', size = axis_line_thickness, linetype = 'dashed') +
+      geom_vline( xintercept = 0, color = 'darkgray', size = axis_line_thickness) +
+      geom_text(
+    data = all_annot[[.x]],  
+   mapping = aes(x = Inf, y = Inf, label = str_glue('{d_days} days')),  
+    hjust = 1.6, vjust = 1,  
+   size = 2,color = diet_line_color,
+    inherit.aes = FALSE  
+  ) +
+      geom_text(
+    data = all_annot[[.x]],  
+   mapping = aes(x = Inf, y = Inf, label = str_glue('{s_days} days')),  
+    hjust = 1.6, vjust = 2.5,  
+   size = 2,color = stool_line_color,
+    inherit.aes = FALSE  
+  ) +
       theme_pubr() +
     scale_y_continuous(name = "Daily calories, Faith div", 
                        limits = c(0, 4600),
@@ -83,6 +142,16 @@ every_pt_list <-  pids %>%
         aspect.ratio=1/2)
   })
 
+
+# use one to be the example plot
+example <- every_pt_list[[1]]
+
+ggsave('../data/085_example_patient_timecourse.pdf', 
+        width = 60,
+       height = 60,
+         units = c("mm"),
+         dpi = 400, device = 'pdf',
+       plot = example)
 ```
 
 ```{r}
@@ -98,6 +167,22 @@ whole_list <-  pids %>%
       geom_line(data = faith[[.x]], aes(x = fdrt, y = faith_pd), linetype = 'solid', size = pt_line_size, col = faith_line_color) +
       # the stool data
       geom_line(data = meta[[.x]], aes(x = sdrt, y = simpson_reciprocal*scale_factor), linetype = 'solid', size = pt_line_size, col = stool_line_color) +
+       geom_vline( data = all_annot[[.x]],mapping = aes(xintercept = engraftment_day), color = 'forestgreen', size = axis_line_thickness, linetype = 'dashed') +
+      geom_vline( xintercept = 0, color = 'darkgray', size = axis_line_thickness) +
+      geom_text(
+    data = all_annot[[.x]],  
+   mapping = aes(x = Inf, y = Inf, label = str_glue('{d_days} days')),  
+    hjust = 1.6, vjust = 1,  
+   size = 2,color = diet_line_color,
+    inherit.aes = FALSE  
+  ) +
+      geom_text(
+    data = all_annot[[.x]],  
+   mapping = aes(x = Inf, y = Inf, label = str_glue('{s_days} days')),  
+    hjust = 1.6, vjust = 2.5,  
+   size = 2,color = stool_line_color,
+    inherit.aes = FALSE  
+  ) +
       theme_pubr() +
     scale_y_continuous(name = "", limits = c(0, 4600),
     sec.axis = sec_axis(~./scale_factor)) +
@@ -239,17 +324,6 @@ ggsave('../data/S2_all_patients_timecourse_4.pdf',
          dpi = 300, plot = combined) 
 ```
 
-```{r}
-# use one to be the example plot
-example <- every_pt_list[[1]]
-
-ggsave('../data/085_example_patient_timecourse.pdf', 
-        width = 60,
-       height = 60,
-         units = c("mm"),
-         dpi = 400, device = 'pdf',
-       plot = example)
-``` 
 
 
 
