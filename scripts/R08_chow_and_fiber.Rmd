@@ -32,28 +32,37 @@ This table has the chow consumption. Chow typically contains a mix of grains, pr
 chow <- read_csv('../data/08_chow_intake.csv') %>% 
   mutate(treatment = str_glue('{abx_treatment}\n+\n{diet_treatment}'),
          treatment = factor(treatment, levels = c('biapenem\n+\nvehicle','biapenem\n+\nsucrose'))) %>% 
-  mutate(day = str_glue('Day{day}'))
+  mutate(day = str_glue('Day{day}')) %>% 
+  # for the daily intake, day 3 data is from time interval d1 to d3, d6 and d9 is actually the data for the previous three days.
+  mutate(chow_per_day = if_else(day == 'Day3', food_consumed_g/2, food_consumed_g/3))
 
+```
+
+
+```{r}
 chow_days <- chow %>% 
-  ggboxplot(x = 'treatment', y = 'food_consumed_g', facet.by =  'day', color = 'treatment',
+  ggboxplot(x = 'treatment', y = 'chow_per_day', facet.by =  'day', color = 'treatment',
             xlab = '', ylab = 'Chow consumption (grams)\nper mouse per day',
             add = 'jitter', 
             outlier.shape = NA,
             palette = c('gray32','deeppink2')) + theme_light() + theme(legend.position = 'none')
 chow_days %>% write_rds('../data/08_chow_days.RDS')
 ```
+
 ```{r}
 # calculate the trapezoidal AUC since there are several measurements over time for each mouse
 chow_AUC <- chow %>% 
-  select(-total_food_g, -food_left_g) %>% 
+  select(-total_food_g, -food_left_g, -food_consumed_g, -treatment) %>% 
   pivot_wider(id_cols = c(diet_treatment,
                           abx_treatment,
                           mouse),
               names_from = day,
               names_prefix = "",
-              values_from = food_consumed_g)
+              values_from = chow_per_day)
+```
 
 
+```{r}
 chow_AUC_wide <- chow_AUC %>% 
   mutate(trap_3_6 = (Day3  + Day6 )*3/2,
          trap_6_9 = (Day6  + Day9 )*3/2,
@@ -75,6 +84,6 @@ chow_AUC_plot <- ggboxplot(chow_AUC_wide,
   theme_light() +
   theme(axis.title=element_text(size=10), axis.text =  element_text(size = 10),legend.position = 'none',aspect.ratio=1/2, axis.ticks.x = element_blank())
 chow_AUC_plot
-chow_AUC_plot %>% write_rds('../data/08_chow_auc.RDS')
+chow_AUC_plot %>% write_rds('../data/08_chow_auc.RDS') 
 ```
 
