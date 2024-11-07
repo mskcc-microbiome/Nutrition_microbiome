@@ -19,7 +19,7 @@ library(ggtext)
 library(tidybayes)
 axis_text_size <- 10
 axis_title_size <- 10
-zero_line_size = .8
+zero_line_size <- .8
 META <- read_csv('../data/153_combined_META.csv')
 ```
 
@@ -458,7 +458,7 @@ rawsweets <- META %>%
          antibiotics = factor(antibiotics, levels = c('not exposed','exposed'))) %>% 
   ggscatter(x = 'fg_sweets', y = 'log_div', color = 'antibiotics',
             ylab = 'log(diversity)',xlab = 'Sweets consumed (grams)',
-            alpha = 0.1, shape = 16, size = 1,
+            alpha = 0.35, shape = 16, size = 1,
             add = "reg.line",  # Add regressin line
            add.params = list(color = 'antibiotics', fill = 'antibiotics', alpha = 0.3, size = 1.5), # Customize line
            conf.int = TRUE, # Add confidence interval
@@ -466,7 +466,7 @@ rawsweets <- META %>%
            cor.coeff.args = list(method = "spearman",  label.sep = "\n", cor.coef.name = c("rho"),p.accuracy = 0.01, r.accuracy = 0.01,label.x.npc = "left", label.y.npc = "bottom", size = 3.5)) +
   geom_text(data = num_annot, aes(label = lbl), 
               x = Inf, y = Inf, hjust = 0.6, vjust = 1.5) +
-  #scale_x_sqrt() +
+  scale_x_sqrt() +
   scale_y_sqrt() +
   scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
   scale_colour_manual('antibiotics',values = palette, labels=c('not exposed', 'exposed')) +
