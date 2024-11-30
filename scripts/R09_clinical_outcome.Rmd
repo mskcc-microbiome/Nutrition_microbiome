@@ -61,6 +61,16 @@ df_main %>% count(type_gvhd_simple)
 df_main %>% count(type_gvhd)
 ```
  
+# high sugar fraction in cluster 1 than cluster 2
+
+```{r}
+df_diet_pt <- read_rds('../data/10_df_diet_pt.RDS')
+
+res <- geepack::geeglm(Sugar_fraction ~ Clusters + splines::ns(time,knots = quantile(df_diet_pt$time, probs=c(0.2,0.8))),
+       id=pid, corstr="exch", data=df_diet_pt)
+summary(res)
+```
+ 
  
 # OS model
 
@@ -112,34 +122,74 @@ survival_plot <- list(
 ```
 
 
-## model fit
+## Table S3 model fit
 
 ```{r OS_model}
 # rename the columns so that they look nice in the output table!
 input_df <- df_main |> 
   filter(OStime_30 > 0) %>% 
-  rename(Diet_pattern_cluster = modal_diet,
-         Exposure_days_to_abx =day_exposed,
-         Conditioning_intensity = intensity,
-         Graft_type_and_GvHD_prophylaxis = source_and_gvhdppx)
+  rename(`Diet-pattern cluster` = modal_diet,
+         `Abx exposure(days)` =day_exposed,
+         `Conditioning intensity` = intensity,
+         Graft_type_and_GvHD_prophylaxis = source_and_gvhdppx) %>% 
+  mutate(Graft_type_and_GvHD_prophylaxis = case_when(
+    Graft_type_and_GvHD_prophylaxis == 'TCD+TCD' ~ 'T-cell depleted PBSC',
+    Graft_type_and_GvHD_prophylaxis == 'Cord+CNI-based' ~ 'Cord blood + CNI-based',
+    Graft_type_and_GvHD_prophylaxis == 'Unmodified+CNI-based' ~ 'Unmodified graft + CNI-based',
+    Graft_type_and_GvHD_prophylaxis == 'Unmodified+PTCy-based' ~ 'Unmodified graft + PTCy-based'
+  )) %>% 
+  mutate(Graft_type_and_GvHD_prophylaxis = factor(Graft_type_and_GvHD_prophylaxis, levels = c('T-cell depleted PBSC','Cord blood + CNI-based','Unmodified graft + CNI-based','Unmodified graft + PTCy-based'))) %>% 
+    rename(`Graft source and GvHD prophylaxis` = Graft_type_and_GvHD_prophylaxis) %>% 
+   mutate(`Diet-pattern cluster` = case_when(
+    `Diet-pattern cluster` == 'Lower-intake/sugar-enriched' ~ 'Cluster 1 (Lower-intake/sugar-enriched)',
+    `Diet-pattern cluster` == 'Higher-intake' ~ 'Cluster 2 (Higher-intake)' 
+  ))
 
 
-fit <- coxph(Surv(OStime_30,OSevent)~Diet_pattern_cluster*Exposure_days_to_abx  + Conditioning_intensity + Graft_type_and_GvHD_prophylaxis,
+fit <- coxph(Surv(OStime_30,OSevent)~`Diet-pattern cluster`*`Abx exposure(days)`  + `Conditioning intensity` + `Graft source and GvHD prophylaxis`,
              data= input_df)
 
 
 # fit_original <- coxph(Surv(OStime_30,OSevent)~modal_diet*day_exposed  + intensity + source + gvhd_ppx,
 #              data=df_main |> filter(OStime_30 > 0) ) 
-```
 
-```{r OS_model}
 fit |> 
   tbl_regression(exponentiate = FALSE) |> 
   bold_p() |> 
   as_gt() |> 
   gtsave(filename="../data/09_OS_model.png")
 
+
+# just print the multivar table to the correct size
+
+title <- ggdraw() + 
+  draw_label(
+    "Table S3",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 5)
+  )
+
+
+table_OS <- ggdraw() + draw_image("../data/09_OS_model.png", scale = .8)
+
+
+
+combined <- plot_grid(
+  title, table_OS,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/Table_S3_OS_multivariate_R09.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
+ 
+ 
  
 ```{r}
 coef(fit)[2]
@@ -317,37 +367,7 @@ ggsave('../data/09_clinical_outcome.pdf',
 ```
 
 
-# supp figure  
 
-```{r}
-# just print the multivar table to the correct size
-
-title <- ggdraw() + 
-  draw_label(
-    "Fig. S11",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 5)
-  )
-
-
-table_OS <- ggdraw() + draw_image("../data/09_OS_model.png", scale = .6)
-
-
-
-combined <- plot_grid(
-  title, table_OS,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.05, 1)
-)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
-
-ggsave('../data/S11_clinical_outcome_supp_R09.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
-```
   
 
 # revised a-gvhd onset analysis
@@ -373,7 +393,15 @@ df_main <- df_main %>%
          modal_diet = if_else(modal_diet == 'High intake', 'Higher-intake', 'Lower-intake/sugar-enriched'),
          modal_diet = factor(modal_diet, levels = c('Lower-intake/sugar-enriched','Higher-intake'))) 
 
-df_main %>% count(type_gvhd_simple)
+df_main %>% count(type_gvhd_simple, agvhd_grade)
+colnames(df_main)
+# day_exposed : Number of days exposed to broad-spectrum\nantibiotics between day -7 to 12\nrelative to transplant
+# leng_of_stay
+
+# the range of the follow up dates
+df <- df_main  %>% 
+  select(where(is.Date)) %>% 
+  gather()
 ```
 
 ## aGVHD onset cumulative incidence ~ modal_diet
