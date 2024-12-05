@@ -1,0 +1,105 @@
+---
+title: "Upload the mouse sequencing data"
+output: html_document
+date: "2024-12-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+# find the mouse sequencing data of this paper
+healthyall <- read_csv('../data/204_mice_diet_healthy_all.csv') %>% 
+  distinct(sampleid, experiment_no, day,mouse_no, abx_treatment,  diet_treatment) %>%
+  mutate(id = str_replace(sampleid, 'PL0','')) %>% 
+  mutate(R1 = str_glue('../../MSS_pipeline-/scripts/food_tree/data/zymo_16s/zymo_reads//zr17118_{id}V3V4_R1.fastq.gz'),
+         R2 = str_glue('../../MSS_pipeline-/scripts/food_tree/data/zymo_16s/zymo_reads//zr17118_{id}V3V4_R2.fastq.gz'))
+
+
+healthyall %>% 
+  select(R1, R2) %>% 
+  gather() %>% 
+  mutate(cmd = str_glue('cp {value} ~/Downloads/')) %>% 
+  select(cmd) %>% 
+  write_csv('../data/R15_copy_mice.sh', col_names = F)
+
+healthyall
+```
+
+
+# create the biosample upload table
+
+```{r}
+biosam <- tibble(
+  Sample_name = healthyall$sampleid,
+  Organism = 'mouse gut metagenome',
+  host = 'Mus musculus',
+  isolation_source = 'stool',
+  collection_date = 'Not applicable',
+  geo_loc_name = 'USA: New York',
+  lat_lon = '40.7641 N 73.9568 W',
+  experiment_no = healthyall$experiment_no,
+  day = healthyall$day,
+  mouse_no = healthyall$mouse_no,
+  abx_treatment = healthyall$abx_treatment,
+  diet_treatment = healthyall$diet_treatment
+) 
+biosam %>% write_tsv('../data/15_biosample.tsv')
+
+```
+
+# create the table for the sra submission
+
+```{r}
+
+
+bioacc <- read_tsv('../data/biosample_acc.tsv') %>% 
+  mutate(sampleid = sample_name) %>% 
+  full_join(healthyall %>% select(sampleid, R1, R2)) %>% 
+  mutate(R1 = str_replace(R1, '../../MSS_pipeline-/scripts/food_tree/data/zymo_16s/zymo_reads//',''),
+         R2 = str_replace(R2, '../../MSS_pipeline-/scripts/food_tree/data/zymo_16s/zymo_reads//',''))
+
+bioacc
+```
+
+
+```{r}
+bioproject_accession <- 'PRJNA878528'
+
+title <- 'Mouse Fecal Samples'
+
+library_strategy <- 'amplicon'
+library_source <- 'GENOMIC'
+library_selection <- 'PCR'
+library_layout <- 'paired'
+platform <- 'ILLUMINA'
+instrument_model <- 'NextSeq 1000'
+design_description <- 'DNA was extracted using the ZymoBIOMICS®-96 MagBead DNA Kit (Zymo Research) on an automated platform. The V3-V4 region of the bacterial 16S rRNA gene was amplified using the Quick-16S™ NGS Library Prep Kit (Zymo Research) with custom primers designed for optimal coverage and sensitivity. PCR reactions were performed in real-time PCR machines to control cycles and limit chimera formation. The final pooled library was cleaned, quantified, and sequenced on an Illumina® Nextseq™ with a P1 reagent kit (600 cycles) using a 30% PhiX spike-in. '
+filetype <- 'fastq'
+
+sra_fill <- tibble(
+  biosample_accession = bioacc$accession,
+  library_ID = bioacc$sample_name,
+  bioproject_accession = bioproject_accession,
+  title = title,
+  library_strategy = library_strategy,
+  library_source = library_source,
+  library_selection = library_selection,
+  library_layout =library_layout,
+  platform= platform,
+  instrument_model= instrument_model,
+  design_description=design_description,
+  filetype= filetype,
+  filename=bioacc$R1,
+  filename2=bioacc$R2
+)
+
+sra_fill %>% 
+  write_tsv('../data/15_SRA.tsv')
+```
+
