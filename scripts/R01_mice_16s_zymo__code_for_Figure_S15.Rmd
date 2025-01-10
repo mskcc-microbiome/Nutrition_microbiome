@@ -25,6 +25,10 @@ healthyall <- read_csv('../data/204_mice_diet_healthy_all.csv')
 meta <- healthyall %>%
   select(-Taxon, -relab) %>% 
   distinct() 
+
+meta %>% 
+  count(experiment_no, abx_treatment, diet_treatment, day) %>% 
+  summarise(min_ = min(n), max_ = max(n))
 ```
 # alpha diversity 
 
@@ -191,6 +195,71 @@ beta_all <- bc %>%
   mutate(treatment = str_glue('{abx_treatment}_{diet_treatment}')) %>% 
   mutate(treatment = factor(treatment, levels = c('PBS_vehicle','PBS_sucrose','biapenem_vehicle','biapenem_sucrose')))
 ```
+
+## PERMONOVA for global difference in composition
+
+```{r}
+#lump together two experiments
+#and simply compare biapenem_vehicle (dark grey) vs biapenem_sucrose(dark red), because that is the key comparison.
+#and I would do a separate permanova test on day 3 from the test on day 6
+# day 3
+relab_df <- healthyall %>% 
+  select(Taxon, sampleid, relab, abx_treatment, diet_treatment, experiment_no, day) %>%
+  spread(key = 'Taxon', value = 'relab', fill = 0) %>% 
+  filter(abx_treatment == 'biapenem' & day != 0)  %>% 
+  column_to_rownames('sampleid') %>% 
+  split(.$day) %>% 
+  map(function(df){
+    dist_ <- vegdist(df %>% 
+  select(-c(abx_treatment, diet_treatment, experiment_no, day) ), method = 'bray')
+    stool_dist_df <- dist_ %>%
+          as.matrix() %>%
+          as.data.frame() %>%
+          rownames_to_column('sampleid') %>%
+          inner_join(healthyall %>% distinct(sampleid, abx_treatment, diet_treatment, experiment_no, day))
+    
+        stool_matrix <- stool_dist_df %>%
+          select(-c(abx_treatment, diet_treatment, day)) %>%
+          column_to_rownames('sampleid') %>% as.matrix()
+    
+    # Run PERMANOVA
+    adonis2(stool_matrix ~ stool_dist_df$diet_treatment , permutations = 999, parallel = 10 )
+  })
+
+
+relab_df
+
+
+
+```
+```{r}
+relab_df_2 <- healthyall %>% 
+  select(Taxon, sampleid, relab, abx_treatment, diet_treatment, experiment_no, day) %>%
+  spread(key = 'Taxon', value = 'relab', fill = 0) %>% 
+  filter(abx_treatment == 'biapenem' & day != 0)  %>% 
+  column_to_rownames('sampleid') %>% 
+  split(.$day) %>% 
+  map(function(df){
+    dist_ <- vegdist(df %>% 
+  select(-c(abx_treatment, diet_treatment, experiment_no, day) ), method = 'bray')
+    stool_dist_df <- dist_ %>%
+          as.matrix() %>%
+          as.data.frame() %>%
+          rownames_to_column('sampleid') %>%
+          inner_join(healthyall %>% distinct(sampleid, abx_treatment, diet_treatment, experiment_no, day))
+    
+        stool_matrix <- stool_dist_df %>%
+          select(-c(abx_treatment, diet_treatment, day)) %>%
+          column_to_rownames('sampleid') %>% as.matrix()
+    
+    # Run PERMANOVA
+    adonis2(stool_matrix ~ stool_dist_df$diet_treatment + stool_dist_df$experiment_no, permutations = 999, parallel = 10 )
+  })
+
+
+relab_df_2
+```
+
 
 ## PCoA plot
 
@@ -897,3 +966,13 @@ combined <- plot_grid(
 ggsave('../data/01_mice_16s_p2.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
+# meta data for the SRA
+
+```{r}
+accessions <- read_tsv('../data/mice_SRA.tsv') %>% 
+  dplyr::select(accession, sampleid = library_ID) %>% 
+  inner_join(meta %>% dplyr::select(sampleid, experiment_no,day,  mouse_no,abx_treatment,  diet_treatment))
+
+accessions %>% write_csv('../data/01_mice_accession_info.csv')
+```
+

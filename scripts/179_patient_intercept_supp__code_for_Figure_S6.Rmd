@@ -1,0 +1,83 @@
+---
+title: "Supplementary for the patient intercept figure"
+author: "Anqi Dai"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+library(tidybayes)
+```
+
+```{r }
+# make 
+post_all <-  read_csv('../data/171_div_model_fg_post_interaction.csv')
+
+# make  a forest  plot of the pid intercepts
+pid_forest <- post_all %>% 
+  gather() %>% 
+  filter(str_detect(key, 'r_pid')) %>% 
+  separate(key, into = c('rm','more'), sep = 'r_pid\\[') %>% 
+  separate(more, into = c('pid','rm2'), sep = ',Intercept\\]') 
+
+
+# find the median value of the coeff and sort by that in an asc order
+pid_order <- pid_forest %>% 
+  group_by(pid) %>% 
+  summarise(medianvalue = median(value)) %>% 
+  arrange(medianvalue) %>% pull(pid)
+```
+
+
+```{r }
+pid_intercept <- pid_forest %>% 
+  mutate(pid = factor(pid, levels = pid_order)) %>% 
+  ggplot(aes(x = value, y = pid)) +
+  stat_pointinterval(.width =.95, point_size = 1) +
+  geom_vline(xintercept = 0, col = 'blue') +
+  labs(x = 'Patient-Specific Deviation from Average Microbiome log(Diversity)',
+       y = '', 
+       title = '') +
+  theme_classic() +
+  theme(legend.position = 'none') +
+  theme(axis.text=element_text(size=10), 
+        panel.background = element_rect(fill = "gray96",colour = "gray96",size = 0.5, linetype = "solid"),
+        axis.text.y=element_text(size=6))
+
+
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S6",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+combined <- plot_grid(
+  title, pid_intercept,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 6)
+)+theme(plot.margin = unit(c(1,0,0,1), "cm"))
+  
+ggsave('../data/S6_pid_intercepts_forest_179.pdf',  
+     width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)
+```
+
+Interpretation:
+
+Deviation from the Average: The value of r_pid[P1,Intercept] tells you how much the baseline outcome for patient P1 deviates from the overall average outcome predicted by the fixed effects in your model.
+Positive/Negative Value:
+A positive value means that patient P1 tends to have a higher outcome value than the average, even after accounting for other predictors in the model.
+A negative value means that patient P1 tends to have a lower outcome value than the average.
+Magnitude: The absolute value of the random intercept indicates the magnitude of the deviation from the average. A larger absolute value means a greater difference from the average.

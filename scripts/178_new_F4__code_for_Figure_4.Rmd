@@ -16,6 +16,7 @@ library(scales)
 library(tidybayes)
 library(ggtext)
 library(cowplot)
+library(ggsci)
 zero_line_size = .8
 theme_set(theme_pubr(base_size = 10))
 key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
@@ -359,45 +360,51 @@ df <- dat_entero_wide %>%
   filter(Day6 < Day0)
 ```
 
+
+## fold_change
+
 ```{r fold_change}
 # the median fold change and the p value for the star in the 3C upper panel
 deltas <- plotdf %>%
-  select(grp, Day, Mouse_identifier, CFUs_per_GramStool) %>% 
-  spread('Day','CFUs_per_GramStool') %>%
-  rename(d0 = `0`, d3 = `3`,d6 = `6`)
+  select(grp, Day, Mouse_identifier, CFUs_per_GramStool) 
 
 # the fold change on day 3
-day3fc <- deltas %>% 
-  filter(str_detect(grp, 'biapenem')) %>% 
-  select(grp, Mouse_identifier, d3) %>% 
-  spread('grp','d3') %>% 
-  filter(!is.na(biapenem__vehicle)) %>% 
-  mutate(fc = round(biapenem__sucrose/biapenem__vehicle, 2)) 
+# calculate the fold change between the median of the two groups on day 3 and day 6 respectively
+mediancfu <- deltas %>% filter(str_detect(grp, 'biapenem')) %>% droplevels() %>% 
+  split(list(.$grp, .$Day)) %>% 
+  map(function(df){
+    return(summarise(.data = df, median_cfu = median(CFUs_per_GramStool)) %>% pull(median_cfu)) 
+  }) %>% bind_rows(.id = 'grps') %>% 
+  gather('grps','median_cfu')
 
-day3fc
+# fc for day 3
+round( (mediancfu %>% filter(grps == 'biapenem__sucrose.3') %>% pull(median_cfu)) / mediancfu %>% filter(grps == 'biapenem__vehicle.3') %>% pull(median_cfu),2)
 
-median(day3fc$fc)
+# fc for day 6
+round( (mediancfu %>% filter(grps == 'biapenem__sucrose.6') %>% pull(median_cfu)) / mediancfu %>% filter(grps == 'biapenem__vehicle.6') %>% pull(median_cfu),2)
+```
 
+
+```{r p_values}
+# calculate the p values
+deltas %>% 
+  filter(str_detect(grp, 'biapenem') & Day != '0') %>% 
+  droplevels() %>% 
+  split(.$Day) %>% 
+  map(function(df){
+    res = wilcox.test(CFUs_per_GramStool ~ grp, data = df,
+                   exact = FALSE)
+    return(res$p.value)
+  })
+```
+
+
+```{r p_values}
 res <- wilcox.test(d3 ~ grp, data = deltas %>% 
   filter(str_detect(grp, 'biapenem')) %>% 
   select(grp, Mouse_identifier, d3),
                    exact = FALSE)
 res
-```
-
-
-```{r} 
-# the fold change on day 6
-day6fc <- deltas %>% 
-  filter(str_detect(grp, 'biapenem')) %>% 
-  select(grp, Mouse_identifier, d6) %>% 
-  spread('grp','d6') %>% 
-  filter(!is.na(biapenem__vehicle)) %>% 
-  mutate(fc = round(biapenem__sucrose/biapenem__vehicle, 2)) 
-
-
-median(day6fc$fc)
-
 
 
 res <- wilcox.test(d6 ~ grp, data = deltas %>% 
@@ -406,6 +413,7 @@ res <- wilcox.test(d6 ~ grp, data = deltas %>%
                    exact = FALSE)
 res
 ```
+
 ## mouse panel
 
 ```{r}
@@ -479,3 +487,22 @@ combined <- plot_grid(
 ggsave('../data/F4_current_178_changing.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)
 ```
+
+```{r}
+# the figure for the rebuttal that docmnets the time course of the abx + sugar group
+sub <- newest %>% filter(diet_treatment == 'sucrose' & abx_treatment == 'biapenem')
+
+# find the three mice that are very low on the last day 
+three <- sub %>% filter(Day == 6) %>% 
+  slice_min(order_by = Log_CFUs_per_GramStool, n = 3) %>% pull(Mouse_identifier)
+
+sub %>% 
+  mutate(Mouse = if_else(Mouse_identifier %in% three, T, F)) %>% 
+  ggboxplot(x = 'Day', y = 'Log_CFUs_per_GramStool',
+            xlab = 'Day', ylab = 'Enterococcal CFU/gram\nlog10 transformed', title = 'biapenem + sucrose group') +
+   geom_line( aes(group = Mouse_identifier, color = Mouse)) +
+  scale_color_manual(values = c('gray','red'), label = c('Other','Particularly low on day 6'))+
+  theme(legend.position = "right") 
+ggsave('../data/178_low_three.pdf', width = 6, height = 3)
+```
+

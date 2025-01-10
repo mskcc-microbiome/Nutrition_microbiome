@@ -85,6 +85,7 @@ qiime tools export \
     --output-path R06_p2d_fc_unweighted_unifrac_distance_matrix
 ```
 
+# start run
 
 ```{r}
 # can directly extract the distance between certain samples that I care about
@@ -193,24 +194,6 @@ pval = ret$coefficients[2,5]
 # Partial_residual plot
 
 ```{r}
-library(ggpmisc)
-Partial_residual <- joined %>% 
-  mutate(fixed_effects = predict(model, re.form=NA),
-         residuals = residuals(model),
-         partial_residuals = residuals + fixed_effects) %>% 
-  ggplot( aes(x = diet_dist, y = partial_residuals)) +
-  geom_point(alpha = 0.5, shape = 16) +
-  stat_poly_eq(formula = y ~ x, 
-               aes(label = paste(..eq.label.., ..rr.label.., sep = "\n"), colour = 'red'), 
-               parse = TRUE) +  # Add the equation and R-squared
-  geom_smooth(method = "lm", se = FALSE) +  
-  labs(x = "Diet Distance", y = "Stool Distance after\ncontrolling for individual patient effects") +
-  ggtitle("Diet Distance VS Stool Distance\nafter controlling for individual patient effects") +
-  theme_pubr() +
-  theme(aspect.ratio = 1)
-
-Partial_residual
-  
 # In a linear regression model, a partial residual is a way to isolate and visualize the relationship between the response variable and a specific predictor variable, while accounting for the effects of all the other predictor variables in the model.
 
 # Formula:# The partial residual for a predictor X_i is calculated as:
@@ -220,6 +203,26 @@ Partial_residual
 # Direction of Association: The positive slope of the line confirms that there is a positive association between diet distance and stool distance. This means that, on average, as the dissimilarity between a patient's subsequent and initial food intake increases, so does the dissimilarity between their subsequent and initial stool microbiome composition.
 # 
 # Average Effect Size: The slope of the line quantifies the average change in stool distance for each unit increase in diet distance. For example, if the slope is 0.3, it would mean that a 1-unit increase in diet distance is associated with a 0.3-unit increase in stool distance, on average, after controlling for individual patient effects.  
+```
+
+```{r}
+library(ggpmisc)
+Partial_residual <- joined %>% 
+  mutate(fixed_effects = predict(model, re.form=NA),
+         residuals = residuals(model),
+         partial_residuals = residuals + fixed_effects) %>% 
+  ggplot( aes(x = diet_dist, y = partial_residuals)) +
+  geom_point(alpha = 0.4, shape = 16) +
+  stat_poly_eq(formula = y ~ x, 
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "\n"), colour = 'green'), 
+               parse = TRUE) +  # Add the equation and R-squared
+  geom_smooth(method = "lm", se = FALSE, color = 'black') +  
+  labs(x = "Diet Distance", y = "Stool Distance after\ncontrolling for individual patient effects") +
+  ggtitle("Diet Distance vs Stool Distance\nafter controlling for individual patient effects") +
+  theme_pubr() +
+  theme(aspect.ratio = 1)
+
+Partial_residual
 ```
 ```{r}
 # was I plotting the original data in the above plot??
@@ -258,8 +261,8 @@ sbeta_example <-  beta_ %>%
 
 sbeta_example_pcoa <- sbeta_example %>% 
   ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
-            title = 'Microbiome Bray curtis distance PCoA') +
-  scale_color_manual(name = "", values = c('gray','red'),
+            title = 'Fecal Microbiome PCoA\n(Bray-Curtis distance)') +
+  scale_color_manual(name = "", values = c('gray','blue'),
                        labels = c("Other patients", str_glue('{selected}'))) +
   scale_shape_manual(name = "", values = c(16,17),
                        labels = c("Later time points", "Earliest timepoint")) +
@@ -299,8 +302,8 @@ dbeta_example <-  dpcoa %>%
 
 dbeta_example_pcoa <- dbeta_example %>% 
   ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
-            title = 'Diet unweighted unifrac distance PCoA') +
-  scale_color_manual(name = "", values = c('gray','red'),
+            title = 'Diet PCoA\n(Unweighted UniFrac distance) ') +
+  scale_color_manual(name = "", values = c('gray','#E41A1C'),
                        labels = c("Other patients",  str_glue('{selected}'))) +
   scale_shape_manual(name = "", values = c(16,17),
                        labels = c("Later time points", "Earliest timepoint")) +
@@ -380,7 +383,7 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/06_distance_to_earliest.pdf',
+ggsave('../data/S04_distance_to_earliest_R06.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
 ```
 

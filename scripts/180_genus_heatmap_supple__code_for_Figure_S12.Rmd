@@ -38,8 +38,7 @@ selected <- read_csv('../data/087_more_abundant_0.002_genus_33.csv')  %>%
 post_df <- read_csv('../data/171_target_genus_fg_model_post_interaction.csv',  col_select = c(1:25)) %>% 
   select(genus, starts_with('b_')) %>% 
   select(-starts_with('b_intensity')) %>% 
-  gather('item', 'coeff', names(.)[2]:names(.)[ncol(.)]) %>% 
-  filter(genus %in% selected$genus)
+  gather('item', 'coeff', names(.)[2]:names(.)[ncol(.)])
 post_df
 ```
 ## dengrogram 
@@ -97,7 +96,8 @@ summary(post_res_genera$q50)
 
   
 genera <- post_res_genera %>% 
-  filter(!item %in% c('nonablative','reduced','ablative')) 
+  filter(!item %in% c('nonablative','reduced','ablative')) %>% 
+  mutate(genus = factor(genus, levels = genus_odr))
 
 library(cowplot)
 title <- ggdraw() + 
@@ -122,6 +122,8 @@ diverging_palette <- scale_fill_gradient2(
   midpoint = 0,  # Center the color scale at zero
   limits = c(-max(abs(a90$q50)), max(abs(a90$q50)))  # Set limits based on absolute max
 )
+
+genera %>% distinct(genus) %>% nrow
 ```
 
 # heatmap
@@ -150,28 +152,28 @@ genus_fg_main
 
 
 ```{r} 
-# dendropart <- plot_grid(
-#   NA, dendro,NA, ncol = 1,rel_heights = c(-.48,.495, -.48),
-#  align = 'hv', axis = 'lrtb'
-# ) +theme(plot.margin = unit(c(0,-3,0,0), "cm")) 
-# 
-# final_plot <- plot_grid(
-#   genus_fg_main, dendropart,
-#  nrow = 1, ncol = 2,rel_widths = c(2.7,1.5),
-#  align = 'hv', axis = 'lrtb'
-# ) 
-# 
-# combined <- plot_grid(
-#   title, final_plot,
-#   ncol = 1,
-#   # rel_heights values control vertical title margins
-#   rel_heights = c(0.05, 1)
-# ) +theme(plot.margin = unit(c(1,.5,1,.5), "cm"))
-# 
-# ggsave('../data/S14_fg_genus_heatmap_180.pdf',
-#       width = 210, height = 297, units = "mm", device = 'pdf', 
-#       plot = combined, 
-#       dpi = 300)
+dendropart <- plot_grid(
+  NA, dendro,NA, ncol = 1,rel_heights = c(-.48,.495, -.48),
+ align = 'hv', axis = 'lrtb'
+) +theme(plot.margin = unit(c(0,-3,0,0), "cm"))
+
+final_plot <- plot_grid(
+  genus_fg_main, dendropart,
+ nrow = 1, ncol = 2,rel_widths = c(2.7,1.5),
+ align = 'hv', axis = 'lrtb'
+)
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+) +theme(plot.margin = unit(c(1,.5,1,.5), "cm"))
+
+ggsave('../data/S12_fg_genus_heatmap_180.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf',
+      plot = combined,
+      dpi = 300)
 
 ```
 
@@ -182,7 +184,7 @@ post_df_macro <- read_csv('../data/090_target_genus_macro_model_post_interaction
   select(genus, starts_with('b_')) %>% 
   select(-starts_with('b_intensity')) %>% 
   gather('item', 'coeff', names(.)[2]:names(.)[ncol(.)]) %>% 
-  filter(genus %in% selected$genus) %>% 
+  #filter(genus %in% selected$genus) %>% 
   filter(str_detect(item, 'ave')) %>% 
   mutate(item = str_replace(item, 'b_ave_',''),
          item = str_replace(item, 'b_','')) %>% 
@@ -338,16 +340,32 @@ genus_macro_sub <- macro_res_genera %>%
         legend.key = element_rect( colour = "gray50")) 
 ```
 ```{r}
-combined <- plot_grid(
-  genus_sub_fg, genus_macro_sub,
-  ncol = 2,
-  # rel_heights values control vertical title margins
-  rel_widths  = c(0.5, .3)
-) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+# combined <- plot_grid(
+#   genus_sub_fg, genus_macro_sub,
+#   ncol = 2,
+#   # rel_heights values control vertical title margins
+#   rel_widths  = c(0.5, .3)
+# ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+# 
+# ggsave('../data/S_X_genus__heatmap_180.pdf',
+#       width = 300, height = 297, units = "mm", device = 'pdf', 
+#       plot = combined, 
+#       dpi = 300)
+```
 
-ggsave('../data/S_X_genus__heatmap_180.pdf',
-      width = 300, height = 297, units = "mm", device = 'pdf', 
-      plot = combined, 
-      dpi = 300)
+# loosen the threshold and find if there is anymore interesting things to discuss
+
+```{r}
+fg_post <- post_df  %>% 
+  group_by(genus, item) %>% 
+  tidybayes::median_qi(coeff , .width = c( .95)) 
+  
+macro_post <- post_df_macro %>% 
+  group_by(genus, shortname) %>% 
+  tidybayes::median_qi(coeff , .width = c( .8)) %>% 
+  filter(str_detect(shortname, '^Fiber'))
+
+macro_post %>% distinct(genus) %>% 
+  write_csv('../data/180_37_genus.csv')
 ```
 

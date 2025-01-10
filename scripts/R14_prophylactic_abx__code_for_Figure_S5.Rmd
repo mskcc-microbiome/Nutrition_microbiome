@@ -1,0 +1,416 @@
+---
+title: "The PROPHYLACTIC abx and empirical abx"
+author: "Anqi Dai"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(cowplot) 
+library(ggtext)
+```
+
+bar plot by day. For each day what % of samples being exposed in the three categories
+
+1. No antibacterial whatsoever
+2. ciprofloxacin only (the two fluoroquinolones that we use for these patients are cipro and levo.  mostly cipro)
+3. Any Broad-spectrum (PO vanco, metronidazole, pip-tazo, cefepime, or ‘penem drugs). If still on cipro but getting a broad spectrum, classify as broad-spectrum-exposed.
+4. other anti-bacterial
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv')
+
+# loading the cleaned med data
+med <- read_csv('../data/191_medication_cleaned_all_with_type.csv')
+
+# copy the above table to be supp table upload folder 
+```
+
+# plotting
+
+```{r}
+# properly annotate these samples into groups
+# total number of samples per day 
+total_by_day <- meta %>% 
+  select(pid, sampleid, sdrt) %>% 
+  group_by(sdrt) %>% 
+  summarise(daytotal = n())
+
+exposure_grps <- med %>% 
+  distinct(sampleid, med_exposure_type, sdrt) %>% 
+  count(sdrt, med_exposure_type) %>% 
+  inner_join(total_by_day) %>% 
+  mutate(perc = round(n/daytotal*100, 2)) %>% 
+  mutate(med_exposure_type = factor(med_exposure_type, levels = c('broad_spectrum','fluoroquinolones','other_antibacterial','no_abx')))
+  
+exposure_grps %>% count(med_exposure_type) 
+```
+
+```{r}
+# plot them in percentage as a stacked bar plot 
+library(RColorBrewer)
+perc_ <- ggplot(exposure_grps, aes(x = sdrt, y = perc, fill = med_exposure_type)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(values = c( "tomato", "steelblue","goldenrod3","gray"))  +
+  geom_vline( xintercept =  0 , color = 'black', linetype = 'dashed', size = 1) +
+  labs(x = "Transplant day", y = "Percentage", fill = "Exposure group") +
+  theme_minimal() 
+
+# I see so if I plot stat = identity it will be percentage in the bar plot 
+# also plot this in absolute numbers
+count_ <- ggplot(exposure_grps, aes(x = sdrt, y = n, fill = med_exposure_type)) +
+  geom_bar(position = "stack", stat = "identity") +
+  scale_fill_manual(values = c( "tomato", "steelblue","goldenrod3","gray"))  +
+    geom_vline( xintercept =  0 , color = 'black', linetype = 'dashed', size = 1) +
+  labs(x = "Transplant day", y = "Count", fill = "Exposure group") +
+  theme_minimal()
+```
+
+
+```{r}
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S3",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+plot_ <- plot_grid(count_, perc_, nrow = 2, align = 'vh', axis = 'lrtb', labels = c('A','B'))
+
+ 
+combined <- plot_grid(
+  title, plot_,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,5,1), "cm"))
+
+ggsave('../data/14_group4_antibiotics.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+
+```
+
+
+```{r}
+# to just put the broad spectrum together with the fluoroquinolones
+library(tidyverse)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(cowplot)
+library(ggridges)
+library(brmstools)
+library(bayesplot)
+options(mc.cores = parallel::detectCores())
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+ncores <- parallel::detectCores()
+axis_text_size <- 10
+axis_title_size <- 10
+zero_line_size <- .8
+```
+
+
+```{r}
+exposure_grps <- med %>% 
+  distinct(sampleid, med_exposure_type, sdrt)
+
+# how many % of the samples had the abx if to put the broad_spectrum, fluoroquinolones all considered as the abx exposure btween 0 and 12
+two_time <-  exposure_grps %>% mutate(two = if_else(med_exposure_type %in% c('broad_spectrum','fluoroquinolones'), T, F)) %>% 
+  filter(sdrt %in% 0:12)
+
+
+two_time %>% 
+  count(two) %>% 
+  mutate(perc = round(n/sum(n)*100, 2))
+```
+
+
+```{r}
+two <- exposure_grps %>% filter(med_exposure_type %in% c('broad_spectrum','fluoroquinolones')) %>% pull(sampleid)
+
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) %>% 
+  mutate(fg_egg = fg_egg/100,
+         fg_fruit = fg_fruit/100,
+         fg_grain = fg_grain/100,
+         fg_legume = fg_legume/100,
+         fg_meat = fg_meat/100,
+         fg_milk = fg_milk/100,
+         fg_oils = fg_oils/100,
+         fg_sweets = fg_sweets/100,
+         fg_veggie = fg_veggie/100) %>% 
+  mutate(abx = if_else(sampleid %in% two, 1, 0),
+         TPN = if_else(TPN == 'TRUE', 1, 0),
+         EN = if_else(EN == 'TRUE', 1, 0)) %>% 
+  mutate(      fg_fruit_e= fg_fruit*abx,  
+                fg_meat_e=fg_meat*abx,
+                fg_milk_e=fg_milk*abx,
+                fg_oils_e=fg_oils*abx,
+                fg_egg_e=fg_egg*abx,
+                fg_grain_e=fg_grain*abx,
+                fg_sweets_e=fg_sweets*abx,
+                fg_legume_e=fg_legume*abx,
+                fg_veggie_e = fg_veggie*abx)
+
+
+```
+```{r}
+div_model  <- log(simpson_reciprocal) ~ 0 +
+                intensity+
+               fg_fruit_e+
+                fg_meat_e+
+                fg_milk_e+
+                fg_oils_e+
+                fg_egg_e+
+                fg_grain_e+
+                fg_sweets_e+
+                fg_legume_e+
+                fg_veggie_e+
+                abx+
+               fg_fruit+
+                fg_meat+
+                fg_milk+
+                fg_oils+
+                fg_egg+
+                fg_grain+
+                fg_sweets+
+                fg_legume+
+                fg_veggie+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+get_prior(div_model,data = meta )
+
+div_priors <- c(# for the food group variables
+            prior(normal(0, 1), class = 'b', coef = "fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "fg_veggie"),
+            # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "fg_egg_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_fruit_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_grain_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_legume_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_meat_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_milk_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_oils_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_sweets_e"),
+            prior(normal(0, 1), class = 'b', coef = "fg_veggie_e"),
+            # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "EN"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "abx"),
+            # for the intensity
+            prior(normal( 2, .1), class = 'b', coef = "intensityablative"),
+            prior(normal( 2, .1), class = 'b', coef = "intensityreduced"),
+            prior(normal( 2, .1), class = 'b', coef = "intensitynonablative")
+            )
+
+model_div <- brm( div_model,  
+              data = meta, 
+              warmup = 1000, iter = 3000, 
+              prior = div_priors,
+              cores = ncores, 
+              chains = 2, 
+               control = list(adapt_delta = 0.99),
+              seed = 123, sample_prior = T, file = '../data/14_div_model_interaction_two_abx') 
+
+# actually draw samples from the priors 
+samples_prior <- prior_draws(model_div)
+# save it for future use
+post_res <- suppressWarnings(posterior_samples(model_div)) 
+post_res %>%  write_csv('../data/14_div_model_interaction_two_abx.csv')
+plot(model_div)
+```
+
+
+```{r}
+fg_order <- c( 'Vegetables','abx * Vegetables',
+                 'Oils','abx * Oils',
+                 'Fruits','abx * Fruits',
+                 'Meats','abx * Meats',
+                 'Legumes','abx * Legumes',
+                 'Eggs','abx * Eggs',
+                 'Milk','abx * Milk',
+                 'Grains','abx * Grains',
+                 'Sweets','abx * Sweets',
+                 "TPN" ,"EN" , 'abx')
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+cleaned_fg <- post_res  %>% select(starts_with('b_')) %>% 
+  gather('item', 'coeff') %>% 
+  mutate(item = str_replace(item, 'b_fg_',''),
+         item = str_replace(item, 'b_',''),
+         item = str_replace(item, 'intensity','')) %>% 
+   mutate(fgrp1 = case_when(
+    item ==  'milk' ~ '1',
+    item == 'meat' ~ '2',
+    item ==  'egg' ~ '3',
+    item ==  'legume' ~ '4',
+    item == 'grain' ~ '5',
+    item == 'fruit' ~ '6',
+    item == 'veggie' ~ '7',
+    item ==  'oils' ~ '8', 
+    item ==  'sweets' ~ '9'
+  ))  %>% 
+  left_join(key %>% select(fgrp1, color, shortname)) %>% 
+  mutate(shortname = case_when(
+        item ==  'milk_e' ~ 'abx * Milk',
+    item == 'meat_e' ~ 'abx * Meats',
+    item ==  'egg_e' ~ 'abx * Eggs',
+    item ==  'legume_e' ~ 'abx * Legumes',
+    item == 'grain_e' ~ 'abx * Grains',
+    item == 'fruit_e' ~ 'abx * Fruits',
+    item == 'veggie_e' ~ 'abx * Vegetables',
+    item ==  'oils_e' ~ 'abx * Oils', 
+    item ==  'sweets_e' ~ 'abx * Sweets',
+    item ==  'nonablative' ~ 'Nonablative',
+    item ==  'reduced' ~ 'Reduced',
+    item ==  'ablative' ~ 'Ablative',
+    item ==  'TPN' ~ 'TPN',
+    item ==  'EN' ~ 'EN',
+    item ==  'abx' ~ 'abx',
+    TRUE ~ `shortname`
+  )) %>% 
+  mutate(grp = if_else(item %in% c('nonablative','reduced','ablative'), 'patient', 'temporal')) 
+
+# find the credible interval of the abx line
+cleaned_fg %>% filter(str_detect(shortname, 'abx')) %>% 
+  group_by(shortname) %>% 
+  tidybayes::median_qi(coeff , .width = c( .95)) %>% 
+  mutate(coeff = round(coeff, 2),
+         .lower = round(.lower, 2),
+         .upper = round(.upper, 2))
+
+fg_label <- tibble(ord = fg_order) %>% 
+  mutate(shortname = str_replace(ord, 'abx \\+ ','')) %>% 
+  left_join(key %>% select(shortname, color)) %>% 
+  mutate(color = if_else(is.na(color), 'black', color))
+
+interaction_terms <- tibble(
+  shortname = fg_label$ord
+) %>% 
+  mutate(ymin = seq(1, nrow(.)) - 0.5,
+         ymax = seq(1, nrow(.)) + 0.5) %>% 
+  filter(str_detect(shortname, '\\*')) %>% 
+  mutate(xmin = -Inf, xmax = Inf,
+         interaction_fill = 'interaction_fill')
+
+# this leaves me no choice but I need to fill the other blue area with the blue rectangles 
+blue_terms <- tibble(
+  shortname = fg_label$ord
+) %>% 
+  mutate(ymin = seq(1, nrow(.)) - 0.5,
+         ymax = seq(1, nrow(.)) + 0.5) %>% 
+  filter(!str_detect(shortname, '\\*')) %>% 
+  mutate(xmin = -Inf, xmax = Inf,
+         blue_fill = 'blue_fill')
+
+cross0 <- cleaned_fg %>%
+   filter(grp == 'temporal') %>% 
+  group_by(item) %>% 
+  summarise(q2.5 = quantile(coeff, probs = 0.025),
+            q97.5 = quantile(coeff, probs = 0.975)) %>% 
+  mutate(Cross = if_else(q2.5 >= 0 | q97.5 <= 0, F, T))
+
+fg_temporal <- cleaned_fg %>% 
+  filter(grp == 'temporal') %>% 
+  mutate(shortname = factor(shortname, levels = fg_label$ord)) %>% 
+  left_join(cross0) %>% 
+  ggplot() +
+   stat_pointinterval(aes(x = coeff, y = shortname, col = Cross), .width = .95, fatten_point = 1.2) +
+  geom_rect(data = interaction_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = interaction_fill), alpha = .2) +
+  geom_rect(data = blue_terms, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = blue_fill) , alpha = .25) +
+  scale_fill_manual(values=c("interaction_fill" = "tan2", "blue_fill" = "#FAEFD1")) +
+  scale_color_manual(values = c("#EC0000", "black")) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  geom_vline(xintercept = 0, col = 'blue', size = zero_line_size) +
+  labs(x = 'ln(diversity) change', y = '') +
+  theme_classic() +
+  theme(legend.position = 'none') +
+  theme(axis.text = element_text( size = 10),
+        axis.text.y = element_markdown(),
+        plot.background = element_rect(fill='transparent', color=NA), 
+        axis.title=element_text(size=10), 
+        aspect.ratio=1.5)      
+fg_temporal   
+
+
+```
+
+
+```{r}
+num_annot <- meta %>% 
+  split(.$abx) %>% 
+  imap_dfr(function(df, name_) {
+    df %>% distinct(pid) %>% nrow
+  }) %>% gather('abx','pt_num') %>% 
+  full_join(meta %>% count(abx) %>% mutate(abx = as.character(abx))) %>% 
+  rename(sample_num = n) %>% 
+  mutate(antibiotics = if_else(abx == 0, 'not exposed', 'exposed')) %>% 
+  mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
+
+
+library(wesanderson) 
+
+palette <- wes_palette("Royal1", 2)
+
+# the raw data 
+rawsweets <- meta %>% 
+  mutate(log_div = log(simpson_reciprocal)) %>% 
+  mutate(antibiotics = if_else(abx == 0, 'not exposed', 'exposed'),
+         antibiotics = factor(antibiotics, levels = c('not exposed','exposed'))) %>% 
+  ggscatter(x = 'fg_sweets', y = 'log_div', color = 'antibiotics',
+            ylab = 'log(diversity)',xlab = 'Sweets consumed (grams)',
+            alpha = 0.35, shape = 16, size = 1,
+            add = "reg.line",  # Add regressin line
+           add.params = list(color = 'antibiotics', fill = 'antibiotics', alpha = 0.3, size = 1.5), # Customize line
+           conf.int = TRUE, # Add confidence interval
+           cor.coef = TRUE, # Add correlation coefficient.
+           cor.coeff.args = list(method = "spearman",  label.sep = "\n", cor.coef.name = c("rho"),p.accuracy = 0.01, r.accuracy = 0.01,label.x.npc = "left", label.y.npc = "bottom", size = 3.5)) +
+  geom_text(data = num_annot, aes(label = lbl), 
+              x = Inf, y = Inf, hjust = 0.6, vjust = 1.5) +
+  scale_x_sqrt() +
+  scale_y_sqrt() +
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics',values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ antibiotics, labeller = 'label_both', dir = 'h') +
+  theme(aspect.ratio = 1/1.15, 
+        #legend.position = 'none',
+          strip.background = element_blank(),
+        strip.text.x = element_blank(), 
+     axis.text=element_text(size=9), axis.title=element_text(size=9)) 
+rawsweets
+
+ggsave('../data/14_two_abx.png', width = 10)
+```
+
+
+
+
+
+
+
