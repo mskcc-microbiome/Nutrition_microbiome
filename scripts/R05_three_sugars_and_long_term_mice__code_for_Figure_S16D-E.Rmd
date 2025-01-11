@@ -81,6 +81,10 @@ f3_five_days <- f3_five %>%
   theme(axis.text =  element_text(size = 10),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/3)
 f3_five_days %>% write_rds('../data/05_f3_five_days.RDS')
 f3_five_days
+
+f3_five %>% 
+  count(experiment, abx_treatment,  diet_treatment , day) %>% 
+  summarise(min_ = min(n), max_ = max(n))
 ```
 
 
@@ -133,15 +137,31 @@ deltas <- f3_sugars %>%
   # remove any rows that has NA in D3
   filter(!is.na(d3))
 
-# the fold change on day 3
-day3fc <- deltas %>% 
-  filter(str_detect(grp, 'biapenem')) %>% 
-  select(grp, mouse_identifier, d3) %>% 
-  spread('grp','d3') %>% 
-  filter(!is.na(biapenem_vehicle)) %>% 
-  mutate(fc_fructose = round(biapenem_fructose/biapenem_vehicle, 2),
-         fc_glucose = round(biapenem_glucose/biapenem_vehicle, 2),
-         fc_sucrose = round(biapenem_sucrose/biapenem_vehicle, 2)) 
+# the fold change on day 3 between the two groups 
+# should be computed as : median of the day3 of the abx only , and median of the day 3 of the abx + sugar , and the fold change of the two medians 
+ 
+medians <- deltas %>% 
+  split(.$grp) %>% 
+  map(function(df){
+    df %>% summarise(median_d3 = median(d3, na.rm = T),
+                     median_d6 = median(d6, na.rm = T))
+  }) %>% 
+  bind_rows(.id = 'grp')
+```
+
+
+```{r}
+# so the fold change between abx + sucrose and abx only on day 3 is : 
+round(6.980520e+06	/1.672251e+05	, 1 )
+
+# the above at day 6
+round(17668.8445		/681.8511	, 1 )
+
+# fructose 
+round(9.411766e+06		/1.672251e+05	, 1 )
+
+# glucose 
+round(1.188999e+07		/1.672251e+05	, 1 )
 ```
 
 

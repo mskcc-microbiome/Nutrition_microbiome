@@ -448,9 +448,7 @@ num_annot <- META %>%
   rename(sample_num = n) %>% 
   mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed')) %>% 
   mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
-```
 
-```{r raw_sweets}
 # the raw data 
 rawsweets <- META %>% 
   mutate(log_div = log(simpson_reciprocal)) %>% 

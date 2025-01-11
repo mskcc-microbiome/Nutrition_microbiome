@@ -45,7 +45,10 @@ chow_days <- chow %>%
             xlab = '', ylab = 'Chow consumption (grams)\nper mouse per day',
             add = 'jitter', 
             outlier.shape = NA,
-            palette = c('gray32','deeppink2')) + theme_light() + theme(legend.position = 'none')
+            palette = c('gray32','deeppink2')) + theme_light() + theme(legend.position = 'none') +
+  stat_compare_means(comparisons = list( 
+                        c("biapenem\n+\nvehicle", "biapenem\n+\nsucrose")),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T)
+chow_days
 chow_days %>% write_rds('../data/08_chow_days.RDS')
 ```
 

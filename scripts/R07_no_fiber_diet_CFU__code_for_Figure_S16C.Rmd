@@ -18,6 +18,7 @@ library(ggrepel)
 library(cowplot)
 library(kableExtra)
 ```
+
 B+S  (Biapenem + Sucrose) PS (PBS + Sucrose) BP (Biapenem +Plain Hydrogel) and PP (PBS + Plain Hydrogel)
 
 ```{r}
@@ -46,6 +47,10 @@ plotdf <- nofiber %>%
   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
   mutate(grp = factor(grp, levels = c('DPBS__vehicle','DPBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+
+nofiber %>% 
+  count(experiment, treatment, day) %>% 
+  summarise(min_ = min(n), max_ = max(n))
 ```
 
 ```{r}
@@ -210,14 +215,14 @@ S_mouse1 <- plot_grid(chowones, NA, nofiber, NA, glucose,NA, long,
                  label_size = 12, ncol = 1,labels = c(NA,'C','D','E'),
                 align = 'vh', axis = 'lrtb')
 
- 
+  
 combined <- plot_grid(
   title, S_mouse1,
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.05, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
-
+ 
 ggsave('../data/07_diet_mice.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
 ```
