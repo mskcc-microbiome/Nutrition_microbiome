@@ -139,6 +139,12 @@ transplant_CFU_plot <- transplant_CFU %>%
   theme(axis.text.x =  element_text(size = 10),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/2.8)
 transplant_CFU_plot
 transplant_CFU_plot %>% write_rds('../data/02_transplant_CFU_plot.RDS')
+
+transplant_CFU %>% 
+  count(abx_treatment, diet_treatment, day_relative_to_transplant, gvhd_grp) %>% 
+  filter(gvhd_grp == 'BMonly') %>% 
+  summarise(min_ = min(n), max_ = max(n))
+  
 ```
 
 
