@@ -20,13 +20,14 @@ library(gt)
 library(cowplot)
 library(survminer)
 library(patchwork)
+library(geepack)
 ```
 
 
 # load the cleaned data
 
 ```{r}
-# load("../data/df_main.Rdata")
+# load("../data/df_main_Dec10.Rdata")
 # link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
 # 
 # df_main <- df_main |>
@@ -42,17 +43,21 @@ library(patchwork)
 #   select(-d100_a_gvhd_onset, -mrn_str, -agvhd_onset,  -mrn) %>%
 #   relocate(pid, .before = 'source')
 # 
-# df_main %>% write_rds('../data/R02_cleaned_clinical_outcome.rds')
+# df_main %>% write_rds('../data/R02_cleaned_clinical_outcome2.rds')
 
 # the below table has the pid
-df_main <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>%
+df_main <- read_rds('../data/R02_cleaned_clinical_outcome2.rds') %>%
   mutate(modal_diet = as.character(modal_diet),
          modal_diet = if_else(modal_diet == 'High intake', 'Higher-intake', 'Lower-intake/sugar-enriched'),
-         modal_diet = factor(modal_diet, levels = c('Lower-intake/sugar-enriched','Higher-intake'))) %>% 
+         modal_diet = factor(modal_diet, levels = c( 'Lower-intake/sugar-enriched', 'Higher-intake'))) %>% 
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
   mutate(source_and_gvhdppx = str_glue('{source}+{gvhd_ppx}'),
-         source_and_gvhdppx = factor(source_and_gvhdppx, levels = c('TCD+TCD','Cord+CNI-based','Unmodified+CNI-based','Unmodified+PTCy-based')))
+         source_and_gvhdppx = factor(source_and_gvhdppx, levels = c('TCD+TCD','Cord+CNI-based','Unmodified+CNI-based','Unmodified+PTCy-based')),
+         day_exposed_cat = factor(day_exposed_cat, levels = c('Short exposure (< 8 days)','Long exposure (>= 8 days)')))
 df_main %>% count(source_and_gvhdppx)
+
+# find out the abx exposure days
+
 ```
  
 ```{r}
@@ -119,8 +124,42 @@ survival_plot <- list(
   ggsurvfit::ggsurvfit_build(OS_clusers)
 ) |> 
   wrap_plots()
+
+# the multivariate model (the code gets a little bit too messy so I just put this here together with the univariate )
+fit <- coxph(Surv(OStime_30,OSevent)~modal_diet*abx13  + intensity + source_and_gvhdppx,
+             data = df_main |> filter(OStime_30 > 0 ) %>% mutate(abx13 = if_else(day_exposed>= 13, 'long', 'short'), abx13 = factor(abx13, levels = c('short','long'))))
+
+
+fit |> 
+  tbl_regression(exponentiate = FALSE) |> 
+  bold_p() |> 
+  as_gt()  |> 
+  gtsave(filename="../data/09_OS_model_multi_inclu_carb.png")
+
+# what is the distribution of the day exposed
+summary(fit)
 ```
 
+```{r}
+
+# 
+# dtb %>% ggscatter(x = 'Calories_kcal', y = 'estimated_cal') +
+#   geom_abline( slope = 1, intercept = 0)
+
+# Sugar Density (grams sugar/1000 kcal):
+# calculate the density 
+
+# the median for each patient
+median_sugar_pt <- dtb %>% 
+  group_by(pid) %>% 
+  summarise(median_per_pt = median(dens_sugar, na.rm = T))
+
+median_whole <- median(median_sugar_pt$median_per_pt, na.rm = T)
+
+high_sugar_pts <- median_sugar_pt %>% 
+  filter(median_per_pt >= median_whole) %>% 
+  pull(pid)
+```
 
 ## Table S3 model fit
 
@@ -143,10 +182,29 @@ input_df <- df_main |>
    mutate(`Diet-pattern cluster` = case_when(
     `Diet-pattern cluster` == 'Lower-intake/sugar-enriched' ~ 'Cluster 1 (Lower-intake/sugar-enriched)',
     `Diet-pattern cluster` == 'Higher-intake' ~ 'Cluster 2 (Higher-intake)' 
-  ))
+  )) %>% 
+  mutate(grp = if_else(pid %in% high_sugar_pts, 'high_sugar', 'lower_sugar'))
 
 
-fit <- coxph(Surv(OStime_30,OSevent)~`Diet-pattern cluster`*`Abx exposure(days)`  + `Conditioning intensity` + `Graft source and GvHD prophylaxis`,
+OS_clusers <- survfit2(Surv(OStime_30,OSevent)~grp  , data = input_df |> filter(OStime_30 > 0 )) %>%
+  ggsurvfit(linewidth = 0.8) +
+  add_pvalue("annotation",size=5) +
+  add_risktable()+
+  ylab("Survival probability") +
+  xlab("Days relative to HCT, landmarked at day 12")+
+   scale_color_manual(values = c( "darkslateblue",  "darkgoldenrod2"), name = '') +
+  ylim(c(0,1)) +
+  ggtitle("")+
+  theme(aspect.ratio = 1/1.5, legend.position = c(0.5, 0.3))
+OS_clusers
+
+survival_plot <- list(
+  ggsurvfit::ggsurvfit_build(OS_clusers)
+) |> 
+  wrap_plots()
+
+
+fit <- coxph(Surv(OStime_30,OSevent)~grp*`Abx exposure(days)`  + `Conditioning intensity` + `Graft source and GvHD prophylaxis`,
              data= input_df)
 
 
@@ -402,6 +460,10 @@ colnames(df_main)
 df <- df_main  %>% 
   select(where(is.Date)) %>% 
   gather()
+
+df_main %>% 
+  ggboxplot(x = 'modal_diet', y = 'day_exposed', add = 'jitter') +
+  stat_compare_means()
 ```
 
 ## aGVHD onset cumulative incidence ~ modal_diet
@@ -421,6 +483,8 @@ cuminc_cluster_plot <- list(
   ggsurvfit::ggsurvfit_build(cuminc_cluster)
 ) |> 
   wrap_plots()
+
+cuminc_cluster_plot
 ```
 
 
