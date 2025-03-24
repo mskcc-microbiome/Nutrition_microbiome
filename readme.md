@@ -7,22 +7,9 @@ The code performs statistical analyses (including Bayesian inference) and genera
 
 ## data/ 
 
-### Patient Characteristics Data (`patient_characteristics.csv`)
+## Data Availability
 
-This file (`patient_characteristics.csv`) provides deidentified demographic and clinical characteristics for the 173 patients included in the study cohort.  These characteristics are used in various analyses throughout the manuscript.
-
-| Column Name          | Description                                                                                                                                                                                            | Data Type | Possible Values/Examples                                                                     |
-|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|
-| `pid`                | Deidentified patient identifier.  Each patient has a unique `pid`.                                                                                                                              | character | "P1", "P2", "P3", ...                                                                       |
-| `age`                | Patient age in years at the time of transplant.                                                                             | numeric   | Numeric values.                                                        |
-| `sex`                | Patient sex.                                                                                                                                                                                | character | "M" (Male), "F" (Female)                                            |
-| `disease.simple`     | Simplified disease type. The following abbreviations are used: *Define each abbreviation here.  For example:*<br>  *   AML: Acute Myeloid Leukemia<br>  *   ALL: Acute Lymphoblastic Leukemia<br>  *   NHL: Non-Hodgkin Lymphoma<br>  *   MDS/MPN: Myelodysplastic Syndromes/Myeloproliferative Neoplasms<br>  *   CML: Chronic Myelogenous Leukemia<br>  *   CLL: Chronic Lymphocytic Leukemia<br> *   Hodgkins: Hodgkin's Lymphoma<br> *   Myeloma: Multiple Myeloma     | character | "AML", "ALL", "NHL", "MDS/MPN", "CML", "CLL", "Hodgkins", "Myeloma"                             |                                                                  |
-| `source`             | Graft source type.  The following abbreviations are used: *Define each abbreviation.  For example:* <br> *  unmodified: Unmodified graft<br> *   TCD: T-cell depleted     | character |  "unmodified","TCD"...                                                                         |
-| `intensity`          | Conditioning regimen intensity. The following abbreviations are used:*Define each abbreviation*. For example:<br> * ablative:Ablative conditioning regimen <br> * nonablative:Non-ablative conditioning regimen <br> * reduced: reduced-intensity conditioning.         | character |  "ablative", "nonablative", "reduced"...                                                             |
-| `gvhd_ppx`           | Graft-versus-host disease (GVHD) prophylaxis regimen.  The following abbreviations are used: *Define each abbreviation*. For example:<br>  * CNI-based: Calcineurin inhibitor-based prophylaxis<br> * PTCy-based: Post-transplant cyclophosphamide-based prophylaxis        | character |   "CNI-based", "PTCy-based"...                                                                   |
-| `day_exposed`        | Number of days the patient was exposed to broad-spectrum antibiotics within the window of day -7 to day +12, relative to the day of transplant (day 0).  The following antibiotics were considered broad-spectrum: piperacillin/tazobactam, carbapenems (e.g., meropenem, imipenem), cefepime, linezolid, oral vancomycin, and metronidazole. | integer   | 0, 1, 2, 3, ...                                                                             |
-
-
+The patient-level clinical data used in this study are not publicly available due to patient privacy concerns and institutional regulations.  These data can be made available to qualified researchers upon reasonable request and with the execution of a data use agreement with Memorial Sloan-Kettering Cancer Institute.  Requests for data access should be directed to Dr. Jonathan Peled at peledj@mskcc.org.
 
 
 ## Reproducing the R Environment
