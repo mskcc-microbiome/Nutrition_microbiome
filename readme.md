@@ -24,6 +24,19 @@ This file (`NodeLabelsMCT.txt`) contains information used to describe the differ
 | `Main.food.description` | Text description of the food category corresponding to the `Level.code`                                         | character   |
 
 
+## Food Group Color Key (`food_group_color_key_final.csv`)
+
+This file (`food_group_color_key_final.csv`) provides a mapping between food group codes, names, and colors used for visualization in the manuscript.
+
+| Column Name | Description                                                                                  | Data Type   |
+|-------------|----------------------------------------------------------------------------------------------|-------------|
+| `fgrp1`     | Numeric code representing the food group (corresponds to the first digit of the full food code). | integer     |
+| `fdesc`     | Full descriptive name of the food group.                                                   | character   |
+| `fg1_name`  | Short variable-friendly name for the food group.                                        | character   |
+| `color`     | Hexadecimal color code used for representing this food group in figures (e.g., food trees).     | character   |
+| `shortname` | Short, one-word name of the food group.                                                      | character   |
+
+
 ## Data availability for the patient-level clinical data 
 
 The patient-level clinical data used in this study are not publicly available due to patient privacy concerns and institutional regulations.  These data can be made available to qualified researchers upon reasonable request and with the execution of a data use agreement with Memorial Sloan-Kettering Cancer Institute.  Requests for data access should be directed to Dr. Jonathan Peled at peledj@mskcc.org.
