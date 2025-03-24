@@ -24,9 +24,7 @@ This file (`NodeLabelsMCT.txt`) contains information used to describe the differ
 | `Main.food.description` | Text description of the food category corresponding to the `Level.code`                                         | character   |
 
 
-## 
-
-
+## Data availability for the patient-level clinical data 
 
 The patient-level clinical data used in this study are not publicly available due to patient privacy concerns and institutional regulations.  These data can be made available to qualified researchers upon reasonable request and with the execution of a data use agreement with Memorial Sloan-Kettering Cancer Institute.  Requests for data access should be directed to Dr. Jonathan Peled at peledj@mskcc.org.
 
@@ -57,7 +55,7 @@ To recreate the R environment:
     ```r
     renv::restore()
     ```
-    This command will read the `renv.lock` file and install the *exact* versions of all packages listed there into a project-specific library.  This may take some time, especially the first time you run it.  `renv` may need to download and compile packages.
+    This command will read the `renv.lock` file and install the *exact* versions of all packages listed there into a project-specific library.  This may take some time, especially the first time you run it.  `renv` may need to download and compile packages. 
 
 5.  **Activate the Environment (if not using RStudio):**
     If you are *not* using RStudio, you will need to *activate* the `renv` environment after restoring it.  This is done automatically by RStudio when you open the `.Rproj` file.  To activate manually, run:
@@ -66,3 +64,26 @@ To recreate the R environment:
     ```
     You'll only need to do this once per R session, *if* you aren't using RStudio.
 
+
+## Setting up the Conda Environment for Graphlan
+
+These instructions assume you have Conda (either Miniconda or Anaconda) installed.
+
+1.  **Create a new environment:**
+    ```bash
+    conda create -n graphlan_env python=2.7 biopython matplotlib
+    ```
+    This command creates a new Conda environment named `graphlan_env` with Python 2.7, Biopython, and Matplotlib. We'll install Graphlan in the next step. Note that specific version can be specified via `biopython>=1.6 matplotlib>=1.1`.
+
+2.  **Activate the environment:**
+    ```bash
+    conda activate graphlan_env
+    ```
+
+3. **Install Graphlan:**
+
+   Follow the installation instruction of Graphlan. For example, using pip.
+   ```bash
+    pip install graphlan
+    ```
+    

@@ -1,0 +1,217 @@
+---
+title: "Tree building"
+author: "Anqi Dai"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+library(tidyverse)
+library(data.tree)
+library(viridisLite)
+library(readxl)
+library(data.table)
+```
+
+
+# the food database (The code here is adapted from https://github.com/knights-lab/Food_Tree )
+
+```{r}
+### The food database with all the unique food from the diet project
+# need to get rid of the all the special characters, so that you will only see underscores
+# including the semicolon damn the semi colon
+
+# uniq_food is a table with the food_nsc and food code and description
+dtball <- read_csv('../data/152_combined_DTB.csv')
+
+uniq_food <- dtball %>% 
+  distinct(Food_code, description)  
+
+
+food_database <- uniq_food %>% 
+  distinct(Food_code, .keep_all = T)  %>%  
+  rename(FoodID = Food_code) %>% 
+  mutate(description = str_replace_all(description,',| |-|\\(|\\)|%|/|"|;','_')) %>% 
+  mutate(description = str_replace_all(description,"'",""))  
+```
+
+# the nodes   
+
+```{r}
+nodes_fn <- '../data/NodeLabelsMCT.txt'
+
+num.levels <- 7
+```
+
+# the df transformation
+
+```{r}
+fdata <- food_database
+nodes <- read.table(nodes_fn, header = TRUE, sep="\t", fill = TRUE , colClasses="character")
+
+main <- fdata[,c("FoodID", "description")]
+
+
+# if there happen to be duplicate FoodIDs in main, remove them
+main <- main[!duplicated(main$FoodID),]
+
+flevels <- NULL
+for(i in 1:num.levels)
+    flevels <- cbind(flevels, I(substr(main$FoodID, 1, i)))
+colnames(flevels) <- paste0("L",1:num.levels)
+main <- data.frame(main, flevels, stringsAsFactors=F)
+
+
+# melt the data, merge to get the node names, then cast back
+main.melt <- reshape2::melt(main, id.vars = "FoodID", variable.name = "Level", value.name = "Level.code")
+main.merge <- merge(main.melt, nodes, by = "Level.code")
+setDT(main.merge)
+main.cast <- data.table::dcast(main.merge, FoodID ~ Level, value.var = "Main.food.description")
+
+# prepend level to all level descriptions
+main.cast[is.na(main.cast)] <- ""
+#main.cast[,colnames(main.cast)[-1]] <- sapply(colnames(main.cast)[-1], function(colname) paste(colname, main.cast[,colname], sep="_"))
+
+# merge back with original table to grab Food Description
+main.join <- merge(main.cast, main[,c("FoodID","description")], by="FoodID")
+
+# create a proper newick string for the tree
+newickstring <- paste("foodtreeroot", apply(main.join, 1, function(xx) paste(xx[-1], collapse="/")), sep="/")
+# create a proper taxonomy string for QIIME
+taxonomy <- apply(main.join, 1, function(xx) paste(xx[-1], collapse=";"))
+
+final.table <- data.frame(main.join, newickstring, taxonomy, stringsAsFactors=F) %>% 
+  # THE BELOW IS ESSENTIAL, THAT WE WANNA USE FOOD ID INSTEAD OF DESCRIPTION TO REPRESENT THE FOOD
+  mutate(newickstring = str_glue('foodtreeroot/{L1}/{L2}/{L3}/{L4}/{L5}/{L6}/{FoodID}'))
+
+final.table %>% 
+  write_csv('../intermediate_data/final_table_for_writing_out_to_newick.csv')
+```
+
+
+# make the tree in newick
+
+```{r}
+#### Make and export the tree ####
+# the below is the tree that is gonna be used in the procrustes since the food is represented by food_code
+foodTree <- as.Node(final.table, pathName = "newickstring")
+tree <- ToNewick(foodTree)
+cat(tree, file = '../results/output_food_tree_datatree.newick') 
+```
+
+```{r}
+library(phytools)
+tre <-   read.newick('../results/output_food_tree_datatree.newick')
+leaves <- tibble(
+  fcode = tre$tip.label
+)
+dtb <- read_csv('../data/152_combined_DTB.csv')
+
+n_meal <- dtb %>% 
+  count(pid, fdrt, Meal) %>% 
+  nrow()
+
+matching <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+food_code_sum <- dtb %>% 
+  group_by(Food_code) %>% 
+  summarise(fc_sum = sum(dehydrated_weight)) %>% 
+  mutate(Food_code = as.character(Food_code))  %>% 
+  filter(Food_code %in% leaves$fcode)
+
+food_code_sum_ <- food_code_sum[order(leaves$fcode),]
+```
+
+```{r}
+# the newick string for the nodes
+tree_df <- read_csv('../intermediate_data/final_table_for_writing_out_to_newick.csv', col_types = cols(.default = col_character())) %>% 
+  select(FoodID, description)
+```
+
+## plot with bar plot and then try to overlay
+
+```{r}
+# make the circular bar plot
+bars <- food_code_sum_ %>% 
+  mutate(per_meal_ave = round(fc_sum/n_meal, 3)) %>% 
+  mutate(fgrp1 = str_sub(Food_code, 1, 1)) %>% 
+  left_join(matching, by = "fgrp1") %>% 
+  mutate(fg1_name = factor(fg1_name, levels = c('fg_egg', 'fg_oils', 'fg_legume', 'fg_fruit', 'fg_sweets', 'fg_milk','fg_meat', 'fg_veggie', 'fg_grain' ))) %>% 
+  arrange(fg1_name)
+
+food_code_level <- bars %>% pull(Food_code)
+
+bars_ <- bars %>% 
+  mutate(Food_code = factor(Food_code, levels = food_code_level))
+```
+
+## plot using the graphlan itself
+ 
+Need to make the annotation file to specify how the tree ring looks like
+
+```{r per_meal_ave_ring_annot}
+ring <- bars_ %>%  
+  select(Food_code, ring_height = per_meal_ave, ring_color = color) %>% 
+  mutate(Food_code = as.character(Food_code)) %>% 
+  full_join(tree_df %>% select(Food_code = FoodID, description)) %>% 
+  select(description, ring_height:ring_color) %>% 
+  mutate(ring_width = 0.5) %>% 
+  gather('key','value', ring_height:ring_width) %>% 
+  mutate(ring_level = 1) %>% 
+  select(description, key, ring_level, value) 
+  
+ring %>% 
+  write_tsv('../intermediate_data/ring_annot.txt', col_names = F)
+```
+
+```{r one_day}
+ring_itself <- tibble(
+  ring_level = c(1),
+  ring_internal_separator_thickness = 0,
+  ring_external_separator_thickness = 0,
+  ring_label_font_size = 5,
+  ring_separator_color = 'black'
+) %>% 
+  gather('key', 'value', ring_internal_separator_thickness:ring_separator_color) %>% 
+  select(key, ring_level, value) %>% 
+  write_tsv('../intermediate_data/ring_itself.txt', col_names = F)
+```
+
+
+    
+```{r}
+# remake the output_food_tree_datatree_name.newick file
+# make another tree with leave nodes as the name description so it is not some numbers
+final.table <- read_csv('../intermediate_data/final_table_for_writing_out_to_newick.csv')
+
+final_table_name <- final.table%>% 
+  mutate(newickstring_name = str_glue('foodtreeroot/{L1}/{L2}/{L3}/{L4}/{L5}/{L6}/{description}'))
+
+#### Make and export the tree ####
+foodTree <- as.Node(final_table_name, pathName = "newickstring_name")
+tree <- ToNewick(foodTree)
+cat(tree, file = '../results/output_food_tree_datatree_name.newick')
+```
+    
+```{bash}
+cat ../data/annotation.base.txt ../intermediate_data/ring_itself.txt > ../intermediate_data/Annot_tree2.txt 
+cat ../intermediate_data/Annot_tree2.txt ../intermediate_data/ring_annot.txt > ../intermediate_data/Annot_tree4.txt 
+```
+
+
+**See this page: https://huttenhower.sph.harvard.edu/graphlan/ for installation of this tool**
+**Change the path to suit how you would run the tool**
+
+```{bash}
+# the key is that the tree and the annot file has to have the string of food name as leaves 
+../softwares/graphlan/graphlan_annotate.py --annot ../intermediate_data/Annot_tree4.txt ../results/output_food_tree_datatree_name.newick  ../intermediate_data/guide_1_new.xml
+../softwares/graphlan/graphlan.py ../intermediate_data/guide_1_new.xml ../results/F1_D_food_tree_004.pdf --dpi 300 --size 2.5 --pad 0
+# I can't generate pdf that is transparent so export it to png with transparent bg
+```
+
+
