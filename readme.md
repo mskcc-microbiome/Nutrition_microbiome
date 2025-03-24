@@ -7,7 +7,26 @@ The code performs statistical analyses (including Bayesian inference) and genera
 
 ## data/ 
 
-## Data Availability
+## Food Code Levels Table (`NodeLabelsMCT.txt`)
+
+This file (`NodeLabelsMCT.txt`) contains information used to describe the different levels of the food classification system. The source of the file is listed below.  
+
+**Source:**
+
+*   **Publication:** Johnson, A. J. et al. Daily Sampling Reveals Personalized Diet-Microbiome Associations in Humans. Cell Host Microbe 25, 789-802.e5 (2019).
+*   **Repository:** https://github.com/knights-lab/Food_Tree
+
+**File Structure:**
+
+| Column Name             | Description                                                                                        | Data Type   |
+|--------------------------|----------------------------------------------------------------------------------------------------|-------------|
+| `Level.code`            | A hierarchical code representing the level within the food code classification system.  Higher-level codes (e.g., "1", "11") represent broader categories, while lower-level codes (e.g., "1142") represent more specific food items.                                                | character   |
+| `Main.food.description` | Text description of the food category corresponding to the `Level.code`                                         | character   |
+
+
+## 
+
+
 
 The patient-level clinical data used in this study are not publicly available due to patient privacy concerns and institutional regulations.  These data can be made available to qualified researchers upon reasonable request and with the execution of a data use agreement with Memorial Sloan-Kettering Cancer Institute.  Requests for data access should be directed to Dr. Jonathan Peled at peledj@mskcc.org.
 
