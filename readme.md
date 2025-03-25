@@ -78,25 +78,37 @@ To recreate the R environment:
     You'll only need to do this once per R session, *if* you aren't using RStudio.
 
 
-## Setting up the Conda Environment for Graphlan
+## Run GraPhlAn with Docker (`shengwei/graphlan`)
 
-These instructions assume you have Conda (either Miniconda or Anaconda) installed.
+**1. Prep:**
 
-1.  **Create a new environment:**
+* Install [Docker](https://docs.docker.com/get-docker/).
+* Pull image: `docker pull shengwei/graphlan`
+
+**2. Key Concept: Linking Files**
+
+* We use `docker run -v "$(pwd)":/data ...`
+* **Important:** Inside the `docker run` command, always refer to your files using the `/data/` prefix (e.g., `/data/results/your_tree.txt`).
+
+**3. Run GraPhlAn:**
+
+Make sure your input tree and annotation files are in your current directory (or subdirectories like `results/`, `intermediate_data/`).
+
+* **Annotate:**
     ```bash
-    conda create -n graphlan_env python=2.7 biopython matplotlib
+    docker run --rm -v "$(pwd)":/data shengwei/graphlan:latest \
+      graphlan_annotate.py --annot /data/intermediate_data/Annot_tree4.txt \
+      /data/results/output_food_tree_datatree_name.newick \
+      /data/intermediate_data/guide_1_new.xml
     ```
-    This command creates a new Conda environment named `graphlan_env` with Python 2.7, Biopython, and Matplotlib. We'll install Graphlan in the next step. Note that specific version can be specified via `biopython>=1.6 matplotlib>=1.1`.
 
-2.  **Activate the environment:**
+* **Plot:**
     ```bash
-    conda activate graphlan_env
+    docker run --rm -v "$(pwd)":/data shengwei/graphlan:latest \
+      graphlan.py /data/intermediate_data/guide_1_new.xml \
+      /data/results/F1_D_food_tree_004.pdf \
+      --dpi 300 --size 2.5 --pad 0
     ```
 
-3. **Install Graphlan:**
-
-   Follow the installation instruction of Graphlan. For example, using pip.
-   ```bash
-    pip install graphlan
-    ```
+*(Output files like `guide_1_new.xml` and `F1_D_food_tree_004.pdf` will appear in your local directories).*
     

@@ -209,8 +209,8 @@ cat ../intermediate_data/Annot_tree2.txt ../intermediate_data/ring_annot.txt > .
 
 ```{bash}
 # the key is that the tree and the annot file has to have the string of food name as leaves 
-../softwares/graphlan/graphlan_annotate.py --annot ../intermediate_data/Annot_tree4.txt ../results/output_food_tree_datatree_name.newick  ../intermediate_data/guide_1_new.xml
-../softwares/graphlan/graphlan.py ../intermediate_data/guide_1_new.xml ../results/F1_D_food_tree_004.pdf --dpi 300 --size 2.5 --pad 0
+docker run --rm -v "$(pwd)":/data shengwei/graphlan:latest graphlan_annotate.py --annot /data/intermediate_data/Annot_tree4.txt /data/results/output_food_tree_datatree_name.newick  /data/intermediate_data/guide_1_new.xml
+docker run --rm -v "$(pwd)":/data shengwei/graphlan:latest graphlan.py /data/intermediate_data/guide_1_new.xml /data/results/F1_D_food_tree_004.pdf --dpi 300 --size 2.5 --pad 0
 # I can't generate pdf that is transparent so export it to png with transparent bg
 ```
 
