@@ -1,6 +1,6 @@
-Project Title: Sugar-rich foods exacerbate antibiotic-induced microbiome disruption.
+# Title: Sugar-rich foods exacerbate antibiotic-induced microbiome disruption.
 
-Brief Description:
+# Description:
 This repository contains the code and processed data used for the analyses presented in the manuscript "Sugar-rich foods exacerbate antibiotic-induced microbiome disruption".  
 The code performs statistical analyses (including Bayesian inference) and generates the figures demonstrating the link between dietary sugar intake, antibiotic exposure, and microbiome disruption in both human patients undergoing hematopoietic cell transplantation and in a mouse model.
 
@@ -39,7 +39,7 @@ This file (`food_group_color_key_final.csv`) provides a mapping between food gro
 
 ## Data availability for the patient-level clinical data 
 
-The patient-level clinical data used in this study are not publicly available due to patient privacy concerns and institutional regulations.  These data can be made available to qualified researchers upon reasonable request and with the execution of a data use agreement with Memorial Sloan-Kettering Cancer Institute.  Requests for data access should be directed to Dr. Jonathan Peled at peledj@mskcc.org.
+Patient-level clinical data are available through a data use agreement with Memorial Sloan Kettering Cancer Cancer.  Requests for data access should be directed to Dr. Jonathan Peled at peledj@mskcc.org.
 
 
 ## Reproducing the R Environment
@@ -111,4 +111,46 @@ Make sure your input tree and annotation files are in your current directory (or
     ```
 
 *(Output files like `guide_1_new.xml` and `F1_D_food_tree_004.pdf` will appear in your local directories).*
+
+
+## Setup and Installation of taxUMAP
+
+**1. Prerequisites:**
+* Install [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or Anaconda.
+* Ensure `git` is installed.
+
+**2. Get Project Code & Environment File:**
+* Clone this repository (the one containing this README and the `taxumap_environment.yml` file):
+    ```bash
+    git clone git@github.com:mskcc-microbiome/Nutrition_microbiome.git
+    cd Nutrition_microbiome
+    ```
+
+**3. Create the Conda Environment:**
+    ```bash
+    conda env create -f taxumap_environment.yml
+    ```
+
+**4. Activate the Environment:**
+    ```bash
+    conda activate taxumap_env
+    ```
+
+**5. Install Taxumap:**
+    ```bash
+    # Clone the taxumap repository
+    git clone [https://github.com/jsevo/taxumap.git](https://github.com/jsevo/taxumap.git)
+
+    # Navigate into the taxumap directory
+    cd taxumap
+
+    # Install taxumap using pip
+    pip install -e .
+    ```
+
+**6. Run Analysis:**
+    ```bash
+    run_taxumap.py -t ../../intermediate_data/162_food_taxa.csv -m ../../intermediate_data/162_food_code_relative.csv --agg_levels Kingdom/Phylum/Class/Order -n 173 --weights 0.01/2/10/10  -o ../../intermediate_data
+    ```
+
     

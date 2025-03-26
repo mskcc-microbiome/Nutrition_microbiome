@@ -66,7 +66,7 @@ top2level <- food_taxa %>%
 **Please refer this page for installation of taxUMAP: https://github.com/jsevo/taxumap**
 
 ```{bash}
-run_taxumap.py -t ../../intermediate_data/162_food_taxa.csv -m ../../intermediate_data/162_food_code_relative.csv --agg_levels Kingdom/Phylum/Class/Order -n 173 --weights 0.01/2/10/10  
+run_taxumap.py -t ../../intermediate_data/162_food_taxa.csv -m ../../intermediate_data/162_food_code_relative.csv --agg_levels Kingdom/Phylum/Class/Order -n 173 --weights 0.01/2/10/10  -o ../../intermediate_data
 ```
 
 
