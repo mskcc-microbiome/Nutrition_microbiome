@@ -135,23 +135,20 @@ model_div <- brm( div_model,
               cores = ncores, 
               chains = 2, 
                control = list(adapt_delta = 0.99),
-              seed = 123, sample_prior = T, file = '../data/173_div_model_interaction') 
+              seed = 123, sample_prior = T) 
 
 # actually draw samples from the priors 
 samples_prior <- prior_draws(model_div)
 # save it for future use
 post_res <- suppressWarnings(posterior_samples(model_div)) 
-post_res %>%  write_csv('../data/171_div_model_fg_post_interaction.csv')
-
-
-get_prior(div_model,  
-              data = meta)
+post_res %>%  write_csv('../results/173_div_model_fg_post_interaction.csv')
 ```
 
 
-# use their function to see the interaction effects
-
+# use conditional_effects function to see the marginal effects  
+ 
 ```{r}
+
 # I wanna use the original data types for this thing
 meta_original <- read_csv('../data/153_combined_META.csv') %>% 
   mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
@@ -217,7 +214,7 @@ model_div_original <- brm( mod_original,
               cores = ncores, 
               chains = 2, 
                control = list(adapt_delta = 0.99),
-              seed = 123, sample_prior = T, file = '../data/173_interaction_conditional_model')
+              seed = 123, sample_prior = T)
 ```
 
 ```{r}
@@ -227,7 +224,7 @@ condi_dat <- dat_conditional %>%
   keep(.p = str_detect(names(.), ':')) %>% 
   bind_rows(.id = 'grp')     
 
-condi_dat %>% write_csv('../data/173_conditional_data.csv')
+condi_dat %>% write_csv('../intermediate_data/173_conditional_data.csv')
 ```
 
 
@@ -237,7 +234,7 @@ condi_dat %>% write_csv('../data/173_conditional_data.csv')
 fitPrior <- brm(div_model, data=meta, 
                 family = 'gaussian',
                 prior=div_priors, seed = 123,
-           sample_prior = "only", file = '../data/173_prior_only_model')
+           sample_prior = "only")
 # the below is the posterior predictive check 
 prior_c <- pp_check(fitPrior, type = "scatter_avg", ndraws = 100)$data
 ```
@@ -252,16 +249,16 @@ prior_pred <- pp_check(fitPrior, ndraws = 500, alpha = 0.1) +
   theme(legend.position = 'bottom', legend.title = element_blank())
   
 prior_pred 
-ggsave('../data/173_Prior_pred_check.pdf')
+ggsave('../intermediate_data/173_Prior_pred_check.pdf')
 ```
 
-# for the S3
+# for the S4
 # posterior predictive check 
 
 ```{r}
 fit <- brm(div_model, data=meta, 
                 prior=div_priors, 
-           sample_prior = "no", seed = 12, file = '../data/173_posterior_pred_check')
+           sample_prior = "no", seed = 12)
 
 post_pred <- pp_check(fit, type = "boxplot", nreps = 10, notch = FALSE, alpha = 0)+
   labs(y = 'log(microbiome alpha diversity)',
@@ -269,19 +266,17 @@ post_pred <- pp_check(fit, type = "boxplot", nreps = 10, notch = FALSE, alpha = 
    scale_color_discrete(labels=c('observed distribution', 'simulated from posterior predictive distribution')) +
   theme(legend.position = 'bottom', legend.title = element_blank())
 post_pred 
-
-
 ```
 
-```{r}
-S3 <- plot_grid(prior_pred, NA,post_pred,
+```{r} 
+S4 <- plot_grid(prior_pred, NA,post_pred,
           labels = c("A",NA, "B"), align = "v",rel_heights = c(1,0.2,1),
           #label.y = 1,
           ncol = 1)
  
 title <- ggdraw() + 
   draw_label(
-    "Fig. S3",
+    "Fig. S4",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -289,21 +284,21 @@ title <- ggdraw() +
   theme(
     plot.margin = margin(0, 0, 0, 7)
   )
-
+ 
 combined <- plot_grid(
-  title, S3,
+  title, S4,
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(2,3,3,3), "cm"))
-
-ggsave('../data/S3_prior_and_post_pred_173.pdf',
+ 
+ggsave('../results/S04_prior_and_post_pred_173.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', 
-      #plot = combined, 
-      dpi = 300)
+      plot = combined, 
+      dpi = 300) 
 ```
 
-# the random intercepts of the week relative to transplant
+# the random intercepts of the week relative to transplant 
 
 ```{r}
 random_effects_timebin <- post_res %>% 
@@ -332,24 +327,7 @@ ggplot(random_effects_timebin_df, aes(x = coeff, y = weekID)) +
        title = "Caterpillar Plot of Random Intercepts for Week") +
   theme(axis.text.x = element_text(angle = 45,hjust = 1 ), aspect.ratio = 1)
   
-ggsave('../data/173_Caterpillar Plot of Random Intercepts for Week.jpg', width = 6, height = 6)
+
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

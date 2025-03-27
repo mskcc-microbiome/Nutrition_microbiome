@@ -26,8 +26,8 @@ META <- read_csv('../data/153_combined_META.csv')
 # 2D
 
 ```{r}
-macro <- read_csv('../data/090_model_alpha_macro_fat_post_interaction.csv')
-fg <- read_csv('../data/171_div_model_fg_post_interaction.csv')
+macro <- read_csv('../results/090_model_alpha_macro_fat_post_interaction.csv')
+fg <- read_csv('../results/173_div_model_fg_post_interaction.csv')
 
 fg_order <- c( 'Vegetables','abx * Vegetables',
                  'Oils','abx * Oils',
@@ -166,10 +166,7 @@ fg_pt <- cleaned_fg %>%
          panel.background = element_rect(fill = "gray95",colour = "gray95",size = 0.5, linetype = "solid"),axis.title=element_text(size=10), 
         aspect.ratio=1.3)
 
-ggsave('../data/f2c_176.pdf',
-      width = 80, height = 120, units = "mm", device = 'pdf', 
-      plot = fg_pt, 
-      dpi = 300)
+
 ```
 ```{r}
 # the credible interval for the intensity
@@ -299,6 +296,8 @@ macro_temporal <- cleaned_macro %>%
         aspect.ratio=1/1.2)
 macro_temporal
 ```
+
+
 # 2C intensity
 
 ```{r macro_pt}
@@ -352,10 +351,7 @@ f2a <- twoscore %>%
         legend.title = element_blank(), 
         axis.text.x = element_text(angle=0, hjust=0.5)) 
 f2a
-ggsave('../data/f2a_176.pdf',
-      width = 40, height = 70, units = "mm", device = 'pdf', 
-      plot = f2a, 
-      dpi = 300)
+
 ```
 
 
@@ -373,7 +369,7 @@ diagram
 # the conditional effects plot
 library(wesanderson) 
 key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
-conditional <- read_csv('../data/173_conditional_data.csv') %>% 
+conditional <- read_csv('../intermediate_data/173_conditional_data.csv') %>% 
   mutate(grp = str_replace(grp, '\\:empirical','')) %>% 
   left_join(key %>% select(grp = fg1_name, shortname)) %>% 
   mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
@@ -419,7 +415,7 @@ conditional9 <- conditional %>%
 # 2H condi macro
 
 ```{r}
-conditional3 <- read_rds('../data/090_conditional3.RDS')
+conditional3 <- read_rds('../intermediate_data/090_conditional3.RDS')
 ```
 
 ## condiall
@@ -543,7 +539,7 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/F2_model_results_176.pdf',
+ggsave('../results/F2_model_results_176.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', 
       #plot = combined, 
       dpi = 300)   

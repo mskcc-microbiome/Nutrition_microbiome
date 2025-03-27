@@ -1,6 +1,6 @@
 ---
 title: "Macronutrients with diversity or genus"
-output: html_document
+output: html_document  
 ---
 
 ```{r setup, include=FALSE}
@@ -50,59 +50,6 @@ full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.
 ```
 
 
-
-# carb only with other vars
-
-```{r}
-alpha_carb_only <- log(simpson_reciprocal) ~ 0 +
-               ave_carb_e +
-              ave_carb + 
-               abx+
-               intensity +
-                TPN+
-                EN+
-               (1 | pid) +
-                (1 | timebin)
-get_prior(formula = alpha_carb_only, data = full)
-
-priors_alpha_carb_only <- c(
-            # for the macro nutrients
-            prior(normal(0, 1), class = 'b', coef = "ave_carb"),
-            # for the interaction terms
-            prior(normal(0, 1), class = 'b', coef = "ave_carb_e"),
-
-            # for the TPN 
-            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
-            # for the EN
-            prior(normal(0, 0.1), class = 'b', coef = "EN"),
-            # for the empirical 
-            prior(normal(0, 0.5), class = 'b', coef = "abx"),
-            # for the intensity 
-            prior(normal(2, .1), class = 'b', coef = "intensityablative"),
-            prior(normal(2, .1), class = 'b', coef = "intensityreduced"),
-            prior(normal(2, .1), class = 'b', coef = "intensitynonablative"))
-
-# vet the prior 
-model_alpha_carb_only  <- brm( alpha_carb_only,  
-              data = full, 
-              warmup = 1000, iter = 3000, 
-              prior = priors_alpha_carb_only,
-               control = list(adapt_delta = 0.99),
-              cores = ncores,
-              chains = 2, 
-              seed = 125, sample_prior = T, file = '../data/090_model_alpha_carb_only')
-
-
-post_res <- suppressWarnings(posterior_samples(model_alpha_carb_only))
-post_res %>%  write_csv('../data/090_model_alpha_carb_only.csv')
-
-plot(model_alpha_carb_only)
-
-median_qi(post_res, .width = c(.95)) %>% 
-  gather()
-```
-
-
 ```{r}
 alpha_macro_fat <- log(simpson_reciprocal) ~ 0 +
                 ave_fiber_e +
@@ -147,15 +94,15 @@ model_alpha_macro_fat  <- brm( alpha_macro_fat,
                control = list(adapt_delta = 0.99),
               cores = ncores,
               chains = 2, 
-              seed = 125, sample_prior = T, file = '../data/090_alpha_macro_fat_interaction_model')
+              seed = 125, sample_prior = T)
 
 
 post_res <- suppressWarnings(posterior_samples(model_alpha_macro_fat))
-post_res %>%  write_csv('../data/090_model_alpha_macro_fat_post_interaction.csv')
+post_res %>%  write_csv('../results/090_model_alpha_macro_fat_post_interaction.csv')
 
-prior_df <- prior_draws(model_alpha_macro_fat) 
-prior_df %>% 
-  write_csv('../data/090_model_alpha_macro_fat_prior_interaction.csv')
+# prior_df <- prior_draws(model_alpha_macro_fat) 
+# prior_df %>% 
+#   write_csv('../data/090_model_alpha_macro_fat_prior_interaction.csv')
 
 ```
 
@@ -192,8 +139,7 @@ alpha_macro_fat_original <- log(simpson_reciprocal) ~ 0 +
                 EN+
                (1 | pid) +
                 (1 | timebin)  
- 
-get_prior(alpha_macro_fat_original,data = full_original )
+
 
 
 priors_alpha_macro_fat__original <- c(
@@ -217,7 +163,7 @@ priors_alpha_macro_fat__original <- c(
             prior(normal(2, .1), class = 'b', coef = "intensityReducedTRUE"),
             prior(normal(2, .1), class = 'b', coef = "intensityNonablativeTRUE"))
 
-# vet the prior 
+
 model_alpha_macro_fat_original  <- brm( alpha_macro_fat_original,  
               data = full_original, 
               warmup = 1000, iter = 3000, 
@@ -225,7 +171,7 @@ model_alpha_macro_fat_original  <- brm( alpha_macro_fat_original,
                control = list(adapt_delta = 0.99),
               cores = ncores,
               chains = 2, 
-              seed = 125, sample_prior = T, file = '../data/090_model_alpha_macro_fat_interaction_original')
+              seed = 125, sample_prior = T)
 
 dat_conditional_macro <- conditional_effects(model_alpha_macro_fat_original, surface = T)
 
@@ -233,8 +179,7 @@ condi_dat_macro <- dat_conditional_macro %>%
   keep(.p = str_detect(names(.), ':')) %>% 
   bind_rows(.id = 'grp')     
 
-```
-```{r}
+
 # to make the conditional plot like F2
 library(wesanderson) 
 key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
@@ -267,101 +212,95 @@ conditional3 <- condi_dat_macro %>%
         strip.background = element_rect(color="white", fill='#6B8E2340', size=1.5,linetype="solid"),
      axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
   guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
-conditional3  %>% write_rds('../data/090_conditional3.RDS') 
+conditional3  %>% write_rds('../intermediate_data//090_conditional3.RDS') 
 ```
 
 # macro genera     
 
 ```{r}
-priors <- c(  # for the macro nutrients
-            prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
-            prior(normal(0, 1), class = 'b', coef = "ave_fat"),
-            prior(normal(0, 1), class = 'b', coef = "ave_Sugars"),
-            # for the interaction terms
-            prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
-            prior(normal(0, 1), class = 'b', coef = "ave_fat_e"),
-            prior(normal(0, 1), class = 'b', coef = "ave_Sugars_e"),
-            # for the TPN 
-            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
-            # for the EN
-            prior(normal(0, 0.1), class = 'b', coef = "EN"),
-            # for the empirical 
-            prior(normal(0, 0.5), class = 'b', coef = "abx")
-            )
-
-```
-
-```{r}
-# I want to only include the genus that are more prevalent and abundant, and most likely exist in human gut
-meta <- read_csv('../data/153_combined_META.csv')
-
-cts <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
-  filter(sampleid %in% meta$sampleid) 
-thre <- seq(0.0001, 0.002, 0.0001)
-thre %>% 
-  set_names(thre) %>% 
-  map_dfr(function(num){
-    cts %>% 
-    group_by(genus) %>% 
-    count(relab > num) %>% 
-    rename(criteria = names(.)[2]) %>% 
-    filter(criteria == 'TRUE') %>% 
-    arrange(-n) %>% 
-    filter(genus != 'NA') %>% 
-    mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
-    filter(perc > 10) %>% 
-      nrow
-  }) %>% 
-  gather('thre', 'num')
-
-target_genera <-  cts %>% 
-  group_by(genus) %>% 
-  count(relab > 0.002) %>% 
-  rename(criteria = names(.)[2]) %>% 
-  filter(criteria == 'TRUE') %>% 
-  arrange(-n) %>% 
-  filter(genus != 'NA') %>% 
-  mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
-  filter(perc > 10) %>% 
-  pull(genus) 
-#target_genera %>% write_csv('../data/087_more_abundant_0.002_genus_33.csv')
-```
-  
- 
-```{r}
-macro_genus_interaction <- target_genera %>% 
-  set_names(target_genera) %>% 
-  purrr::map(function(genus) {
-    print(str_glue('{genus} is RUNNING!\n'))
-    mod =  brm( as.formula(str_glue(
-              '{genus}  ~ 
-              0 +
-                ave_fiber_e +
-                ave_fat_e +
-                ave_Sugars_e +
-                ave_fiber +
-                ave_fat +
-                ave_Sugars +
-               abx+
-               intensity +
-                TPN+
-                EN+
-               (1 | pid) +
-                (1 | timebin)')),  
-                data = full, 
-              warmup = 1000, iter = 3000, 
-              prior = priors,
-              cores = ncores, 
-              chains = 2, 
-              control = list(adapt_delta = 0.99),
-              seed = 456) 
-  })
-
-post_df <- macro_genus_interaction %>% 
-  imap(~ (suppressWarnings(posterior_samples(.x)) ))  %>% 
-  bind_rows(.id = 'genus')  
-post_df %>% 
-  write_csv('../data/090_target_genus_macro_model_post_interaction.csv')
+# priors <- c(  # for the macro nutrients
+#             prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
+#             prior(normal(0, 1), class = 'b', coef = "ave_fat"),
+#             prior(normal(0, 1), class = 'b', coef = "ave_Sugars"),
+#             # for the interaction terms
+#             prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
+#             prior(normal(0, 1), class = 'b', coef = "ave_fat_e"),
+#             prior(normal(0, 1), class = 'b', coef = "ave_Sugars_e"),
+#             # for the TPN 
+#             prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+#             # for the EN
+#             prior(normal(0, 0.1), class = 'b', coef = "EN"),
+#             # for the empirical 
+#             prior(normal(0, 0.5), class = 'b', coef = "abx")
+#             )
+# 
+# # I want to only include the genus that are more prevalent and abundant, and most likely exist in human gut
+# meta <- read_csv('../data/153_combined_META.csv')
+# 
+# cts <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
+#   filter(sampleid %in% meta$sampleid) 
+# thre <- seq(0.0001, 0.002, 0.0001)
+# thre %>% 
+#   set_names(thre) %>% 
+#   map_dfr(function(num){
+#     cts %>% 
+#     group_by(genus) %>% 
+#     count(relab > num) %>% 
+#     rename(criteria = names(.)[2]) %>% 
+#     filter(criteria == 'TRUE') %>% 
+#     arrange(-n) %>% 
+#     filter(genus != 'NA') %>% 
+#     mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
+#     filter(perc > 10) %>% 
+#       nrow
+#   }) %>% 
+#   gather('thre', 'num')
+# 
+# target_genera <-  cts %>% 
+#   group_by(genus) %>% 
+#   count(relab > 0.002) %>% 
+#   rename(criteria = names(.)[2]) %>% 
+#   filter(criteria == 'TRUE') %>% 
+#   arrange(-n) %>% 
+#   filter(genus != 'NA') %>% 
+#   mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
+#   filter(perc > 10) %>% 
+#   pull(genus) 
+# #target_genera %>% write_csv('../data/087_more_abundant_0.002_genus_33.csv')
+# 
+# macro_genus_interaction <- target_genera %>% 
+#   set_names(target_genera) %>% 
+#   purrr::map(function(genus) {
+#     print(str_glue('{genus} is RUNNING!\n'))
+#     mod =  brm( as.formula(str_glue(
+#               '{genus}  ~ 
+#               0 +
+#                 ave_fiber_e +
+#                 ave_fat_e +
+#                 ave_Sugars_e +
+#                 ave_fiber +
+#                 ave_fat +
+#                 ave_Sugars +
+#                abx+
+#                intensity +
+#                 TPN+
+#                 EN+
+#                (1 | pid) +
+#                 (1 | timebin)')),  
+#                 data = full, 
+#               warmup = 1000, iter = 3000, 
+#               prior = priors,
+#               cores = ncores, 
+#               chains = 2, 
+#               control = list(adapt_delta = 0.99),
+#               seed = 456) 
+#   })
+# 
+# post_df <- macro_genus_interaction %>% 
+#   imap(~ (suppressWarnings(posterior_samples(.x)) ))  %>% 
+#   bind_rows(.id = 'genus')  
+# post_df %>% 
+#   write_csv('../data/090_target_genus_macro_model_post_interaction.csv')
 
 
 ```
@@ -369,224 +308,54 @@ post_df %>%
 # macro and protein and genus
 
 ```{r}
-priors <- c(  # for the macro nutrients
-            prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
-            prior(normal(0, 1), class = 'b', coef = "ave_Sugars"),
-            prior(normal(0, 1), class = 'b', coef = "ave_Protein"),
-            # for the interaction terms
-            prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
-            prior(normal(0, 1), class = 'b', coef = "ave_Sugars_e"),
-            prior(normal(0, 1), class = 'b', coef = "ave_Protein_e"),
-            # for the TPN 
-            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
-            # for the EN
-            prior(normal(0, 0.1), class = 'b', coef = "EN"),
-            # for the empirical 
-            prior(normal(0, 0.5), class = 'b', coef = "abx")
-            )
-
-protein_macro_genus_interaction <- target_genera %>% 
-  set_names(target_genera) %>% 
-  purrr::map(function(genus) {
-    print(str_glue('{genus} is RUNNING!\n'))
-    mod =  brm( as.formula(str_glue(
-              '{genus}  ~ 
-              0 +
-                ave_fiber_e +
-                ave_Protein_e +
-                ave_Sugars_e +
-                ave_fiber +
-                ave_Protein +
-                ave_Sugars +
-               abx+
-               intensity +
-                TPN+
-                EN+
-               (1 | pid) +
-                (1 | timebin)')),  
-                data = full, 
-              warmup = 1000, iter = 3000, 
-              prior = priors,
-              cores = ncores, 
-              chains = 2, 
-              control = list(adapt_delta = 0.99),
-              seed = 456) 
-  })
-
-post_df <- protein_macro_genus_interaction %>% 
-  imap(~ (suppressWarnings(posterior_samples(.x)) ))  %>% 
-  bind_rows(.id = 'genus')  
-post_df %>% 
-  write_csv('../data/090_target_protein_genus_macro_model_post_interaction.csv')
+# priors <- c(  # for the macro nutrients
+#             prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
+#             prior(normal(0, 1), class = 'b', coef = "ave_Sugars"),
+#             prior(normal(0, 1), class = 'b', coef = "ave_Protein"),
+#             # for the interaction terms
+#             prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
+#             prior(normal(0, 1), class = 'b', coef = "ave_Sugars_e"),
+#             prior(normal(0, 1), class = 'b', coef = "ave_Protein_e"),
+#             # for the TPN 
+#             prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+#             # for the EN
+#             prior(normal(0, 0.1), class = 'b', coef = "EN"),
+#             # for the empirical 
+#             prior(normal(0, 0.5), class = 'b', coef = "abx")
+#             )
+# 
+# protein_macro_genus_interaction <- target_genera %>% 
+#   set_names(target_genera) %>% 
+#   purrr::map(function(genus) {
+#     print(str_glue('{genus} is RUNNING!\n'))
+#     mod =  brm( as.formula(str_glue(
+#               '{genus}  ~ 
+#               0 +
+#                 ave_fiber_e +
+#                 ave_Protein_e +
+#                 ave_Sugars_e +
+#                 ave_fiber +
+#                 ave_Protein +
+#                 ave_Sugars +
+#                abx+
+#                intensity +
+#                 TPN+
+#                 EN+
+#                (1 | pid) +
+#                 (1 | timebin)')),  
+#                 data = full, 
+#               warmup = 1000, iter = 3000, 
+#               prior = priors,
+#               cores = ncores, 
+#               chains = 2, 
+#               control = list(adapt_delta = 0.99),
+#               seed = 456) 
+#   })
+# 
+# post_df <- protein_macro_genus_interaction %>% 
+#   imap(~ (suppressWarnings(posterior_samples(.x)) ))  %>% 
+#   bind_rows(.id = 'genus')  
+# post_df %>% 
+#   write_csv('../data/090_target_protein_genus_macro_model_post_interaction.csv')
 ```
  
-#  calories density   
-
-```{r}
-# to calculate the percent of calories from each macronutrient
-# daily gram intake of each
-dtb <- read_csv('../data/152_combined_DTB.csv') %>%
-  select(pid, fdrt,description,  Calories_kcal:Sugars_g) %>%
-  select(-total_weight) %>%
-  group_by(pid, fdrt ) %>% 
-  summarise(d_carb = sum(Carbohydrates_g),
-            d_Protein_g = sum(Protein_g),
-            d_Fat_g = sum(Fat_g),
-            d_Calories_kcal = sum(Calories_kcal),
-            d_Fibers_g = sum(Fibers_g),
-            d_Sugars_g = sum(Sugars_g)) %>% 
-  filter(d_Calories_kcal > 0) %>% # to get rid of spurious results because of mathematical manipulatio
-  mutate(dens_Protein = round(d_Protein_g/(d_Calories_kcal )*1000, 2),
-         dens_carb = round(d_carb/(d_Calories_kcal )*1000, 2),
-         dens_fat = round(d_Fat_g/(d_Calories_kcal )*1000, 2),
-         dens_fiber = round(d_Fibers_g/(d_Calories_kcal )*1000, 2),
-         dens_sugar = round(d_Sugars_g/(d_Calories_kcal )*1000, 2)) %>% 
-  rowwise( ) %>% 
-  mutate(dens3 = dens_Protein + dens_carb + dens_fat) %>% 
-  mutate(log_den_sugar = log(dens_sugar + 0.5),
-        log_den_fiber = log(dens_fiber + 0.5),
-        log_den_3 = log(dens3 + 0.5)) 
-
-dtb
-dtb %>% write_csv('../data/090_daily_macro_density.csv')
-```
-```{r}
-# how to check the pairwise correlation  
-library(corrr)
-dtb %>%
-  group_by(pid) %>%  # Group by patient ID
-  summarize(across(c(dens_Protein, dens_carb, dens_fat, dens_fiber, dens_sugar), mean)) %>%  # Calculate mean per patient
-  correlate() %>%  # Calculate correlations
-  shave() %>%  # Remove upper triangle for cleaner output
-  fashion() 
-# makes sense the higher the sugar the lower the fat 
-```
-
-```{r}
-# scatter plot to visualize the correlation 
-density_cor <- dtb %>%
-  group_by(pid) %>%  # Group by patient ID
-  summarize(across(c(dens_Protein, dens_carb, dens_fat, dens_fiber, dens_sugar), mean)) 
-
-#density_cor %>% ggscatter( x= 'dens_fat', y = 'dens_sugar')
-```
-
-```{r}
-# create a "macronutrient density" variable by summing the protein, carbohydrate, and fat densities.
-df_density <- dtb %>% 
-  select(pid, fdrt, starts_with('dens')) %>% 
-  rowwise( ) %>% 
-  transmute(pid = pid, 
-            fdrt = fdrt,
-            dens_sugar = dens_sugar, dens_fiber = dens_fiber,
-            dens_3 = dens_Protein + dens_carb + dens_fat)
-
-df_density %>%
-  group_by(pid) %>%  # Group by patient ID
-  summarize(across(c(dens_3, dens_fiber, dens_sugar), mean)) %>%  # Calculate mean per patient
-  correlate() %>%  # Calculate correlations
-  shave() %>%  # Remove upper triangle for cleaner output
-  fashion() 
-# yeah finaly the high correlation pattern is broken!!!
-
-```
-
-# density model
-
-for every 1000 kcal consumed, 25 grams are from sugar.
-
-```{r}
-# calculate the p2d density of the 4 
-p2d_dens <- full %>% 
-   mutate(dens_Protein = round((ave_Protein*2)/(ave_cal *2)*1000, 2),
-         dens_carb = round((ave_carb*2)/(ave_cal *2)*1000, 2),
-         dens_fat = round((ave_fat*2)/(ave_cal *2)*1000, 2),
-         dens_fiber = round((ave_fiber*2)/(ave_cal *2)*1000, 2),
-         dens_sugar = round((ave_Sugars*2)/(ave_cal *2)*1000, 2)) %>% 
-  rowwise( ) %>% 
-  mutate(dens3 = dens_Protein + dens_carb + dens_fat) %>% 
-  mutate(log_den_sugar = log(dens_sugar + 0.5),
-        log_den_fiber = log(dens_fiber + 0.5),
-        log_den_3 = log(dens3 + 0.5)) %>% 
-  mutate(      log_den_sugar_e= log_den_sugar*abx,
-               log_den_fiber_e = log_den_fiber*abx,
-               log_den_3_e= log_den_3*abx)
-
-p2d_dens %>% select(starts_with('log')) %>% gather() %>% gghistogram(
- x = 'value', facet.by = 'key' 
-) 
-
-p2d_dens %>% select(starts_with('log')) %>% summary
-colnames(full)
-```
-
-
-```{r}
-alpha_density <- log(simpson_reciprocal) ~ 0 +
-                 log_den_sugar_e +
-                log_den_sugar +
-                log_den_fiber_e +
-                log_den_fiber +
-                log_den_3_e +
-                log_den_3 +
-               abx+
-               intensity +
-                TPN+
-                EN+
-               (1 | pid) +
-                (1 | timebin)
-get_prior(formula = alpha_density, data = p2d_dens)
-
-priors_aalpha_density<- c(
-            # for the macro nutrients
-            # prior(normal(0, 1), class = 'b', coef = "ave_fiber"),
-            # prior(normal(0, 1), class = 'b', coef = "ave_fat"),
-            # prior(normal(0, 1), class = 'b', coef = "ave_Sugars"),
-            # # for the interaction terms
-            # prior(normal(0, 1), class = 'b', coef = "ave_fiber_e"),
-            # prior(normal(0, 1), class = 'b', coef = "ave_fat_e"),
-            # prior(normal(0, 1), class = 'b', coef = "ave_Sugars_e"),
-            # for the TPN 
-            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
-            # for the EN
-            prior(normal(0, 0.1), class = 'b', coef = "EN"),
-            # for the empirical 
-            prior(normal(0, 0.5), class = 'b', coef = "abx"),
-            # for the intensity 
-            prior(normal(2, .1), class = 'b', coef = "intensityablative"),
-            prior(normal(2, .1), class = 'b', coef = "intensityreduced"),
-            prior(normal(2, .1), class = 'b', coef = "intensitynonablative"))
-
-# vet the prior 
-model_alpha_density  <- brm( alpha_density,  
-              data = p2d_dens, 
-              warmup = 1000, iter = 3000, 
-              prior = priors_aalpha_density,
-               control = list(adapt_delta = 0.99),
-              cores = ncores,
-              chains = 2, 
-              seed = 125, sample_prior = T, file = '../data/090_model_alpha_density_interaction_model')
-
-
-post_res <- suppressWarnings(posterior_samples(model_alpha_density))
-post_res %>%  write_csv('../data/090_model_alpha_density_interaction_model.csv')
-
-plot(model_alpha_density)
-
-post_res %>% 
-  select(starts_with('b_log_den'))  %>% 
-  gather() %>% 
-  ggplot() +
-   stat_pointinterval(aes(x = value, y = key), .width = .95, fatten_point = 1.2) +
-    geom_vline( xintercept =  0)
-
-post_res %>% 
-  select(starts_with('b_log_den'))  %>% 
-  gather() %>% 
-  group_by(key) %>% 
-  median_qi(value , .width = c(.95))
-  
-
-# "For patients on antibiotics, an increase in sugar density by a factor of approximately 2.7 is associated with a 14% decrease in alpha-diversity, relative to patients not on antibiotics."  median -0.146
-```
-
