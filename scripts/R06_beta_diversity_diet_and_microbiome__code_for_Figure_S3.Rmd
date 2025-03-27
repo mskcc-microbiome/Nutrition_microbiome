@@ -162,10 +162,6 @@ joined <- stool_filtered_df %>%
   rename(stool_dist = distance) %>% 
   full_join(diet_filtered_df %>% rename(diet_dist = distance))
  
-# it's important to account for the repeated measurements here 
-# joined %>% 
-#   ggscatter(x = 'diet_dist', y = 'stool_dist', facet.by = 'pid')
-
 ```
 
 
@@ -224,25 +220,7 @@ Partial_residual <- joined %>%
 
 Partial_residual
 ```
-```{r}
-# was I plotting the original data in the above plot??
-# joined %>% 
-#   ungroup() %>% 
-#   mutate(fixed_effects = predict(model, re.form=NA),
-#          residuals = residuals(model),
-#          partial_residuals = residuals + fixed_effects) %>% 
-# ggplot( aes(x = diet_dist, y = stool_dist)) +
-#   geom_point(alpha = 0.8, shape = 16) +
-#   stat_poly_eq(formula = y ~ x, 
-#                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
-#                parse = TRUE) +  # Add the equation and R-squared
-#   geom_smooth(method = "lm", se = FALSE) +  
-#   labs(x = "Diet Distance", y = " (Stool Distance)") +
-#   ggtitle("regression Plot") +
-#   theme_pubr() +
-#   theme(aspect.ratio = 1)
-# No I was not! this one is not accounting for patient individual differences. 
-```
+
 
 # sbeta_example
 
@@ -313,6 +291,7 @@ dbeta_example_pcoa <- dbeta_example %>%
  
 dbeta_example_pcoa
 ```
+
 # within pt correlation 
 
 ```{r}
@@ -347,10 +326,10 @@ stool_matrix <- stool_dist_df %>%
 
 # Run PERMANOVA
 adonis2(stool_matrix ~ stool_dist_df$pid, permutations = 999, parallel = 10)
-adonis2(stool_matrix ~ stool_dist_df$timebin, permutations = 999, parallel = 10)
-
-both <- adonis2(stool_matrix ~ stool_dist_df$pid + stool_dist_df$timebin, permutations = 999, parallel = 10)
-three <- adonis2(stool_matrix ~ stool_dist_df$pid + stool_dist_df$timebin + stool_dist_df$empirical, permutations = 999, parallel = 10)
+#adonis2(stool_matrix ~ stool_dist_df$timebin, permutations = 999, parallel = 10)
+# 
+# both <- adonis2(stool_matrix ~ stool_dist_df$pid + stool_dist_df$timebin, permutations = 999, parallel = 10)
+# three <- adonis2(stool_matrix ~ stool_dist_df$pid + stool_dist_df$timebin + stool_dist_df$empirical, permutations = 999, parallel = 10)
 ```
  
 Yes there is strong within individual correlation as well. 
@@ -359,9 +338,9 @@ Yes there is strong within individual correlation as well.
 
 ```{r}
 # to combine them together as one single supp figure
- title <- ggdraw() + 
+title <- ggdraw() + 
   draw_label(
-    "Fig. S4",
+    "Fig. S3",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -371,74 +350,19 @@ Yes there is strong within individual correlation as well.
   )
 
 
-S4 <- plot_grid(dbeta_example_pcoa, sbeta_example_pcoa, Partial_residual, 
+S3 <- plot_grid(dbeta_example_pcoa, sbeta_example_pcoa, Partial_residual, 
                  label_size = 12, ncol = 1,labels = c('A','B','C'),
                 align = 'vh', axis = 'lrtb')
 
  
 combined <- plot_grid(
-  title, S4,
+  title, S3,
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.05, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/S04_distance_to_earliest_R06.pdf',
+ggsave('../results//S03_distance_to_earliest_R06.pdf',           
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
-```
-
-# loop 
-
-```{r}
-# maybe I should just loop through every patient and see what looks the best???
-pts <- s_num %>%  filter(n %in% 2:5) %>% distinct(pid) %>% pull(pid)
-produce_2 <- pts %>% 
-  set_names(pts) %>% 
-  imap(function(pid_, name_){
-selected <- pid_
-this_earliest <- beta_ %>% filter(pid == selected) %>% slice_min(sdrt) %>% pull(sdrt)
-
-# would be good to do a visualization of the beta diversity of the food and stool 
-# too hard to do the whole thing in ggplot, so start with a scatter plot and then fininsh in illustrator 
-sbeta_example <-  beta_ %>% 
-  mutate(highlightpt = if_else(pid == selected, T, F),
-         highlight_time = if_else(pid == selected & sdrt == this_earliest, T, F)) %>% 
-  arrange(highlightpt)
-
-sbeta_example_pcoa <- sbeta_example %>% 
-  ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
-            title = 'Microbiome Bray curtis distance PCoA') +
-  scale_color_manual(name = "", values = c('gray','red'),
-                       labels = c("Other patients", str_glue('{pid_}'))) +
-  scale_shape_manual(name = "", values = c(16,17),
-                       labels = c("Later time points", "Earliest timepoint")) +
-    xlab(paste0("PCo 1 [",percent_var_stool[1],"%]")) +
-  ylab(paste0("PCo 2 [",percent_var_stool[2],"%]")) +
-  theme(aspect.ratio =  1)
-
-dbeta_example <-  dpcoa %>% 
-  mutate(highlightpt = if_else(pid == selected, T, F),
-         highlight_time = if_else(pid == selected & sdrt == this_earliest, T, F)) %>% 
-  arrange(highlightpt)
-
-dbeta_example_pcoa <- dbeta_example %>% 
-  ggscatter(x = 'PC1', y = 'PC2', color = 'highlightpt', shape = 'highlight_time', alpha = 0.8,
-            title = 'Diet unweighted unifrac distance PCoA') +
-  scale_color_manual(name = "", values = c('gray','red'),
-                       labels = c("Other patients", str_glue('{pid_}'))) +
-  scale_shape_manual(name = "", values = c(16,17),
-                       labels = c("Later time points", "Earliest timepoint")) +
-    xlab(paste0("PCo 1 [",percent_var_diet1,"%]")) +
-  ylab(paste0("PCo 2 [",percent_var_diet2,"%]")) +
-  theme(aspect.ratio =  1)
-
-
-S_ <- plot_grid(dbeta_example_pcoa, sbeta_example_pcoa, 
-                 label_size = 12, ncol = 1,labels = c('A','B'),
-                align = 'vh', axis = 'lrtb')
-
-ggsave(str_glue('../data/06_d_to_earliest_{pid_}.pdf'),
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = S_, dpi = 300) 
-  })
 ```
 
