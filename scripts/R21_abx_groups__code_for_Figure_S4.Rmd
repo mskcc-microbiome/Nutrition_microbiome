@@ -1,0 +1,176 @@
+---
+title: "Script for generating the abx figure"
+output: html_document
+date: "2025-04-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+```
+
+# A. heatmap of the patients medication exposure in the timeline 
+
+Heatmap: Rows could represent patients, columns represent days, and cells could be colored to indicate the antibiotic status (e.g., FQ = blue, Empiric = red, Both = purple, Neither = white).
+
+
+```{r}
+# classify all of the meds the pt had into the categories
+route_clean <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/routes_simple_2025-01-29.csv')
+
+ptb <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/156_combined_PTB.csv')
+
+types <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_types_of_medication.csv') 
+```
+
+```{r}
+meds <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/169_all_medication.csv')  %>% 
+  select(mrn, drug_name_clean,class,  route,together, start_date, stop_date  ) %>% 
+  mutate(drug_name_clean = if_else(drug_name_clean == 'levofloxacin (levaquin)', 'levofloxacin', drug_name_clean)) %>% 
+  left_join(route_clean %>% select(-n)) %>% 
+  left_join(ptb %>% select(mrn, hct)) %>% 
+  mutate(startday = as.numeric(start_date - hct), stopday = as.numeric(stop_date - hct)) %>% 
+  filter(stopday > -5 & startday < 40) %>% 
+  filter(startday > -20 & stopday < 40) %>% 
+  left_join(types %>% select(-n, -class)) %>% 
+  select(-c(start_date, stop_date, hct, route)) %>% 
+  mutate(together = str_glue('{drug_name_clean}__{route_clean}'))
+
+# annotate the medication that are NA
+what <- meds %>% 
+  filter(is.na(drug_category_for_this_study)) %>% distinct(drug_name_clean, route_clean, class)
+
+# ertapenem  
+# the most important few
+few <- what %>% 
+  mutate(together = str_glue('{drug_name_clean}__{route_clean}')) %>%  
+  mutate(drug_category_for_this_study = if_else(together %in% c('amikacin__IV','gentamicin__IV','ampicillin__IV','penicillin v potassium__oral','cefdinir__oral','cephalexin__oral', 'azithromycin__IV', 'azithromycin__oral'), 'other_antibacterials', if_else(together == 'ertapenem__IV', 'broad_spectrum','not_antibacterial')))
+
+link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
+meds_updated <- bind_rows(
+  meds %>% filter(is.na(drug_category_for_this_study)) %>% select(-drug_category_for_this_study) %>% left_join(few  ),
+  meds %>% filter(!is.na(drug_category_for_this_study))
+) %>% select(-class, -route_clean) %>%
+   full_join(link) %>% select(-mrn) %>% relocate(pid, .before = 'drug_name_clean')
+
+```
+
+```{r}
+# make the df with day exposure type 
+meds_expanded <- meds_updated %>%
+    distinct() %>% 
+    group_by(pid, drug_name_clean, together, startday, stopday, drug_category_for_this_study) %>%
+    summarize(day = seq(startday, stopday), .groups = "drop") %>% 
+    group_by(pid, day) %>%
+  summarise(
+    exposure_category = case_when(
+      any(drug_category_for_this_study == "broad_spectrum") & any(drug_category_for_this_study == "fluoroquinolones") ~ "both",  # Both present
+      any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",  # Only broad_spectrum
+      any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
+      any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterials",
+      TRUE ~ "not_antibacterial"
+    ), .groups = "drop"
+  )
+
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  select(pid, sdrt)
+```
+
+```{r}
+# heatmap
+df<- meds_expanded
+
+
+# 2. Find the first broad-spectrum day for each patient
+first_broad_spectrum <- df %>%
+  filter(exposure_category == "broad_spectrum") %>%
+  group_by(pid) %>%
+  summarize(FirstBroadSpectrumDay = min(day), .groups = 'drop') %>% 
+  full_join(df %>% distinct(pid)) %>% 
+  mutate(FirstBroadSpectrumDay = if_else(is.na(FirstBroadSpectrumDay), 40, FirstBroadSpectrumDay))
+
+# 3. Sort PatientIDs based on the first broad-spectrum day
+sorted_patient_ids <- first_broad_spectrum %>%
+  arrange(FirstBroadSpectrumDay) %>%
+  pull(pid)
+```
+
+```{r}
+# 1. Ensure 'pid' is a factor (for proper ordering on the y-axis)
+df$pid <- factor(df$pid)
+
+# 2. Create a complete grid of pid and day combinations
+#    This is *crucial* to handle missing days and ensure consistent plotting
+df_complete <- df %>%
+  complete(pid, day = full_seq(day, 1), fill = list(exposure_category = "not_antibacterial")) %>% 
+  mutate(has_stool = if_else(paste(pid, day) %in% paste(meta$pid, meta$sdrt), T, F)) %>% 
+  mutate(pid = factor(pid, levels = sorted_patient_ids)) 
+#df_complete <- df
+ 
+# 3. Define the color palette
+color_palette <- c(
+  "broad_spectrum" = "#FF000070",
+  "fluoroquinolones" = "#0000FF70",
+  "both" = "#A020F090",
+  "not_antibacterial" = "#FFFFFF70",
+  "other_antibacterials" = "#80808070"
+)
+ 
+# --- Create the Heatmap using ggplot2 ---
+heatmap <- ggplot(df_complete, aes(x = day, y = pid, fill = exposure_category)) +
+  geom_tile(aes(fill = exposure_category, color = has_stool),  linewidth = 0.7, show.legend = FALSE     )+  
+  scale_fill_manual(values = color_palette) +  # Apply the defined color palette
+  scale_color_manual(values = c(NA,'brown')) + 
+  scale_x_continuous(breaks = seq(min(df_complete$day), max(df_complete$day), by = 5),
+                     minor_breaks = seq(min(df_complete$day),max(df_complete$day), by = 1)) + # Show every 5th day, with minor breaks
+  labs(title = "",
+       x = "Transplant day",   
+       y = "Patient ID",
+       fill = "Exposure Category") +  # Add labels and title
+  theme_minimal() +  # Use a cleaner theme
+  geom_vline(xintercept = 0,  # The x-value where the line should be
+                   linetype = "dashed",  # Optional: Line style (solid, dashed, dotted, etc.)
+                   color = "black",     # Optional: Line color
+                   linewidth = 1)  +
+  theme(
+    panel.grid.major = element_blank(),    # Remove major grid lines
+    panel.grid.minor = element_blank(), 
+    legend.position = "bottom"   ,      # Place the legend at the bottom
+    axis.text.x = element_text(size = 6, angle = 0, hjust = 1, vjust=0.5),
+  axis.text.y = element_blank(),
+  axis.title = element_text(size = 8),
+  legend.text = element_text(size = 6),
+  legend.title = element_text(size = 8)
+  )
+```
+
+
+
+
+```{r}
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S4",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+combined <- plot_grid(
+  title, heatmap,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.01, 1)
+)+theme(plot.margin = unit(c(6.5,6.5,6.5,6.5), "cm"))
+
+ggsave('../results/S04_abx_heatmap.pdf',
+      width = 215.9, height = 279.4, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+```
