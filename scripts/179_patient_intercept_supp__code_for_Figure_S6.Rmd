@@ -18,7 +18,7 @@ library(tidybayes)
 
 ```{r }
 # make 
-post_all <-  read_csv('../data/171_div_model_fg_post_interaction.csv')
+post_all <- read_csv('../data/171_div_model_fg_post_interaction.csv')
 
 # make  a forest  plot of the pid intercepts
 pid_forest <- post_all %>% 
@@ -54,7 +54,7 @@ pid_intercept <- pid_forest %>%
 
 title <- ggdraw() + 
   draw_label(
-    "Fig. S6",
+    "Fig. S5",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -70,7 +70,7 @@ combined <- plot_grid(
   rel_heights = c(0.1, 6)
 )+theme(plot.margin = unit(c(1,0,0,1), "cm"))
   
-ggsave('../data/S6_pid_intercepts_forest_179.pdf',  
+ggsave('../results//S05_pid_intercepts_forest_179.pdf',  
      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)
 ```
 
