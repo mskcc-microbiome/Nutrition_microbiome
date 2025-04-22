@@ -149,6 +149,68 @@ heatmap <- ggplot(df_complete, aes(x = day, y = pid, fill = exposure_category)) 
   )
 ```
 
+# B. the histogram and percentage plots of the different categories of the medication exposure
+
+```{r}
+expodat <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_all_medication_overlapping_with_prior_2_day_of_stool_samples_upated_2.csv')
+```
+
+
+```{r}
+meds_categorized <- expodat %>%
+    distinct() %>% 
+    group_by(sampleid, sdrt) %>%
+  summarise(
+    exposure_category = case_when(
+      any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",  # Only broad_spectrum or both
+      any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
+      any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterials",
+      TRUE ~ "not_antibacterial"
+    ), .groups = "drop")
+```
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv')
+
+total_by_day <- meta %>% 
+  select(pid, sampleid, sdrt) %>% 
+  group_by(sdrt) %>% 
+  summarise(daytotal = n())
+
+exposure_grps <- meds_categorized %>% 
+  distinct(sampleid, exposure_category, sdrt) %>% 
+  count(sdrt, exposure_category) %>% 
+  inner_join(total_by_day) %>% 
+  mutate(perc = round(n/daytotal*100, 2)) %>% 
+  mutate(exposure_category = factor(exposure_category, levels = c('broad_spectrum','fluoroquinolones','other_antibacterials','not_antibacterial')))
+
+
+# plot them in percentage as a stacked bar plot 
+library(RColorBrewer)
+perc_ <- ggplot(exposure_grps, aes(x = sdrt, y = perc, fill = exposure_category)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(values = c( "tomato", "steelblue","goldenrod3","gray"))  +
+  geom_vline( xintercept =  0 , color = 'black', linetype = 'dashed', size = 1) +
+  labs(x = "Transplant day", y = "Percentage", fill = "Exposure group") +
+  theme_minimal()  +
+  theme(legend.position = 'none')
+
+# I see so if I plot stat = identity it will be percentage in the bar plot 
+# also plot this in absolute numbers
+count_ <- ggplot(exposure_grps, aes(x = sdrt, y = n, fill = exposure_category)) +
+  geom_bar(position = "stack", stat = "identity") +
+  scale_fill_manual(values = c( "tomato", "steelblue","goldenrod3","gray"))  +
+    geom_vline( xintercept =  0 , color = 'black', linetype = 'dashed', size = 1) +
+  labs(x = "Transplant day", y = "Count", fill = "Exposure group") +
+  theme_minimal() +
+  theme(legend.position = 'none')
+
+plot_ <- plot_grid(count_, perc_, nrow = 2, align = 'vh', axis = 'lrtb', labels = c('B','C'))
+
+# combine the A to C
+together <- plot_grid(heatmap, plot_, nrow = 1, align = 'vh', axis = 'lrtb', labels = c('A', NA))
+```
 
 
 
@@ -165,12 +227,12 @@ title <- ggdraw() +
   )
 
 combined <- plot_grid(
-  title, heatmap,
+  title, together,
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.01, 1)
-)+theme(plot.margin = unit(c(6.5,6.5,6.5,6.5), "cm"))
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../results/S04_abx_heatmap.pdf',
+ggsave('../results/S04_abx_and_medication_R21.pdf',
       width = 215.9, height = 279.4, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
