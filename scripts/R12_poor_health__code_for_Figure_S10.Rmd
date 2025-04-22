@@ -28,11 +28,11 @@ zero_line_size <- .8
 # pre-d0 subset model
 
 ```{r}
-meta <- read_csv('../data/153_combined_META.csv')%>% 
+meta <- read_csv('../data/153_combined_META.csv') %>% 
   mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
   mutate(pid = factor(pid)) %>% 
-  # only 
+  # pre-d0 subset only 
   filter(sdrt < 0) %>% 
   mutate(fg_egg = fg_egg/100,
          fg_fruit = fg_fruit/100,
@@ -129,46 +129,13 @@ model_div_original <- brm( mod_original,
               cores = ncores, 
               chains = 2, 
                control = list(adapt_delta = 0.99),
-              seed = 123, sample_prior = T, file = '../data/12_interaction_model_diversity_pre_transplant')
+              seed = 123, sample_prior = T)
 
 
 post_res <- suppressWarnings(posterior_samples(model_div_original)) 
 post_res %>%  write_csv('../data/12_interaction_model_diversity_pre_transplant.csv')
 ```
 
-```{r}
-# if using pre-conditioning samples only
-matchingtb <- read_rds('../data/196_matching_shortname.rds')
-
- 
-```
-
-Assessing the fit of a brms model involves a combination of quantitative and qualitative approaches. Here's a comprehensive strategy to determine if your model is a good fit: 
-
-1. Convergence Diagnostics:
-
-Rhat Values: Check that all Rhat values are close to 1 (ideally less than 1.01). This indicates that the chains have converged and are sampling from the same posterior distribution.
-Effective Sample Size (ESS): Ensure that ESS values are sufficiently high (generally, a minimum of 100 per chain is recommended). Low ESS suggests that the chains are not exploring the posterior space effectively.
-Trace Plots: Visually inspect the trace plots (plot(fit)) to see if the chains are mixing well and show no divergent trends.
-2. Posterior Predictive Checks (PPCs):
-
-Visual Inspection: Use pp_check(fit) to compare the observed data to simulated data from the posterior predictive distribution. This helps you assess whether the model can generate data that resembles the observed data.
-Test Statistics: Compare the observed test statistics (e.g., mean, standard deviation, quantiles) to the distributions of the same statistics calculated from the posterior predictive samples. Significant discrepancies may indicate model misfit.
-3. Model Comparison:
-
-Leave-One-Out Cross-Validation (LOO): Use loo(fit) to estimate the expected log pointwise predictive density (elpd) of your model. Higher elpd values indicate better predictive accuracy.
-WAIC: Similar to LOO, WAIC is another information criterion for model comparison. Again, higher values suggest better predictive performance.
-Compare Models: Use loo_compare() to directly compare the elpd or WAIC values of different models. This helps you select the model with the best predictive ability.
-4. Residual Analysis:
-
-Posterior Predictive Residuals: Examine the distribution of residuals (resid(fit)) to assess if they are approximately normally distributed (for Gaussian models) or if they show any patterns that suggest model misspecification.
-Additional Considerations:
-
-Domain Expertise: Evaluate the model's results in the context of your research question and prior knowledge. Do the estimates make sense? Are the relationships between variables plausible?
-Sensitivity Analysis: Assess the robustness of your results by varying prior distributions or model specifications. If the results change substantially, it might indicate that your conclusions are not reliable.
-Important Note: There is no single definitive test for model fit. It's essential to consider multiple lines of evidence and use your judgment to determine if the model adequately represents the data and answers your research question.
-
-Let me know if you have any specific questions about interpreting these diagnostics or want to discuss your particular model.
 
 ```{r}
 # assessing the fit of the model
@@ -177,7 +144,8 @@ post_pred
 
 # yes they are about same distribution  
 ```
-# raw exposure    
+
+# raw data 
   
 ```{r}
 # what about the raw data that shows how many sample size are in each group
@@ -234,9 +202,11 @@ pre_transplant_samples
 ```
 
 
-# caterpillar
+# caterpillar plot
 
 ```{r}
+matchingtb <- read_rds('../data/196_matching_shortname.rds')
+
 # for pre-transplant model:
 post_res_pre_transplant <- read_csv('../data/12_interaction_model_diversity_pre_transplant.csv') %>% 
   select(starts_with('b_')) %>% 
@@ -279,7 +249,7 @@ post_res_pre_transplant_temporal
 library(cowplot)
 title <- ggdraw() + 
   draw_label(
-    "Fig. S10",
+    "Fig. S9",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -297,10 +267,10 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 0.5)
-)+theme(plot.margin = unit(c(1,1,2,1), "cm"))
+)+theme(plot.margin = unit(c(1,4,5,4), "cm"))
 
-ggsave('../data/S10_poor_health_pre_transplant_R12.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+ggsave('../results//S09_poor_health_pre_transplant_R12.pdf',
+      width = 215.9, height = 279.4, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
 
 
