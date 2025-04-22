@@ -121,7 +121,7 @@ mod_PCA <- brm( model_PCA,
               cores = ncores, 
               control = list(adapt_delta = 0.99),
               chains = 2, 
-              seed = 123, sample_prior = T, file = '../data/084_mod_PCA') 
+              seed = 123, sample_prior = T) 
 
 
 as_draws_df(mod_PCA) %>% write_csv('../data/084_mod_PCA.csv')
@@ -192,7 +192,7 @@ library(cowplot)
 
 title <- ggdraw() + 
   draw_label(
-    "Fig. S9",
+    "Fig. S8",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -207,7 +207,7 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,4,4,4), "cm"))
 
-ggsave('../data/084_pca_diversity.pdf',
+ggsave('../results//S08_pca_diversity_084.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', 
       plot = combined, 
       dpi = 300)
