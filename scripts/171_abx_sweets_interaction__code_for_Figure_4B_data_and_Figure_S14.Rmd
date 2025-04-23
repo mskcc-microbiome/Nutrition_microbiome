@@ -134,13 +134,6 @@ extra_full <- meta %>%
   inner_join(clr_wide)  
 ```
 
-```{r} 
-# 
-# # still use the log10 cuz that's what I have always been using this time
-# gcts <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv') %>% 
-#   select(sampleid, Enterococcus)
-```
-
 
 ```{r}
   
@@ -207,7 +200,7 @@ mod_entero =  brm(Enterococcus ~ 0 +
               cores = ncores, 
               chains = 2, 
               control = list(adapt_delta = 0.99),
-              seed = 456, file = '../data/171_mod_entero_interaction')
+              seed = 456)
 
 # save it for future use
 post_res <- suppressWarnings(posterior_samples(mod_entero)) 
@@ -286,70 +279,11 @@ post_df %>%
 ```
 
  
-```{r}
-# make the heatmap with all of the genera 
-post_df <- read_csv('../data/171_genus_foodgroup_model_post_extra_few_interaction.csv',  col_select = c(1:25)) %>% 
-  select(genus, starts_with('b_'))
-
-key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
-
-post_res_genera <- post_df %>% 
-  select(genus, starts_with('b_')) %>% 
-  gather('item','coeff', names(.)[2]:names(.)[ncol(.)]) %>% 
-  group_by(genus, item) %>% 
-  summarise(q50 = median(coeff),
-            q2.5 = quantile(coeff, probs = 0.025),
-            q97.5 = quantile(coeff, probs = 0.975),
-            q12.5 = quantile(coeff, probs = 0.125),
-            q87.5 = quantile(coeff, probs = 0.875),
-            q1.25 = quantile(coeff, probs = 0.0125),
-            q98.75 = quantile(coeff, probs = 0.9875),
-            q0.5 = quantile(coeff, probs = 0.005),
-            q99.5 = quantile(coeff, probs = 0.995)
-            ) %>% 
-  ungroup() %>% 
-  mutate(mark = if_else(q99.5 < 0 | q0.5 > 0, '***', if_else(q98.75 < 0 | q1.25 > 0, '**', if_else(q97.5 < 0 | q2.5 > 0, '*', '')))) %>% 
-  mutate(color = if_else(q87.5 < 0, 'steelblue', if_else(q12.5 > 0, 'maroon', 'white'))) %>% 
- mutate(item = str_replace(item, 'b_fg_',''),
-         item = str_replace(item, 'b_',''),
-         item = str_replace(item, 'intensity','')) %>% 
-  mutate(shortname = case_when(
-    item ==  'milk' ~ 'Milk',
-    item == 'meat' ~ 'Meats',
-    item ==  'egg' ~ 'Eggs',
-    item ==  'legume' ~ 'Legumes',
-    item == 'grain' ~ 'Grains',
-    item == 'fruit' ~ 'Fruits',
-    item == 'veggie' ~ 'Vegetables',
-    item ==  'oils' ~ 'Oils', 
-    item ==  'sweets' ~ 'Sweets',
-    item ==  'milk_e' ~ 'abx + Milk',
-    item == 'meat_e' ~ 'abx + Meats',
-    item ==  'egg_e' ~ 'abx + Eggs',
-    item ==  'legume_e' ~ 'abx + Legumes',
-    item == 'grain_e' ~ 'abx + Grains',
-    item == 'fruit_e' ~ 'abx + Fruits',
-    item == 'veggie_e' ~ 'abx + Vegetables',
-    item ==  'oils_e' ~ 'abx + Oils', 
-    item ==  'sweets_e' ~ 'abx + Sweets',
-    item ==  'nonablative' ~ 'Nonablative',
-    item ==  'reduced' ~ 'Reduced',
-    item ==  'ablative' ~ 'Ablative',
-    item ==  'TPN' ~ 'TPN',
-    item ==  'EN' ~ 'EN',
-    item ==  'abx' ~ 'abx'
-  )) %>% 
-  mutate(grp = if_else(item %in% c('nonablative','reduced','ablative'), 'patient', 'temporal'))
-
-post_res_genera %>% distinct(shortname)
-
-post_res_genera %>% write_csv('../data/171_post_res_genera.csv')
-```
- 
-# marginal Enterococcus
+# marginal plot for Enterococcus model (S13)
 
 ```{r}
 clr_res <- read_csv('../data/171_genus_CLR_res.csv')
+
 clr_Enterococcus <- clr_res %>% 
   filter(genus %in% c('Enterococcus')) %>%
   spread('genus','clr')
@@ -408,10 +342,7 @@ priors_enterococcus_original <- c(# for the food group variables
             prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
             
             )
-```
 
-
-```{r}
 mod_entero =  brm(entero_model_original,  
                 data = meta, 
               warmup = 1000, iter = 3000, 
@@ -419,11 +350,8 @@ mod_entero =  brm(entero_model_original,
               cores = ncores, 
               chains = 2, 
               control = list(adapt_delta = 0.99),
-              seed = 456, file = '../data/171_mod_entero_interaction_original')
-```
+              seed = 456)
 
-
-```{r}
 dat_conditional_mod_entero <- conditional_effects(mod_entero, surface = T)
 
 condi_dat_mod_entero <- dat_conditional_mod_entero %>% 
@@ -445,10 +373,7 @@ library(wesanderson)
 # the color for the strip background
 palette <- wes_palette("Royal1", 2)
 strip_color <- wes_palette("Royal1", 3)[3]
-```
 
-
-```{r}
 conditional9_entero <- condi_dat_mod_entero %>%   
   ggplot() +
   geom_smooth(aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
@@ -467,8 +392,11 @@ conditional9_entero <- condi_dat_mod_entero %>%
         strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
      axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
   guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
-#conditional9_entero   
 
+```
+
+
+```{r}
 title <- ggdraw() + 
   draw_label(
     "Fig. S13",
@@ -485,9 +413,8 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-)+theme(plot.margin = unit(c(2,2,5,2), "cm"))
+)+theme(plot.margin = unit(c(2,5,8,2), "cm"))
 
-ggsave('../data/S13_conditional9_entero_171.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
-
+ggsave('../results//S13_conditional9_entero_171.pdf',
+      width = 215.9, height = 279.4, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
