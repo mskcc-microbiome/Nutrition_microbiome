@@ -41,6 +41,7 @@ post_df <- read_csv('../data/171_target_genus_fg_model_post_interaction.csv',  c
   gather('item', 'coeff', names(.)[2]:names(.)[ncol(.)])
 post_df
 ```
+
 ## dengrogram 
  
 ```{r}
@@ -56,7 +57,7 @@ hclust_obj <- hclust(dist(post_matrix), method = "complete")
 dendrogram <- as.dendrogram(hclust_obj)
 dendro <- ggdendrogram(dendrogram, rotate = TRUE) +
   theme(axis.text.x=element_blank(), plot.margin = unit(c(-3,0,-7,-1), "cm"))
-#ggsave('../data/180_dendro.pdf', width = 10, height = 10) 
+
 genus_odr <- dendrogram %>% labels
 dendro
 ```
@@ -87,22 +88,23 @@ post_res_genera <- post_df %>%
             q99.5 = round(quantile(coeff, probs = 0.995), 2)
             ) %>% 
   ungroup() %>% 
-  #mutate(mark = if_else(q99.5 <= 0 | q0.5 >= 0, '***', if_else(q97.5 <= 0 | q2.5 >= 0, '**', if_else(q95 <= 0 | q5 >= 0, '*', '')))) %>% 
   mutate(mark = if_else(q99.5 <= 0 | q0.5 >= 0, '***', if_else(q98.5 <= 0 | q1.5 >= 0, '**', if_else(q97 <= 0 | q3 >= 0, '*', '')))) %>% 
   filter(str_detect(item, 'fg'))%>% 
   inner_join(matchingtb %>% select(item, shortname))
 summary(post_res_genera$q50)
 
-
   
 genera <- post_res_genera %>% 
   filter(!item %in% c('nonablative','reduced','ablative')) %>% 
   mutate(genus = factor(genus, levels = genus_odr))
+```
 
+
+```{r}
 library(cowplot)
 title <- ggdraw() + 
   draw_label(
-    "Fig. S14",
+    "Fig. S11",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -170,202 +172,9 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 ) +theme(plot.margin = unit(c(1,.5,1,.5), "cm"))
 
-ggsave('../data/S12_fg_genus_heatmap_180.pdf',
+ggsave('../results//S11_fg_genus_heatmap_180.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf',
       plot = combined,
       dpi = 300)
 
 ```
-
-## macro & genus
-
-```{r}
-post_df_macro <- read_csv('../data/090_target_genus_macro_model_post_interaction.csv', num_threads = 10, col_select = c(1:25)) %>% 
-  select(genus, starts_with('b_')) %>% 
-  select(-starts_with('b_intensity')) %>% 
-  gather('item', 'coeff', names(.)[2]:names(.)[ncol(.)]) %>% 
-  #filter(genus %in% selected$genus) %>% 
-  filter(str_detect(item, 'ave')) %>% 
-  mutate(item = str_replace(item, 'b_ave_',''),
-         item = str_replace(item, 'b_','')) %>% 
-  mutate(shortname = case_when(
-        item ==  'fiber_e' ~ 'abx * Fiber',  
-    item == 'fiber' ~ 'Fiber',
-    item ==  'fat_e' ~ 'abx * Fat',
-    item ==  'fat' ~ 'Fat',
-    item == 'Sugars_e' ~ 'abx * Sugars',
-    item == 'Sugars' ~ 'Sugars',
-    item ==  'nonablative' ~ 'Nonablative',
-    item ==  'reduced' ~ 'Reduced',
-    item ==  'ablative' ~ 'Ablative',
-    item ==  'TPN' ~ 'TPN',
-    item ==  'EN' ~ 'EN',
-    item ==  'abx' ~ 'abx'
-  )) %>% 
-  mutate(shortname = factor(shortname, levels = c('Fat','abx * Fat',
-                 'Fiber','abx * Fiber',
-                 'Sugars','abx * Sugars')))
-
-
-macro_res_genera <- post_df_macro %>% 
-  group_by(genus, shortname) %>% 
-  summarise(q50 = median(coeff),
-            q5 = quantile(coeff, probs = 0.05),
-            q95 = quantile(coeff, probs = 0.95),
-            q2.5 = quantile(coeff, probs = 0.025),
-            q97.5 = quantile(coeff, probs = 0.975),
-               # 94%
-            q3 = round(quantile(coeff, probs = 0.03), 2),
-            q97 = round(quantile(coeff, probs = 0.97), 2),
-            # 97%
-            q1.5 = round(quantile(coeff, probs = 0.015), 2),
-            q98.5 = round(quantile(coeff, probs = 0.985), 2),
-            # 99%
-            q0.5 = round(quantile(coeff, probs = 0.005), 2),
-            q99.5 = round(quantile(coeff, probs = 0.995), 2)
-            ) %>% 
-  ungroup() %>%  
-  #mutate(mark = if_else(q99.5 < 0 | q0.5 > 0, '***', if_else(q97.5 < 0 | q2.5 > 0, '**', if_else(q95 < 0 | q5 > 0, '*', '')))) %>% 
-  mutate(mark = if_else(q99.5 <= 0 | q0.5 >= 0, '***', if_else(q98.5 <= 0 | q1.5 >= 0, '**', if_else(q97 <= 0 | q3 >= 0, '*', '')))) 
-
-# color the cells based on the q50
-
-# Define a diverging color palette (blue-white-red)
-diverging_palette <- scale_fill_gradient2(
-  low = "blue", 
-  mid = "white", 
-  high = "red", 
-  midpoint = 0,  # Center the color scale at zero
-  limits = c(-max(abs(macro_res_genera$q50)), max(abs(macro_res_genera$q50)))  # Set limits based on absolute max
-)
-
-genus_macro_main <- macro_res_genera %>% 
-  mutate(q50 = if_else(!str_detect(mark , '\\*'), 0, q50)) %>% 
-  ggplot( aes(x = shortname, y = genus)) +
-  geom_tile(aes(fill = q50,  x = shortname, y =  genus), alpha = 1, color='gray50', width=0.95, height=0.95) +
-  geom_text(aes(label = mark, x = shortname,y =  genus),
-            nudge_y = -0.1, nudge_x = 0,size = 3) +
-  #theme_pubr() +
-  diverging_palette +
-  scale_x_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
-  labs(fill = "Effect size\n(posterior median)") +
-  theme(axis.title.x = element_blank(),axis.title.y = element_blank(),
-        axis.text.y = element_markdown(face = "italic"),
-        axis.text.x = element_markdown(angle = 45, hjust = 1),
-        legend.position = 'top', legend.text = element_text(size = 5), 
-        panel.background=element_rect(colour="black"),
-        legend.key = element_rect( colour = "gray50"))
-genus_macro_main
-```
-
-## supp figure
-
-```{r}
-# if put the fg and the macro heatmap together
-title <- ggdraw() + 
-  draw_label(
-    "Fig. S14",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(plot.margin = margin(0, 0, 0, 5))
-
-heatmaps <- plot_grid(
-  genus_fg_main, genus_macro_main,
-  ncol = 2,
-  # rel_heights values control vertical title margins
-  rel_widths  = c(0.5, .3)
-) 
-
-combined <- plot_grid(
-  title, heatmaps,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.05, 1)
-) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
-
-ggsave('../data/S14_genus_heatmaps_180.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', 
-      plot = combined, 
-      dpi = 300)
-```
-
-```{r}
-paste0(selected$genus, collapse = ', ')
-```
-
-# subset popular
-
-```{r}
-# look at the subset popular genera: Staphylococcus actinomycin bifidobacterium lactobacillus 
-#Ruminococcus  streptococcus blautia ackmacashia bacteroides clostridium 
-hot <- c('Streptococcus', 'Blautia',  'Lactobacillus', 'Lachnoclostridium',  'Enterococcus',  'Bacteroides', 'Rothia',  'Bifidobacterium', 'Ruminococcus',  'Lactococcus',  'Actinomyces', 'Faecalimonas', 'Eubacterium', 'Akkermansia',  'Staphylococcus',  'Clostridium',  'Escherichia')
-
-genus_sub_fg <- genera %>%  
-  filter(genus %in% hot) %>% 
-  mutate(q50 = if_else(!str_detect(mark , '\\*'), 0, q50)) %>% 
-  ggplot( aes(x = shortname, y = genus)) +
-  geom_tile(aes(fill = q50,  x = shortname, y =  genus), alpha = 1, color='gray50', width=0.95, height=0.95) +
-  geom_text(aes(label = mark, x = shortname,y =  genus),
-            nudge_y = -0.1, nudge_x = 0,size = 3) +
-  scale_x_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
-  diverging_palette +
-  #guides(fill = guide_legend(title = "Effect size\n(posterior median)")) +
-  labs(fill = "Effect size\n(posterior median)") +
-  theme(axis.title.x = element_blank(),axis.title.y = element_blank(),
-        axis.text.y = element_markdown(face = "italic"),
-        axis.text.x = element_markdown(angle = 45, hjust = 1),
-        legend.position = 'top', legend.text = element_text(size = 5), 
-        panel.background=element_rect(colour="black"),
-        legend.key = element_rect( colour = "gray50")) 
-
-```
-```{r}
-genus_macro_sub <- macro_res_genera %>% 
-   filter(genus %in% hot) %>% 
-  mutate(q50 = if_else(!str_detect(mark , '\\*'), 0, q50)) %>% 
-  ggplot( aes(x = item, y = genus)) +
-  geom_tile(aes(fill = q50,  x = item, y =  genus), alpha = 1, color='gray50', width=0.95, height=0.95) +
-  geom_text(aes(label = mark, x = item,y =  genus),
-            nudge_y = -0.1, nudge_x = 0,size = 3) +
-  #theme_pubr() +
-  diverging_palette +
-  scale_x_discrete( labels = function(x) { ifelse(str_detect(x, '_e'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
-  theme(axis.title.x = element_blank(),axis.title.y = element_blank(),
-        axis.text.x = element_markdown(angle = 45, hjust = 1),
-        axis.text.y=element_text(size=10),
-        legend.position = 'top',
-        panel.background=element_rect(colour="black"),
-        legend.key = element_rect( colour = "gray50")) 
-```
-```{r}
-# combined <- plot_grid(
-#   genus_sub_fg, genus_macro_sub,
-#   ncol = 2,
-#   # rel_heights values control vertical title margins
-#   rel_widths  = c(0.5, .3)
-# ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
-# 
-# ggsave('../data/S_X_genus__heatmap_180.pdf',
-#       width = 300, height = 297, units = "mm", device = 'pdf', 
-#       plot = combined, 
-#       dpi = 300)
-```
-
-# loosen the threshold and find if there is anymore interesting things to discuss
-
-```{r}
-fg_post <- post_df  %>% 
-  group_by(genus, item) %>% 
-  tidybayes::median_qi(coeff , .width = c( .95)) 
-  
-macro_post <- post_df_macro %>% 
-  group_by(genus, shortname) %>% 
-  tidybayes::median_qi(coeff , .width = c( .8)) %>% 
-  filter(str_detect(shortname, '^Fiber'))
-
-macro_post %>% distinct(genus) %>% 
-  write_csv('../data/180_37_genus.csv')
-```
-
