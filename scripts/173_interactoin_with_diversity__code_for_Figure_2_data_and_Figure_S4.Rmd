@@ -227,8 +227,9 @@ condi_dat <- dat_conditional %>%
 condi_dat %>% write_csv('../intermediate_data/173_conditional_data.csv')
 ```
 
+# for the S16
 
-# prior predictive check  
+## prior predictive check  
 
 ```{r}
 fitPrior <- brm(div_model, data=meta, 
@@ -252,12 +253,13 @@ prior_pred
 ggsave('../intermediate_data/173_Prior_pred_check.pdf')
 ```
 
-# for the S4
-# posterior predictive check 
+
+## posterior predictive check 
 
 ```{r}
 fit <- brm(div_model, data=meta, 
                 prior=div_priors, 
+            cores = ncores, 
            sample_prior = "no", seed = 12)
 
 post_pred <- pp_check(fit, type = "boxplot", nreps = 10, notch = FALSE, alpha = 0)+
@@ -269,14 +271,14 @@ post_pred
 ```
 
 ```{r} 
-S4 <- plot_grid(prior_pred, NA,post_pred,
+S16 <- plot_grid(prior_pred, NA,post_pred,
           labels = c("A",NA, "B"), align = "v",rel_heights = c(1,0.2,1),
           #label.y = 1,
           ncol = 1)
  
 title <- ggdraw() + 
   draw_label(
-    "Fig. S4",
+    "Fig. S16",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -286,16 +288,16 @@ title <- ggdraw() +
   )
  
 combined <- plot_grid(
-  title, S4,
+  title, S16,
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(2,3,3,3), "cm"))
  
-ggsave('../results/S04_prior_and_post_pred_173.pdf',
+ggsave('../results/S16_prior_and_post_pred_173.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', 
       plot = combined, 
-      dpi = 300) 
+      dpi = 300)        
 ```
 
 # the random intercepts of the week relative to transplant 
