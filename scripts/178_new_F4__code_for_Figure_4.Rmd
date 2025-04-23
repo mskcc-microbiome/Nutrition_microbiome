@@ -66,21 +66,19 @@ spearman_all <- spearman_res %>%
   mutate(Correlation = if_else(rho >= 0, 'higher_div', 'lower_div')) %>% 
   arrange(rho, desc(genus)) 
 
+res <- spearman_all %>% 
+  mutate(Correlation = factor(Correlation, levels = c('lower_div','higher_div')))
 ```
 
 ## 4A: bar plot
 
 ```{r}
-res <- spearman_all %>% 
-  mutate(Correlation = factor(Correlation, levels = c('lower_div','higher_div')))
-
-
 # make a panel with only top 5 significant ones in either direction for the main figure 3
 main <- res %>% 
   filter(sig05 == 'FDR < 0.05') %>% 
   split(.$Correlation) %>% 
   map(function(df){
-    df %>% mutate(absrho = abs(rho)) %>% slice_max(order_by =absrho, n = 5 )
+    df %>% mutate(absrho = abs(rho)) %>% slice_max(order_by =absrho, n = 3 )
   }) %>% bind_rows() %>% 
   arrange(desc(rho))
 
@@ -99,8 +97,6 @@ correbar <- main %>%
 correbar
 ```
 
- 
-
 ## supp: all bars 
 
 ```{r}
@@ -118,16 +114,13 @@ all_order <- selected_bars$genus
 correbar_all <- selected_bars %>% 
    mutate(genus = factor(genus, levels = all_order)) %>%
  ggplot( aes(x = genus, y = 0, xend = genus, yend = rho, color = Correlation)) + 
-  geom_segment(size = 8) + 
+  geom_segment(size = 5) + 
   labs(x = '', y ='Spearman correlation') +
   scale_color_jco() +
   coord_flip() +
   theme(axis.text=element_text(size=10),axis.title=element_text(size=10),legend.position = 'none',
         axis.text.y = element_markdown(face = "italic"))
-```
 
-
-```{r}
 title <- ggdraw() + 
   draw_label(
     "Fig. S12",
@@ -144,10 +137,10 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-)+theme(plot.margin = unit(c(1,1,4,1), "cm"))
+)+theme(plot.margin = unit(c(1,5,8,2), "cm"))
 
-ggsave('../data/S12_genus_diversity_correlation_178.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)
+ggsave('../results//S12_genus_diversity_correlation_178.pdf',
+      width = 215.9, height = 279.4, units = "mm", device = 'pdf', plot = combined, dpi = 300)
 ```
 
 # 4B: the Enterococcus results
