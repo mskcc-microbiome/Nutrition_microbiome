@@ -70,7 +70,7 @@ nofiber_days <- plotdf %>%
             ylab = 'Enterococcal\n CFU/gram log10 transformed',, add.params = list(alpha = 0.5, shape = 16),
             width = 0.6,color  = 'grp')+
    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('biapenem__vehicle__3','biapenem__sucrose__3'),  c('biapenem__vehicle__9','biapenem__sucrose__9')),
+  stat_compare_means(comparisons = list(  c('biapenem__vehicle__9','biapenem__sucrose__9')),
                      label= "p.signif", 
                      method= 't.test',tip.length = 0.015,exact=T,correct=T, step.increase = 0.1) +
   #scale_y_log10(breaks = c(1 %o% 10^(-1:12)),  labels = trans_format("log10", math_format(10^.x))) +
@@ -87,21 +87,6 @@ nofiber_days %>% write_rds('../data/07_nofiber_days.RDS')
        
 ```
 
-```{r}
-# Assuming your data is in a dataframe called 'data_abx' (for antibiotic-treated mice)
-data_abx <- plotdf %>% 
-  filter(abx_treatment == 'biapenem') %>% 
-  mutate(logCFU = log10(CFUs_per_GramStool))
-
-model <- aov(logCFU ~ diet_treatment * day + Error(mouse_identifier/day), data = data_abx)
-summary(model)  # Check for significance of the interaction term
-
-# If the interaction is significant, proceed with post-hoc tests
-library(emmeans)
-emmeans(model, pairwise ~ diet_treatment | day)  # Example using emmeans for pairwise comparisons
-
-# Day 9:  Significant difference (p = 0.0036) with a negative estimate (-1.65).  This clearly shows that the vehicle group has significantly lower Enterococcus counts than the sucrose group on day 9.  This confirms the interaction effect and provides strong evidence that the sucrose diet promotes Enterococcus colonization in the longer term after antibiotic treatment.
-```
 
 
 ```{r}
@@ -148,39 +133,9 @@ nofiber_AUC <- ggboxplot(dat_entero_wide,
 
 nofiber_AUC     
 ```
-```{r}
-# I still feel weird that the day 9 data is not significant
 
-d9 <- wilcox.test(CFUs_per_GramStool ~ treatment, data = nofiber %>% filter(day == 9) %>% filter(treatment %in% c('BS','BP')) %>% select(CFUs_per_GramStool, treatment),
-                   exact = FALSE)
-d9
-```
-
-
-
-
-
-```{r}
-# to do a test looking at the difference between day 0 and 3/6/9
-differences <- dat_entero_wide %>% 
-  mutate(delta_3_0 = day3 - day0,
-         delta_6_0 = day6 - day0,
-         delta_9_0 = day9 - day0) %>% 
-  select(diet_treatment:mouse_identifier, delta_3_0:delta_9_0 ) %>% 
-  gather('grp','deltas', delta_3_0:delta_9_0)
-  
-
-# differences %>% 
-#   ggboxplot(x = 'diet_treatment', y = 'deltas', add = 'jitter', add.params = list(color = 'mouse_identifier')) +
-#   facet_grid(abx_treatment ~ grp) +
-#   stat_compare_means(comparisons = list(c('vehicle','sucrose')), method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
-#   scale_y_log10() +
-#   theme(aspect.ratio = 1) 
-  
-
-```
 # Final mouse graph 
-
+ 
 ## p1:healthy mice
 
 ```{r}
@@ -190,12 +145,13 @@ chow <- read_rds('../data/08_chow_days.RDS')
 chow_auc <- read_rds('../data/08_chow_auc.RDS')
 glucose <- read_rds('../data/05_f3_sugars_days.RDS')
 long <- read_rds('../data/05_f3_five_days.RDS')
+```
 
 
-
+```{r}
 title <- ggdraw() + 
   draw_label(
-    "Fig. S_X",
+    "Fig. S15",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -223,17 +179,18 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
  
-ggsave('../data/07_diet_mice.pdf',
+ggsave('../results//S15_diet_mice_P1_R07.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
 ```
-## p2: transplant mice
+
+## p2: transplant mice (BM only mice)
 
 ```{r}
 transplant <- read_rds('../data/02_transplant_CFU_plot.RDS')
 
 title2 <- ggdraw() + 
   draw_label(
-    "Fig. S_X (Continued)",
+    "Fig. S15 (Continued)",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -241,7 +198,6 @@ title2 <- ggdraw() +
   theme(
     plot.margin = margin(0, 0, 0, 5)
   )  
-
 
 
 S_mouse2 <- plot_grid(NA, transplant,
@@ -256,13 +212,13 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.05, 1)
-)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+)+theme(plot.margin = unit(c(1,5,1,1), "cm"))
 
-ggsave('../data/07_diet_mice_p2.pdf',
+ggsave('../results//S15_diet_mice_p2_R07.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
 ```
 
-# the diet nutritional info
+# the diet nutritional info (Table S4)
 
 ```{r}
 # the no fiber diet and the control diet info
@@ -323,7 +279,7 @@ controldiet <- ggdraw() + draw_image("../data/07_control_d_tb.jpg", scale = 0.8)
 
 title <- ggdraw() + 
   draw_label(
-    "Table SX",
+    "Table S4",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -341,7 +297,8 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 )+theme(plot.margin = unit(c(1,1,10,1), "cm"))
 
-ggsave('../data/Table_SX_two_diets_composition_R07.pdf',
+ggsave('../results//Table_S4_two_diets_composition_R07.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300) 
 ```
 
+  

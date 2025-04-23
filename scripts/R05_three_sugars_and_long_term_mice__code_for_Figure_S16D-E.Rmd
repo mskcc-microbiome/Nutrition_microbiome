@@ -87,7 +87,6 @@ f3_five %>%
   summarise(min_ = min(n), max_ = max(n))
 ```
 
-
 # three sugars
 
 ```{r}
