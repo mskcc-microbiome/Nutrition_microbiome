@@ -30,6 +30,7 @@ meta %>%
   count(experiment_no, abx_treatment, diet_treatment, day) %>% 
   summarise(min_ = min(n), max_ = max(n))
 ```
+
 # alpha diversity 
 
 ## d3 VS d0
@@ -59,8 +60,6 @@ alpha_change <-  meta %>%
 alpha_change      
 ```
 
-
-
 ```{r}
 # it would be good to have a metric of the effect size of the alpha reduction because of the abx treatment
   # the difference of the median in the two groups
@@ -85,8 +84,6 @@ median_pbs_d3 - median_abx_d3
 sucrose-only doesn’t reduce diversity on day 3, compared with vehicle, but biapenem-only does.  However, sucrose doesn’t further reduce diversity beyond the biapenem effect on day 3. 
 
 
-
-
 ```{r}
 # what we actually care is the difference between day 3 and day 0 in the two groups
 alpha_wide <- meta %>% 
@@ -101,71 +98,6 @@ alpha_wide <- meta %>%
   gather('grp','fc', fc_0_3:fc_0_6)
 ```
 sucrose_only doesn't have much effects. abx_only has a much bigger reduction in the alpha diversity after abx trt
-
-## fold change d3/d0 
-
-```{r}
-# alpha_wide %>% 
-#   mutate(trt = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-#   mutate(trt = factor(trt, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>% 
-#   ggboxplot(x = 'trt', y = 'fc', add = 'jitter', color = 'trt', facet.by = 'grp') +
-#    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-#   stat_compare_means(comparisons = list(
-#     c('PBS__vehicle','biapenem__vehicle'), 
-#     c('biapenem__vehicle','biapenem__sucrose'),
-#     c('PBS__vehicle','PBS__sucrose')
-#     ),
-#     label= "p.signif", method= 't.test',tip.length = 0.04,exact=T,correct=T) +
-#   geom_hline(yintercept = 1, color = 'red') +
-#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-```
-
-
-
-## delta plots
-
-```{r}
-
-# delta_plots <- alpha_wide %>% 
-#   split(.$grp) %>% 
-#   imap(function(df, name_){
-#     df %>% 
-#       ggboxplot(y = 'deltas', title = str_glue('{name_}'), add = 'jitter', xlab = '') +
-#       facet_grid(abx_treatment ~ diet_treatment) +theme_cleveland() + theme(axis.text.x = element_blank())
-#   })
-# 
-# library(cowplot)
-# deltas <- plot_grid(plotlist = delta_plots)
-# ggsave('../data/01_delta_plots.pdf')
-```
-
-
-```{r}
-# # I want to test if I can use t test for this one
-# abx_vehicle <- alpha_wide %>% filter(abx_treatment == 'biapenem' & diet_treatment == 'vehicle' & grp  == 'delta_0_3')
-# shapiro.test(x = abx_vehicle$deltas)
-# # a  p value < 0.05 indicates NOT normally distributed! so I can only use wilcox ranksum test !
-#  
-# 
-
-
-```
-
-## onesided tests
-
-```{r}
-# to just split them to smaller dfs and compute the one sided wilcox with zero alone
-# onesided <- alpha_wide %>% 
-#   split(list(.$abx_treatment, .$diet_treatment,.$grp, .$experiment_no)) %>% 
-#   map_dfr(function(df){
-#     test = wilcox.test(df$deltas, mu = 0, alternative = "less")
-#     return(pvalue = test$p.value)
-#   }) %>% gather('comparison','pvalue') %>% 
-#   mutate(padj = p.adjust(pvalue)) %>% 
-#   mutate(less = if_else(padj < 0.05, T, F))
-
-
-```
 
 
 # beta diversity 
@@ -229,9 +161,8 @@ relab_df <- healthyall %>%
 
 relab_df
 
-
-
 ```
+
 ```{r}
 relab_df_2 <- healthyall %>% 
   select(Taxon, sampleid, relab, abx_treatment, diet_treatment, experiment_no, day) %>%
@@ -286,142 +217,6 @@ beta_4
 beta_4_plot <- beta_4 +theme(legend.position = 'none')
 ```
 
-```{r}
-# to find the stool sample weight of these mice samples
-# thanks to Madhu sending over the tables!
-# dat1 <- read_excel('../data/Angel Rebuttal_Exp2_Healthy mice Diet_Fructose_Sucrose_Glucose_v2.xlsx') %>% 
-#   rename(sampleid  = ...14) %>% 
-#   filter(!is.na(sampleid)) %>% 
-#   filter(!is.na(Stool_weight_mg)) %>% 
-#   select(sampleid, Stool_weight_mg)
-# 
-# dat2 <- read_excel('../data/Angel Rebuttal_Exp2_Healthy mice Diet_Fructose_Sucrose_Glucose_v2.xlsx')%>% 
-#   rename(sampleid  = ...14) %>% 
-#   filter(!is.na(sampleid)) %>% 
-#   filter(!is.na(Stool_weight_mg)) %>% 
-#   select(sampleid, Stool_weight_mg)
-# 
-# all_weights <- bind_rows(dat1, dat2) %>% distinct()
-# 
-# meta_weight <- meta %>% left_join(all_weights ) %>% filter(!is.na(Stool_weight_mg)) %>% clean_names()
-# 
-# meta_weight %>% filter(!is.na(Stool_weight_mg)) %>% count(abx_treatment, diet_treatment)
-# meta  %>% count(abx_treatment, diet_treatment)
-```
-
-  
-```{r}
-# the absolute copy numbers of enterococcus and plot them in boxplots
-# healthy_abso <- read_csv('../data/absolute.abundance.csv') %>% 
-#   rename(sampleid = customer_label) %>% 
-#   select(sampleid, gene_copies_per_ul) %>% 
-#   inner_join(meta_weight %>% select(sampleid, stool_weight_mg)) %>% 
-#   mutate(gene_copies_per_gram = gene_copies_per_ul * 500 /(stool_weight_mg/1000)) %>%
-#   inner_join(healthyall %>% 
-#     filter(str_detect(Taxon, 'g__Enterococc')) %>% 
-#     select(sampleid, day,relab,  abx_treatment:diet_treatment) %>% 
-#       group_by(sampleid, day,abx_treatment, diet_treatment) %>% 
-#     summarise(relab = sum(relab)) ) %>% 
-#   mutate(abs_copy = gene_copies_per_gram * relab,
-#          log10_abs_copy = log10(abs_copy + 1)) %>% 
-#   mutate(day = factor(day)) %>% 
-#   arrange(abx_treatment,desc(diet_treatment),  day) %>% 
-#   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
-#   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-#   mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) 
-```
-
-
-```{r}
-# plotting the data in boxplot
-# abso_entero_healthy_days <- healthy_abso %>%    
-#   ggboxplot(x = 'xvar', y = 'log10_abs_copy',add = 'jitter', 
-#              xlab = '', ylab = 'log10(Enterococcus copy numbers)',, add.params = list(alpha = 0.5, shape = 16),
-#             width = 0.6,color  = 'grp')+
-#    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-#   stat_compare_means(comparisons = list(
-#     c('biapenem__vehicle__3','biapenem__sucrose__3'), 
-#     #c('biapenem__vehicle__6','biapenem__sucrose__6'),
-#     c('PBS__vehicle__3','PBS__sucrose__3'),
-#     c('PBS__vehicle__3','biapenem__vehicle__3')
-#     ),
-#     label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
-#   #scale_y_log10(breaks = c(1 %o% 10^(-1:8)),  labels = trans_format("log10", math_format(10^.x))) +
-#   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
-#   theme_light() +
-#   theme(axis.text.x =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
-#abso_entero_healthy_days
-  
-# this data is looking really weird!!!!, so it doesn't have much to do with the stool weight, the gene copy number is already weird, a lesson for future sequencing of mice samples
-```
-```{r}
-# maybe just plot the relative abundance for enterococcus
-# Entero_healthy <- healthyall %>% 
-#     filter(str_detect(Taxon, 'g__Enterococc')) %>% 
-#     select(sampleid, day,relab,  abx_treatment:diet_treatment) %>% 
-#       group_by(sampleid, day,abx_treatment, diet_treatment) %>% 
-#     summarise(relab = sum(relab)) %>% 
-#   mutate(day = factor(day)) %>% 
-#   arrange(abx_treatment,desc(diet_treatment),  day) %>% 
-#   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
-#   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-#   mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>% 
-#   
-#   ggboxplot(x = 'xvar', y = 'relab',add = 'jitter', 
-#              xlab = '', ylab = 'Enterococcus relative abundance',, add.params = list(alpha = 0.5, shape = 16),
-#             width = 0.6,color  = 'grp')+
-#    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-#   stat_compare_means(comparisons = list(c('biapenem__vehicle__3','biapenem__sucrose__3'), c('biapenem__vehicle__6','biapenem__sucrose__6')),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=F) +
-#   #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
-#   theme(axis.text =  element_text(size = 10, angle = 45, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
-# Entero_healthy
-```
-
-
-# bar plot 
-
-```{r}
-taxa_annot <- read_csv('../data/204_zymo_annotation_taxa_color.csv')
-
-heathy_relab_df <- healthyall  %>% 
-  separate(Taxon, into = c('asv','taxa'), sep = ':') %>% 
-  select(-taxa) %>% 
-  left_join(taxa_annot) %>% 
-  # not sure why some asv doesn't have annotation, so make them "other"
-  mutate(color = if_else(is.na(color), '#BBBBBB', color)) %>% 
-  mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-  # this velow relevel is important for the order of the group
-  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
-  
-
-asv_color <- heathy_relab_df %>% 
-  distinct(asv, color, .keep_all = T) %>% 
-  arrange(phylum, class, order, family, genus) %>% 
-  select(asv, color) %>%    
-  arrange(color) %>% 
-  deframe()
-
-panels4 <- heathy_relab_df %>%  
-  mutate(xvar = str_glue('{experiment_no}__{mouse_no}')) %>% 
-  split(.$grp) %>% 
-  imap(function(df, name_){
-   plots <-  df %>% 
-  ggplot( aes(x=xvar, y=relab, fill=asv) ) +
-  scale_fill_manual(values = asv_color) +
-  labs(x = '', y = 'Relative abundance', title = str_glue('{name_}')) +
-  geom_bar(stat = "identity",position="fill",width = 1) +
-  theme_classic() +
-  facet_grid(day ~ ., scales = 'free') +
-  theme(legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1))
-   return(plots)
-  })
- 
-library(cowplot) 
-h_bar4 <- plot_grid(plotlist =panels4, nrow = 2 )
-h_bar4
-ggsave('../data/R01_h_bar4.pdf', width = 8, height = 12)
-ggsave('../data/R01_h_bar4.jpg', width = 8, height = 12)
-```
 
 # Maaslin2 asv
 
@@ -529,7 +324,6 @@ abx_vol_d3 <- all_res_abx %>%
 ```
 
 
-
 ### volcano d6  
 
 ```{r}
@@ -584,7 +378,7 @@ abx_asvs_relab_plots <- abx_asvs_relab %>%
       mutate(abx_treatment = factor(abx_treatment , levels = c('PBS','biapenem')),
              u_mouse_id = str_glue('{experiment_no}_{mouse_no}')) %>% 
   ggboxplot(x = 'day', y = 'relab',outlier.shape = NA,
-             xlab = 'Day', ylab = '',, add.params = list(alpha = 0.5, shape = 16),
+             xlab = 'Day', ylab = 'Relative abundance', add.params = list(alpha = 0.5, shape = 16),
             title = str_glue('{name_}'),
             #color  = 'grp',
             width = 0.6)+
@@ -758,135 +552,18 @@ sugar_asvs_relab_plots <- sugar_asvs_relab %>%
       mutate(diet_treatment = factor(diet_treatment , levels = c('vehicle','sucrose')),
              u_mouse_id = str_glue('{experiment_no}_{mouse_no}')) %>% 
   ggboxplot(x = 'day', y = 'relab',outlier.shape = NA,
-             xlab = 'Day', ylab = '',, add.params = list(alpha = 0.5, shape = 16),
+             xlab = 'Day', ylab = 'Relative abundance',, add.params = list(alpha = 0.5, shape = 16),
             title = str_glue('{name_}'),
             #color  = 'grp',
             width = 0.6)+
        geom_point(aes(group = u_mouse_id),alpha=0.3, shape = 16) +
       geom_line(aes(group = u_mouse_id),alpha=0.3) +
-   #scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
-  stat_compare_means(comparisons = list(c('0','3'), c('0','6')),label= "p.value", method= 'wilcox.test',paired = T, vjust = 0.4,
-                     tip.length = 0.03,exact=F) +
-  #scale_x_discrete(labels=rep(c(0,3,6),4)) + 
       facet_grid(. ~ diet_treatment) +
   theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
   })
 sugar_asvs_relab_plots
 ```
 
-
-
-
-
-
-# Maaslin2 family
-
-
-```{r}
-# at the family level
-asv_target_family <- asv_target %>%
-  separate(Taxon, into = c('asv','taxa'), sep = ':') %>% 
-  left_join(taxa_annot %>% select(asv, family)) %>% 
-  group_by(sampleid,treatment, day, experiment_no, family ) %>% 
-  summarise(family_relab = sum(relab)) %>% 
-  ungroup() %>% 
-  filter(!is.na(family))
-asv_target_family %>% ungroup %>% distinct(family)
-```
-
-
-```{r}
-asv_target_sample_n <- asv_target_family %>% distinct(sampleid) %>% nrow
-
-kept_family <- asv_target_family %>%
-  group_by(family) %>%
-  count(family_relab > 0.001) %>%
-  rename(criteria = names(.)[2]) %>%
-  filter(criteria == 'TRUE') %>%
-  mutate(perc = round(n/asv_target_sample_n*100, 0)) %>%
-  filter(perc > 10) %>%
-  pull(family)
-
-remove_not_in_mice_gut <- c('Alcaligenaceae','Anaeroplasmataceae','Defluviitaleaceae')
-
-family_relab_target_fil <- asv_target_family %>%
-  filter( family %in% kept_family) %>%
-  filter( !family %in% remove_not_in_mice_gut) %>%
-  spread('family','family_relab', fill = 0) %>% 
-  mutate(day = factor(day),
-         experiment_no = factor(experiment_no))
-```
-
-```{r}
-feature_data_family <- family_relab_target_fil %>% 
-  select(-all_of(c('treatment', 'day', 'experiment_no'))) %>% 
-  column_to_rownames('sampleid')
-
-fit_res_family <- Maaslin2(
-  input_data = feature_data_family, 
-  input_metadata = metadata,
-  output = str_glue("../data/R01_maaslin2_output_ALL_grp4_family"),  # Output directory
-  fixed_effects = c('treatmentbiapenem_sucrose', 'treatmentPBS_vehicle', 'treatmentPBS_sucrose', 'day3', 'day6', 'experiment_no2', 'treatmentbiapenem_sucrose:day3', 'treatmentPBS_vehicle:day3', 'treatmentPBS_sucrose:day3', 'treatmentbiapenem_sucrose:day6', 'treatmentPBS_vehicle:day6', 'treatmentPBS_sucrose:day6'), 
-  random_effects = NULL,  # No random effects in this case
-  normalization = "TSS",  # Total sum scaling normalization
-  transform = "LOG",  # Log transformation actually log2
-  analysis_method = "LM",  # Linear model
-  max_significance = 0.05,
-  min_abundance = 0.0001,  # Minimum abundance threshold
-  min_prevalence = 0.10,  # Minimum prevalence threshold,
-  cores = 10
-)
-sig_res = read_tsv(str_glue('../data/R01_maaslin2_output_ALL_grp4_family/significant_results.tsv'))
-
-```
-
-
-
-
-
-```{r}
-## volcano plot at the family level
-# also make the volcano plot at the family level
-# to use the volcano plot to highlight the results on day 3
-all_res_family  <- read_tsv('../data/R01_maaslin2_output_ALL_grp4_family/all_results.tsv') 
-
-# A coefficient of 2 means an 2²-fold change (approximately a 4-fold increase) in relative abundance.
-# A coefficient of 3 means an 2³-fold change (approximately a 8-fold increase) in relative abundance.
- 
-all_res_family %>%
-  filter(metadata == 'treatmentbiapenem_sucrose:day3') %>% 
-  mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
-  mutate(neglog10_q = -log10(qval)) %>%
-  ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
-            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
-            title = 'Differential abundance between day 0 and day 3\nin abx + sucrose VS abx + vehicle\nat Family level') +
-  scale_color_manual(values = c('blue', 'black', 'red')) +
-  geom_vline(xintercept =  0, color = 'black') + 
-  geom_vline(xintercept =  c(1, -1), color = 'gray', linetype = 'dashed') + 
-  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > 1, feature, "")), color = 'red') +
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < -1, feature, "")), color = 'blue') +
-  theme(aspect.ratio = 1, legend.position = 'none')
-
-```
-
-```{r}
-famly_d6 <- all_res_family %>%
-  filter(metadata == 'treatmentbiapenem_sucrose:day6') %>% 
-  mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
-  mutate(neglog10_q = -log10(qval)) %>%
-  ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
-            xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
-            title = 'Differential abundance between day 0 and day 6\nin abx + sucrose VS abx + vehicle\nat Family level') +
-  scale_color_manual(values = c('blue', 'black', 'red')) +
-  geom_vline(xintercept =  0, color = 'black') + 
-  geom_vline(xintercept =  c(1, -1), color = 'gray', linetype = 'dashed') + 
-  geom_hline(yintercept =  -log10(0.05), color = 'gray', linetype = 'dashed') + 
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > 1, feature, "")), color = 'red') +
-  geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < -1, feature, "")), color = 'blue') +
-  theme(aspect.ratio = 1, legend.position = 'none')
-famly_d6
-```
 
 # Final graphs 
 
@@ -902,7 +579,7 @@ ggsave('../data/01_pcoa_leg.pdf')
 ```{r}
 title <- ggdraw() + 
   draw_label(
-    "Fig. S_X",
+    "Fig. S14",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -928,7 +605,7 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/01_mice_16s_p1.pdf',
+ggsave('../results//S14_mice_16s_p1_R01.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
 
@@ -937,7 +614,7 @@ ggsave('../data/01_mice_16s_p1.pdf',
 ```{r} 
 title <- ggdraw() + 
   draw_label(
-    "Fig. S_X (Continued)",
+    "Fig. S14 (Continued)",
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -963,9 +640,10 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/01_mice_16s_p2.pdf',
+ggsave('../results/S14_mice_16s_p2_R01.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
+
 # meta data for the SRA
 
 ```{r}
