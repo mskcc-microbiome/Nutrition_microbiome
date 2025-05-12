@@ -70,7 +70,7 @@ res <- spearman_all %>%
   mutate(Correlation = factor(Correlation, levels = c('lower_div','higher_div')))
 ```
 
-## 4A: bar plot
+# 4A: bar plot
 
 ```{r}
 # make a panel with only top 5 significant ones in either direction for the main figure 3
@@ -78,7 +78,7 @@ main <- res %>%
   filter(sig05 == 'FDR < 0.05') %>% 
   split(.$Correlation) %>% 
   map(function(df){
-    df %>% mutate(absrho = abs(rho)) %>% slice_max(order_by =absrho, n = 3 )
+    df %>% mutate(absrho = abs(rho)) %>% slice_max(order_by =absrho, n = 5 )
   }) %>% bind_rows() %>% 
   arrange(desc(rho))
 
@@ -216,11 +216,7 @@ arrange_label <- tibble(ord = total_order) %>%
   left_join(key %>% select(shortname, color)) %>% 
   mutate(color = if_else(is.na(color), 'black', color))
 
-```
 
-
-
-```{r}
 # I need to create a data frame that has the coordinates of the rectangles that I wanna create
 interaction_terms <- tibble(
   shortname = total_order
@@ -240,9 +236,7 @@ blue_terms <- tibble(
   filter(!str_detect(shortname, '\\*')) %>% 
   mutate(xmin = -Inf, xmax = Inf,
          blue_fill = 'blue_fill')
-```
 
-```{r}
 # the credible interval for the entero caterpillar 
 entero %>% 
   filter(item == 'sweets_e') %>% 
@@ -254,8 +248,8 @@ entero %>%
 
 cross0 <- entero %>%
   group_by(item) %>% 
-  summarise(q2.5 = round(quantile(coeff, probs = 0.025), 2),
-            q97.5 = round(quantile(coeff, probs = 0.975), 2)) %>% 
+  summarise(q2.5 = round(quantile(coeff, probs = 0.025), 1),
+            q97.5 = round(quantile(coeff, probs = 0.975), 1)) %>% 
   mutate(Cross = if_else(q2.5 >= 0 | q97.5 <= 0, F, T))
 ```
 
@@ -477,7 +471,7 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 )+theme(plot.margin = unit(c(1,9,2,1), "cm"))
 
-ggsave('../data/F4_current_178_changing.pdf',
+ggsave('../results/F4_current_178_changing.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)
 ```
 
