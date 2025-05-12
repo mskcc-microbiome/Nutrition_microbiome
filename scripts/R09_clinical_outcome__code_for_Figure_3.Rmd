@@ -154,53 +154,115 @@ ggsave('../results//Table_S3_OS_multivariate_R09.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
  
- 
+## F3C  
+
+
  
 ```{r}
-coef(fit)[2]
+fit_original <- coxph(Surv(OStime_30,OSevent)~modal_diet*day_exposed  +intensity + source_and_gvhdppx,
+             data= df_main)
+colnames(df_main)
 ```
- 
+
 
 ```{r}
-## The following lines construct a Wald test on the association between abx exposure and OS for high intake patients.
-diff <- sum(coef(fit)[c(2,8)])
-p <- aod::wald.test(Sigma=vcov(fit)[c(2,8),c(2,8)],
-                    b=coef(fit)[c(2,9)],
-                    L=t(c(1,1)))
+# --- 1. Extract Coefficients and Variance-Covariance Matrix ---
+model_coefs <- coef(fit_original)
+model_vcov <- vcov(fit_original)
 
-## Visualizing associations between abx and OS for low and high intake patient groups:
-loghr <- data.frame(exposure = 0:20,
-                    hr = exp(c(coef(fit)[2]*0:20,
-                               diff*0:20)),
-                    group = c(rep("Low intake",21),
-                              rep("High intake",21)),
-                    ub = exp(c((coef(fit)[2]+sqrt(vcov(fit)[2,2])*1.96)*0:20,
-                               (diff+1.96*sqrt(sum(vcov(fit)[c(2,8),c(2,8)])))*0:20)),
-                    lb = exp(c((coef(fit)[2]-sqrt(vcov(fit)[2,2])*1.96)*0:20,
-                               (diff-1.96*sqrt(sum(vcov(fit)[c(2,8),c(2,8)])))*0:20))
-)
+# --- 2. Identify the EXACT Coefficient Names ---
+# Run this line to see the names R assigned:
+names(model_coefs)
 ```
 
-# abx_diet_logHR
 
-```{r abx_VS_diet_logHR}
-abx_diet_logHR <- loghr |> 
-  mutate(group = if_else(group == 'Low intake', 'Lower-intake/sugar-enriched', 'Higher-intake'),
-         group = factor(group, levels = c('Lower-intake/sugar-enriched','Higher-intake'))) %>% 
-  ggplot(aes(x=exposure,y=hr)) + 
-  geom_line(aes(color=group), size = 1.5)+
-  geom_ribbon(aes(ymin=lb,ymax=ub),alpha=0.2) +
-  geom_hline(yintercept = 1,color="black",linetype=2)+
-  scale_y_continuous(transform = "log",labels=function(x) sprintf("%.0f", x))+
-  #facet_grid(.~group, labeller = labeller(facet_var = c("Higher intake" = "Lower intake", "Lower intake" = "Higher intake"))) +
-  facet_grid(.~group) +
-  ylab("log(Hazard ratio) of death\ncompared to non-exposure patients") + 
-  xlab("Number of days exposed to broad-spectrum\nantibiotics between day -7 to 12\nrelative to transplant") + theme_light()+
-  scale_color_manual(values = c( "darkslateblue", 'darkgoldenrod2'), name = '') +
-  theme(aspect.ratio = 1,  legend.position = 'none') 
-     
-abx_diet_logHR
+```{r}
+abx_coef_name <- "day_exposed" 
+interaction_coef_name <- "modal_dietHigher-intake:day_exposed" 
+
+# Check if the names exist in the model output
+if (!abx_coef_name %in% names(model_coefs)) {
+  stop("The specified name for the antibiotic exposure coefficient was not found in the model. Check names(coef(fit)).")
+}
+if (!interaction_coef_name %in% names(model_coefs)) {
+  stop("The specified name for the interaction coefficient was not found in the model. Check names(coef(fit)).")
+}
 ```
+
+
+```{r}
+# --- 3. Calculate Log(HR) and SE for Cluster 1 (Reference) ---
+
+# Log(HR) is just the coefficient for the main effect
+loghr_c1 <- model_coefs[abx_coef_name]
+
+# Standard Error (SE) is the square root of the variance (diagonal element of vcov matrix)
+se_c1 <- sqrt(model_vcov[abx_coef_name, abx_coef_name])
+
+# --- 4. Calculate Log(HR) and SE for Cluster 2 ---
+
+# Log(HR) is the sum of the main effect and the interaction term
+loghr_c2 <- model_coefs[abx_coef_name] + model_coefs[interaction_coef_name]
+
+# Standard Error (SE) for the sum requires variances and covariance:
+# SE_sum = sqrt(Var(A) + Var(B) + 2*Cov(A, B))
+var_abx <- model_vcov[abx_coef_name, abx_coef_name]
+var_int <- model_vcov[interaction_coef_name, interaction_coef_name]
+cov_abx_int <- model_vcov[abx_coef_name, interaction_coef_name]
+
+se_c2 <- sqrt(var_abx + var_int + 2 * cov_abx_int)
+
+# --- 5. Calculate 95% Confidence Intervals ---
+# CI = Estimate +/- Z * SE (where Z is approx 1.96 for 95% CI)
+z_crit <- qnorm(0.975) # More precise Z-value for 95%
+
+ci_c1_low <- loghr_c1 - z_crit * se_c1
+ci_c1_high <- loghr_c1 + z_crit * se_c1
+
+ci_c2_low <- loghr_c2 - z_crit * se_c2
+ci_c2_high <- loghr_c2 + z_crit * se_c2
+
+# --- 6. Display Results ---
+results <- data.frame(
+  Cluster = c("Cluster 1:Lower-intake/sugar-enriched", "Cluster 2:Higher-intake"),
+  LogHR = c(loghr_c1, loghr_c2),
+  SE = c(se_c1, se_c2),
+  CI_Lower = c(ci_c1_low, ci_c2_low),
+  CI_Upper = c(ci_c1_high, ci_c2_high)
+) %>% 
+  mutate(Cluster = factor(Cluster, levels = c('Cluster 2:Higher-intake','Cluster 1:Lower-intake/sugar-enriched')))
+
+```
+
+
+```{r}
+ggplot(results, aes(x = LogHR, y = Cluster, color = Cluster)) +
+  # Add horizontal error bars using the calculated CIs
+  geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.1, linewidth = 0.8) +
+  # Add points for the log HR estimates
+  geom_point(shape = 15, size = 4) + # Shape 15 is a solid square
+  # Add vertical line at log HR = 0 (no effect)
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+  # Apply the custom colors
+  scale_color_manual(values = c( "darkgoldenrod2", "darkslateblue")) +
+  # Set axis labels
+  labs(
+    x = "Log HR per day\nof antibiotic exposure",
+    y = NULL # Remove y-axis title
+  ) +
+  # Customize the theme
+  theme_classic() + # A clean theme
+  theme(
+    #axis.line.y = element_blank(), # Remove y-axis line
+    axis.ticks.y = element_blank(), # Remove y-axis ticks
+    axis.text.y = element_text(hjust = 1, size = 10), # Align y-axis labels, adjust size
+    axis.title.x = element_text(size = 11), # Adjust x-axis title size
+    legend.position = "none" # Hide the legend
+  ) +
+  # Set x-axis limits - adjust these based on your actual CI ranges for a good view
+  coord_cartesian(xlim = c(-0.15, 0.25))  
+```
+ 
 
 #  now F3
 
