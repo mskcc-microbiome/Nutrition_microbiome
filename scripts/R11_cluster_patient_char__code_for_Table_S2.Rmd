@@ -17,25 +17,13 @@ library(cowplot)
 
 
 ```{r}
-PTB <- read_csv('../data/003_combined_PTB_pid.csv') %>% 
-  separate(modal_diet, into = c('cluster_id','cluster_name'), sep = '\\:') %>% 
-  mutate(cluster_id = if_else(cluster_id == 'cluster2', 'cluster 2', cluster_id))
-
-
-load("../data/df_main_Dec10.Rdata")
-new <- read_csv('../data/003_combined_PTB_pid.csv') %>% 
-  full_join(link) %>% 
-  select(-modal_diet) %>% 
-  full_join(df_main %>% select(mrn, modal_diet)) %>% 
-  rename(cluster_id = modal_diet)
-new %>% count(cluster_id)
-PTB <- new
+PTB <- read_csv('../data/003_combined_PTB_pid.csv') 
 ```
 
 
 ```{r}
 final <- PTB %>% 
-  select(age, sex, Disease = disease.simple, source,  intensity, gvhd_ppx, cluster_id, day_exposed) %>% 
+  select(age, sex, Disease = disease.simple, source,  intensity, gvhd_ppx, modal_diet, day_exposed) %>% 
   mutate(Disease = case_when(
     Disease == 'NHL' ~ "Non-Hodgkin's lymphoma",
     # Myelodysplastic/myeloproliferative neoplasms
@@ -78,18 +66,14 @@ final <- PTB %>%
   rename(Sex = sex, Age = age, `GvHD prophylaxis` = gvhd_ppx,
          `Days exposed to broad-spectrum antibiotics` = day_exposed)
 
-#%>%
-#  mutate(cluster_id = if_else(cluster_id  == 'cluster 1', 'Cluster 1','Cluster 2'))
 ```
 
 
 ```{r}
-
-
 final %>% 
   tbl_summary(
     statistic = list(all_continuous() ~ "{median} ({IQR})", all_categorical() ~ "{n} ({p}%)"),
-    by=cluster_id
+    by=modal_diet
   ) %>%
   add_p() %>%
   bold_labels() %>% 
@@ -117,6 +101,6 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/Table_S2_patient_summary__cluster_11.pdf',
+ggsave('../results/Table_S2_patient_summary__cluster_11.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
