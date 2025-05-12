@@ -27,7 +27,7 @@ library(geepack)
 # load the cleaned data
 
 ```{r}
-# load("../data/df_main_Dec10.Rdata")
+# load("../data/df_main_Dec10.Rdata") 
 # link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
 # 
 # df_main <- df_main |>
@@ -46,7 +46,7 @@ library(geepack)
 # df_main %>% write_rds('../data/R02_cleaned_clinical_outcome2.rds')
 
 # the below table has the pid
-df_main <- read_rds('../data/R02_cleaned_clinical_outcome2.rds') %>%
+df_main <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>%
   mutate(modal_diet = as.character(modal_diet),
          modal_diet = if_else(modal_diet == 'High intake', 'Higher-intake', 'Lower-intake/sugar-enriched'),
          modal_diet = factor(modal_diet, levels = c( 'Lower-intake/sugar-enriched', 'Higher-intake'))) %>% 
@@ -56,8 +56,6 @@ df_main <- read_rds('../data/R02_cleaned_clinical_outcome2.rds') %>%
          day_exposed_cat = factor(day_exposed_cat, levels = c('Short exposure (< 8 days)','Long exposure (>= 8 days)')))
 df_main %>% count(source_and_gvhdppx)
 
-# find out the abx exposure days
-
 ```
  
 ```{r}
@@ -66,49 +64,13 @@ df_main %>% count(type_gvhd_simple)
 df_main %>% count(type_gvhd)
 ```
  
-# high sugar fraction in cluster 1 than cluster 2
-
-```{r}
-df_diet_pt <- read_rds('../data/10_df_diet_pt.RDS')
-
-res <- geepack::geeglm(Sugar_fraction ~ Clusters + splines::ns(time,knots = quantile(df_diet_pt$time, probs=c(0.2,0.8))),
-       id=pid, corstr="exch", data=df_diet_pt)
-summary(res)
-```
- 
- 
 # OS model
-
-
-
-```{r survival}
-# since the below is not significant, so we will stick to the lower intake and higher intake survival curve
-# higher_OS <- survfit2(Surv(OStime_30,OSevent)~day_exposed_cat, data = df_main |> filter(OStime_30 > 0 & modal_diet == "Higher-intake")) %>%
-#   ggsurvfit(linewidth = 0.8) +
-#   add_pvalue("annotation",size=5) +
-#   add_risktable()+
-#   ylab("Survival probability") +
-#   xlab("Days relative to HCT, landmarked at day 12")+
-#   ylim(c(0,1)) +
-#   ggtitle("Patients with higher intake")+
-#   theme(aspect.ratio = 1)
-# 
-# lower_OS <- survfit2(Surv(OStime_30,OSevent)~day_exposed_cat, data = df_main |> filter(OStime_30 > 0 & modal_diet == "Lower-intake/sugar-enriched")) %>%
-#   ggsurvfit(linewidth = 0.8) +
-#   add_pvalue("annotation",size=5) +
-#   add_risktable()+
-#   ylab("Survival probability") +
-#   xlab("Days relative to HCT, landmarked at day 12")+
-#   ylim(c(0,1)) +
-#   ggtitle("Patients with lower intake (sugar-enriched)") +
-#   theme(aspect.ratio = 1)
-```
 
 ## survival 
 
 ```{r survival}
 # survival between two clusters
-OS_clusers <- survfit2(Surv(OStime_30,OSevent)~modal_diet  , data = df_main |> filter(OStime_30 > 0 )) %>%
+OS_clusers <- survfit2(Surv(OStime_30,OSevent)~ modal_diet  , data = df_main |> filter(OStime_30 > 0 )) %>%
   ggsurvfit(linewidth = 0.8) +
   add_pvalue("annotation",size=5) +
   add_risktable()+
@@ -125,41 +87,8 @@ survival_plot <- list(
 ) |> 
   wrap_plots()
 
-# the multivariate model (the code gets a little bit too messy so I just put this here together with the univariate )
-fit <- coxph(Surv(OStime_30,OSevent)~modal_diet*abx13  + intensity + source_and_gvhdppx,
-             data = df_main |> filter(OStime_30 > 0 ) %>% mutate(abx13 = if_else(day_exposed>= 13, 'long', 'short'), abx13 = factor(abx13, levels = c('short','long'))))
-
-
-fit |> 
-  tbl_regression(exponentiate = FALSE) |> 
-  bold_p() |> 
-  as_gt()  |> 
-  gtsave(filename="../data/09_OS_model_multi_inclu_carb.png")
-
-# what is the distribution of the day exposed
-summary(fit)
 ```
 
-```{r}
-
-# 
-# dtb %>% ggscatter(x = 'Calories_kcal', y = 'estimated_cal') +
-#   geom_abline( slope = 1, intercept = 0)
-
-# Sugar Density (grams sugar/1000 kcal):
-# calculate the density 
-
-# the median for each patient
-median_sugar_pt <- dtb %>% 
-  group_by(pid) %>% 
-  summarise(median_per_pt = median(dens_sugar, na.rm = T))
-
-median_whole <- median(median_sugar_pt$median_per_pt, na.rm = T)
-
-high_sugar_pts <- median_sugar_pt %>% 
-  filter(median_per_pt >= median_whole) %>% 
-  pull(pid)
-```
 
 ## Table S3 model fit
 
@@ -182,40 +111,18 @@ input_df <- df_main |>
    mutate(`Diet-pattern cluster` = case_when(
     `Diet-pattern cluster` == 'Lower-intake/sugar-enriched' ~ 'Cluster 1 (Lower-intake/sugar-enriched)',
     `Diet-pattern cluster` == 'Higher-intake' ~ 'Cluster 2 (Higher-intake)' 
-  )) %>% 
-  mutate(grp = if_else(pid %in% high_sugar_pts, 'high_sugar', 'lower_sugar'))
+  )) 
 
 
-OS_clusers <- survfit2(Surv(OStime_30,OSevent)~grp  , data = input_df |> filter(OStime_30 > 0 )) %>%
-  ggsurvfit(linewidth = 0.8) +
-  add_pvalue("annotation",size=5) +
-  add_risktable()+
-  ylab("Survival probability") +
-  xlab("Days relative to HCT, landmarked at day 12")+
-   scale_color_manual(values = c( "darkslateblue",  "darkgoldenrod2"), name = '') +
-  ylim(c(0,1)) +
-  ggtitle("")+
-  theme(aspect.ratio = 1/1.5, legend.position = c(0.5, 0.3))
-OS_clusers
 
-survival_plot <- list(
-  ggsurvfit::ggsurvfit_build(OS_clusers)
-) |> 
-  wrap_plots()
-
-
-fit <- coxph(Surv(OStime_30,OSevent)~grp*`Abx exposure(days)`  + `Conditioning intensity` + `Graft source and GvHD prophylaxis`,
+fit <- coxph(Surv(OStime_30,OSevent)~`Diet-pattern cluster`*`Abx exposure(days)`  + `Conditioning intensity` + `Graft source and GvHD prophylaxis`,
              data= input_df)
-
-
-# fit_original <- coxph(Surv(OStime_30,OSevent)~modal_diet*day_exposed  + intensity + source + gvhd_ppx,
-#              data=df_main |> filter(OStime_30 > 0) ) 
 
 fit |> 
   tbl_regression(exponentiate = FALSE) |> 
   bold_p() |> 
   as_gt() |> 
-  gtsave(filename="../data/09_OS_model.png")
+  gtsave(filename="../data/09_OS_model_multi.png")
 
 
 # just print the multivar table to the correct size
@@ -232,7 +139,7 @@ title <- ggdraw() +
   )
 
 
-table_OS <- ggdraw() + draw_image("../data/09_OS_model.png", scale = .8)
+table_OS <- ggdraw() + draw_image("../data/09_OS_model_multi.png", scale = .8)
 
 
 
@@ -243,7 +150,7 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/Table_S3_OS_multivariate_R09.pdf',
+ggsave('../results//Table_S3_OS_multivariate_R09.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
  
@@ -295,91 +202,6 @@ abx_diet_logHR <- loghr |>
 abx_diet_logHR
 ```
 
-# ignored for now
-
-```{r}
-tidycmprsk::cuminc(Surv(tevent_30,TRMevent)~day_exposed_cat, data = df_main |> filter(OStime_30 > 0 & modal_diet == "Higher intake")) %>%
-  ggcuminc(linewidth = 0.8, outcome="TRM") +
-  add_risktable()+
-  ylab("TRM cumulative incidence") +
-  xlab("Days relative to HCT, landmarked at day 12")+
-  ylim(c(0,0.15))+
-  ggtitle("Patients with high intake")
-
-tidycmprsk::cuminc(Surv(tevent_30,TRMevent)~day_exposed_cat, data = df_main |> filter(OStime_30 > 0 & modal_diet == "Low intake")) %>%
-  ggcuminc(linewidth = 0.8, outcome="TRM") +
-  add_risktable()+
-  ylab("TRM cumulative incidence") +
-  xlab("Days relative to HCT, landmarked at day 12")+
-  ylim(c(0,0.15))+
-  ggtitle("Patients with low intake")
-
-
-
-fitTRM <- crr(Surv(tevent_30,TRMevent) ~ as.factor(modal_diet)*day_exposed + source + intensity + gvhdppx_PTCy, data=df_main |> filter(tevent_30 > 0)) |>
-  tbl_regression(exponentiate = FALSE) |>
-  bold_p() |>
-  as_gt() |>
-  gtsave(filename="../data/TRM_model.html")
-
-tidycmprsk::cuminc(Surv(tevent_30,GRMevent)~day_exposed_cat, data = df_main |> filter(OStime_30 > 0 & modal_diet == "High intake"& source!="TCD")) %>%
-  ggcuminc(linewidth = 0.8, outcome="GRM") +
-  add_risktable()+
-  ylab("GRM cumulative incidence") +
-  xlab("Days relative to HCT, landmarked at day 12")+
-  ylim(c(0,0.15))+
-  ggtitle("Non-TCD Patients with high intake")
-
-tidycmprsk::cuminc(Surv(tevent_30,GRMevent)~day_exposed_cat, data = df_main |> filter(OStime_30 > 0 & modal_diet == "Low intake"& source!="TCD")) %>%
-  ggcuminc(linewidth = 0.8, outcome="GRM") +
-  add_risktable()+
-  ylab("GRM cumulative incidence") +
-  xlab("Days relative to HCT, landmarked at day 12")+
-  ylim(c(0,0.15))+
-  ggtitle("Non-TCD Patients with low intake")
-
-fitGRM <- crr(Surv(tevent_30,GRMevent)~as.factor(modal_diet)*day_exposed + source + intensity + gvhd_ppx,data=df_main |> filter(tevent_30 > 0 & source!="TCD")) |>
-  tbl_regression(exponentiate = FALSE)|>
-  bold_p() |>
-  as_gt() |>
-  gtsave(filename="../data/GRM_model.html")
-
-
-tidycmprsk::cuminc(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0)) %>%
-  ggcuminc(linewidth = 0.8, outcome="aGVHD") +
-  add_pvalue("annotation",size=5) +
-  add_risktable()+
-  # scale_color_manual(values=c("blue","red"))+
-  ylab("aGVHD onset cumulative incidence") +
-  xlab("Days relative to HCT (Landmarked at day 12)")+
-  ylim(c(0,0.8))
-
-tidycmprsk::cuminc(Surv(tgvhd_event-12,type_gvhd_simple)~day_exposed_cat, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0 & modal_diet == "High intake")) %>%
-  ggcuminc(linewidth = 0.8, outcome="aGVHD") +
-  add_risktable()+
-  ylab("aGVHD onset cumulative incidence") +
-  xlab("Days relative to HCT, landmarked at day 12")+
-  ylim(c(0,0.8))+
-  ggtitle("Patients with high intake")
-
-tidycmprsk::cuminc(Surv(tgvhd_event-12,type_gvhd_simple)~day_exposed_cat, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0 & modal_diet == "Low intake")) %>%
-  ggcuminc(linewidth = 0.8, outcome="aGVHD") +
-  add_risktable()+
-  ylab("aGVHD onset cumulative incidence") +
-  xlab("Days relative to HCT, landmarked at day 12")+
-  ylim(c(0,0.8))+
-  ggtitle("Patients with low intake")
-
-ggsave("../data/aGVHDonset.pdf")
-
-fitAGVHD <- crr(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet + day_exposed + intensity + source + gvhd_ppx, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0)) |>
-  tbl_regression(exponentiate = FALSE)|>
-  bold_p() |>
-  as_gt() |>
-  gtsave(filename="../data/aGVHDonset_model.html")
-list.files('~/Work/projects/MSS_pipeline-/scripts/food_tree/data/')
-```
-
 #  now F3
 
 ```{r}
@@ -422,154 +244,5 @@ combined <- plot_grid(
 
 ggsave('../data/09_clinical_outcome.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
-```
-
-
-
-  
-
-# revised a-gvhd onset analysis
-
-```{r}
-library(tidyverse)
-library(LCAtoolbox)
-library(gtsummary)
-library(ggsurvfit)
-library(tidycmprsk)
-library(survival)
-library(ggpubr)
-library(gt)
-library(cowplot)
-library(survminer)
-library(patchwork)
-load('../data/df_main_Sep18.Rdata')
-  
-df_main <- df_main %>% 
-  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
-  mutate(source_and_gvhdppx = str_glue('{source}+{gvhd_ppx}')) %>%
-  mutate(modal_diet = as.character(modal_diet),
-         modal_diet = if_else(modal_diet == 'High intake', 'Higher-intake', 'Lower-intake/sugar-enriched'),
-         modal_diet = factor(modal_diet, levels = c('Lower-intake/sugar-enriched','Higher-intake'))) 
-
-df_main %>% count(type_gvhd_simple, agvhd_grade)
-colnames(df_main)
-# day_exposed : Number of days exposed to broad-spectrum\nantibiotics between day -7 to 12\nrelative to transplant
-# leng_of_stay
-
-# the range of the follow up dates
-df <- df_main  %>% 
-  select(where(is.Date)) %>% 
-  gather()
-
-df_main %>% 
-  ggboxplot(x = 'modal_diet', y = 'day_exposed', add = 'jitter') +
-  stat_compare_means()
-```
-
-## aGVHD onset cumulative incidence ~ modal_diet
-
-```{r}
-# aGVHD onset cumulative incidence ~ modal_diet
-cuminc_cluster <- cuminc(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0)) %>%
-  ggcuminc(linewidth = 0.8, outcome="aGVHD") +
-  add_risktable()+
-   scale_color_manual(values = c(   "darkgoldenrod2", "darkslateblue"), name = '') +
-  ylab("aGVHD onset cumulative incidence") +
-  xlab("Days relative to HCT (Landmarked at day 12)")+
-  ylim(c(0,0.8))
-
-
-cuminc_cluster_plot <- list(
-  ggsurvfit::ggsurvfit_build(cuminc_cluster)
-) |> 
-  wrap_plots()
-
-cuminc_cluster_plot
-```
-
-
-```{r}
-# aGVHD onset cumulative incidence ~ modal_diet
-# high intake
-tidycmprsk::cuminc(Surv(tgvhd_event-12,type_gvhd_simple)~day_exposed_cat, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0 & modal_diet == "High intake")) %>%
-  ggcuminc(linewidth = 0.8, outcome="aGVHD") +
-  add_risktable()+
-  ylab("aGVHD onset cumulative incidence") + 
-  xlab("Days relative to HCT, landmarked at day 12")+
-  ylim(c(0,0.8))+ 
-  ggtitle("Patients with high intake")
-```
-
-
-```{r}
-# aGVHD onset cumulative incidence ~ modal_diet
-# low intake
-tidycmprsk::cuminc(Surv(tgvhd_event-12,type_gvhd_simple)~day_exposed_cat, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0 & modal_diet == "Low intake")) %>%
-  ggcuminc(linewidth = 0.8, outcome="aGVHD") +
-  add_risktable()+
-  ylab("aGVHD onset cumulative incidence") + 
-  xlab("Days relative to HCT, landmarked at day 12")+
-  ylim(c(0,0.8))+ 
-  ggtitle("Patients with low intake")
-```
-
-## aGVHDonset : multivariate
-
-```{r}
-# aGVHDonset : multivariate
-fitAGVHD <- crr(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet + day_exposed + intensity + source_and_gvhdppx, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0)) |> 
-  tbl_regression(exponentiate = FALSE)|> 
-  bold_p() |> 
-  as_gt() |> 
-  gtsave(filename="../data/aGVHDonset_model_multi.png")
-
-# I tried the interactive version: modal_diet * day_exposed and the interaction term is not significant, so I can just have them as indenpendent ones. 
-```
-
-## aGVHDonset : univariate
-
-```{r}
-# aGVHDonset : univariate
-fitAGVHD <- crr(Surv(tgvhd_event-12,type_gvhd_simple)~modal_diet, data = df_main |> filter(source!="TCD" & tgvhd_event-12 > 0)) |> 
-  tbl_regression(exponentiate = FALSE)|> 
-  bold_p() |> 
-  as_gt() |> 
-  gtsave(filename="../data/aGVHDonset_model_univariate.png")  
-```
-
-## R3 figure 
-
-```{r}
-# I think it would be a good idea to make this R only figure including the c i curve with the two clusters and the multivariate model with the crr
- title <- ggdraw() + 
-  draw_label(
-    "Fig. R3",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 0)
-  )
-
-aGVHDonset_model_uni <- ggdraw() + draw_image("../data/aGVHDonset_model_univariate.png", scale = 0.9)
-
-aGVHDonset_model_multi <- ggdraw() + draw_image("../data/aGVHDonset_model_multi.png", scale = 0.9)
-
-bottom <- plot_grid(aGVHDonset_model_uni, aGVHDonset_model_multi,   nrow = 1, align = 'vh', axis = 'lrtb', labels = c('B', 'C'), rel_widths = c(2, 2))
-
-plot_ <- plot_grid(cuminc_cluster_plot, bottom,  nrow = 2, align = 'vh', axis = 'lrtb', labels = c('A', NA) )
-
-combined <- plot_grid(
-  title, plot_,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
-
-ggsave('../data/Fig_R3_aGVHD_onset.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
-ggsave('../data/Fig_R3_aGVHD_onset.png',
-      width = 210, height = 297, units = "mm", device = 'png', plot = combined, dpi = 300)  
 ```
 
