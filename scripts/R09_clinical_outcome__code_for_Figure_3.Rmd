@@ -53,15 +53,17 @@ df_main <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>%
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
   mutate(source_and_gvhdppx = str_glue('{source}+{gvhd_ppx}'),
          source_and_gvhdppx = factor(source_and_gvhdppx, levels = c('TCD+TCD','Cord+CNI-based','Unmodified+CNI-based','Unmodified+PTCy-based')),
-         day_exposed_cat = factor(day_exposed_cat, levels = c('Short exposure (< 8 days)','Long exposure (>= 8 days)')))
-df_main %>% count(source_and_gvhdppx)
-
+         day_exposed_cat = factor(day_exposed_cat, levels = c('Short exposure (< 8 days)','Long exposure (>= 8 days)'))) %>% 
+  mutate(day_exposed_cat = str_replace(day_exposed_cat, ' \\(.+\\)','')) %>% 
+  mutate(abx_diet_cat = str_glue('{modal_diet}, {day_exposed_cat}'))
+df_main %>% count(abx_diet_cat)
+ 
 ```
  
 ```{r}
 colnames(df_main)
 df_main %>% count(type_gvhd_simple)
-df_main %>% count(type_gvhd)
+df_main %>% count(abx_diet_cat)
 ```
  
 # OS model
@@ -89,6 +91,38 @@ survival_plot <- list(
 
 ```
 
+```{r}
+# Kaplan-Meier survival curves for 4 groups
+plot_colors <- c(
+  "Higher-intake, Short exposure" = "#8B4513", # SaddleBrown (or a similar brown)
+  "Higher-intake, Long exposure"  = "#FFD700", # Gold (Yellow)
+  "Lower-intake/sugar-enriched, Short exposure"  = "#ADD8E6", # LightBlue
+  "Lower-intake/sugar-enriched, Long exposure"   = "#00008B"  # DarkBlue
+)
+
+OS_clusers_4 <- survfit2(Surv(OStime_30,OSevent)~ abx_diet_cat  , data = df_main |> filter(OStime_30 > 0 )) %>%
+  ggsurvfit(linewidth = 0.8) +
+  scale_colour_manual(values = plot_colors) +
+  add_pvalue("annotation",size=5) +
+  add_risktable()+
+  ylab("Survival probability") +
+  xlab("Days relative to HCT, landmarked at day 12")+
+   #scale_color_manual(values = c( "darkslateblue",  "darkgoldenrod2"), name = '') +
+  ylim(c(0,1)) +
+  ggtitle("")+
+  theme(aspect.ratio = 1/1.5, legend.position = c(0.5, 0.3))
+OS_clusers_4
+
+survival_plot <- list(
+  ggsurvfit::ggsurvfit_build(OS_clusers_4)
+) |> 
+  wrap_plots()     
+
+# "At Risk" Table : For each group, this table tells you the number of patients who were still alive and being followed (i.e., had not yet experienced the event and had not been censored) at specific time points shown on the X-axis (0, 100, 200, 300 days landmarked). When the number "at risk" becomes very small (e.g., single digits), the survival curve estimates for that group at later time points become less reliable because they are based on fewer patients.
+# Understanding Censoring: Drops in the "at risk" numbers that don't correspond to steps down in the curve can indicate censoring (patients lost to follow-up, or the study ended before they had an event).
+# "Events" : For each group, this table typically shows the cumulative number of events (e.g., deaths) that have occurred up to the specific time points on the X-axis.
+# "landmarked at day 12": This means the analysis effectively starts at HCT day 12. Only patients who were alive at day 12 are included, and their follow-up time begins from this point. This is often done to avoid "immortal time bias," where patients who survive longer have more opportunity to, for example, receive a longer duration of treatment, which could skew results if not accounted for.
+```
 
 ## Table S3 model fit
 
