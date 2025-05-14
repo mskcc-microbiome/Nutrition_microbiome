@@ -16,8 +16,11 @@ library(gtsummary)
 library(ggsurvfit)
 library(tidycmprsk)
 library(survival)
+library(ggpubr)
+library(cowplot)
 ```
 
+# run the trajectory algorithm
 
 ```{r}
 df_pt <- readr::read_csv("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/156_combined_PTB_original.csv")
@@ -191,6 +194,13 @@ pdiet <- df_pred_long2 |>
   ylab("Log-transformed daily intake (grams)") +
   xlab("Days relative to HCT") + 
   ylab("")
+```
+
+# S10 A 
+
+```{r}
+first2_ratio <- 2
+line_size = 1
 
 pdiet2 <- df_diet_pd |> 
   pivot_longer(cols=c("Fat",
@@ -199,36 +209,95 @@ pdiet2 <- df_diet_pd |>
                       "Protein"),
                values_to = "value",
                names_to = "event") |>
+  mutate(modal_diet = if_else(modal_diet == 1, 'Cluster 1', 'Cluster 2')) %>% 
   rename(Clusters = modal_diet) |> 
-  ggplot(aes(x=time,y=exp(value)-1)) + 
-  geom_line(aes(group=id),alpha=0.02) + 
-  facet_grid(event~Clusters,scales="free_y") + 
-  geom_line(data=df_pred_long2 |> rename(Clusters = modal_diet),aes(x=time,y=exp(value),color=Clusters)) +
-  ylab("Daily intake (grams)") + 
-  xlab("Days relative to HCT")
+  ggplot(aes(x=time,y=exp(value))) + 
+  geom_line(aes(group=id),alpha=0.03) + 
+  facet_grid(Clusters~ event) + 
+  geom_line(data=df_pred_long2 |> mutate(modal_diet = if_else(modal_diet == 1, 'Cluster 1', 'Cluster 2')) %>%  rename(Clusters = modal_diet) ,aes(x=time,y=exp(value),color=Clusters) , size = line_size) +
+  theme_light() +
+  labs(x = 'HCT Day', y = 'Daily intake (grams)') +
+  scale_y_log10() +
+  scale_color_manual(values = c("darkslateblue", "darkgoldenrod2")) +
+  theme(aspect.ratio = first2_ratio, legend.position = 'none')
+pdiet2
+```
 
-ggsave("../data/10_Individual_intake_Oct21.pdf")
+# F3 A,B and S10 B
 
-pdiet2_comp <- df_diet_pd |> 
-  pivot_longer(cols=c("Fat",
-                      "Sugar",
-                      "Fiber",
-                      "Protein"),
-               values_to = "value",
-               names_to = "event") |>
-  group_by(id,time) |> 
-  mutate(value = exp(value)-1,
-         sumvalue = sum(value),
-         prop = value/sumvalue) |> 
-  rename(Clusters = modal_diet) |> 
-  ggplot(aes(x=time,y=prop)) + 
-  geom_line(aes(group=id),alpha=0.02) + 
-  facet_grid(event~Clusters) + 
-  geom_line(data=df_pred_long2 |> rename(Clusters = modal_diet) |> group_by(time,Clusters) |> mutate(value = exp(value), sumvalue=sum(value), prop = value/sumvalue),
-            aes(x=time,y=prop,color=Clusters)) +
-  ylab("Propotion of intake (grams)") + 
-  xlab("Days relative to HCT")
+## the density metric
 
-ggsave("../data/10_Individual_intake_proportions_Oct21.pdf")
+```{r}
+df_density <- read_csv('../data/152_combined_DTB.csv') %>%
+  select(pid, fdrt,description,  Calories_kcal:Sugars_g) %>%
+  select(-total_weight) %>%
+  group_by(pid, fdrt ) %>% 
+  summarise(d_carb = sum(Carbohydrates_g),
+            d_Protein_g = sum(Protein_g),
+            d_Fat_g = sum(Fat_g),
+            d_Calories_kcal = sum(Calories_kcal),
+            d_Fibers_g = sum(Fibers_g),
+            d_Sugars_g = sum(Sugars_g)) %>% 
+  filter(d_Calories_kcal > 0) %>% # to get rid of spurious results because of mathematical manipulatio
+  mutate(dens_Protein = round(d_Protein_g/(d_Calories_kcal )*1000, 2),
+         dens_carb = round(d_carb/(d_Calories_kcal )*1000, 2),
+         dens_fat = round(d_Fat_g/(d_Calories_kcal )*1000, 2),
+         dens_fiber = round(d_Fibers_g/(d_Calories_kcal )*1000, 2),
+         dens_sugar = round(d_Sugars_g/(d_Calories_kcal )*1000, 2)) %>% 
+  rowwise( ) %>% 
+  mutate(dens3 = dens_Protein + dens_carb + dens_fat) %>% 
+  mutate(log_den_sugar = log(dens_sugar + 0.5),
+        log_den_fiber = log(dens_fiber + 0.5),
+        log_den_3 = log(dens3 + 0.5)) 
+
+p_cal <- df_density %>% 
+  filter(fdrt %in% -7:12) %>% 
+  left_join(readr::read_csv("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/156_combined_PTB.csv") %>% select(pid, modal_diet)) %>%  # the original cluster label 
+  mutate(pid = as.factor(pid), 
+         modal_diet = factor(modal_diet, levels = c('cluster2:higher-intake','cluster 1:lower-intake/sugar-enriched')))
+
+cluster_cal <- p_cal %>% 
+  mutate(modal_diet = factor(modal_diet, levels = c('cluster 1:lower-intake/sugar-enriched', 'cluster2:higher-intake'))) %>% 
+  ggboxplot(x = 'fdrt', y = 'd_Calories_kcal', outlier.shape = NA,xlab = '',
+            #add = 'jitter', add.params = list(alpha = 0.2, shape = 16), 
+            title = 'calories') +
+  stat_summary(fun = median, geom = "line", aes(group = 1), color = "red", size = 1) +scale_x_discrete( breaks = seq(0, 10, 10)) +
+  facet_wrap(~ modal_diet)+theme_bw() +  theme(aspect.ratio = 3.5)
+
+cluster_cal 
+```
+```{r}
+# combine the fiber and the carb
+df_g_prop <- p_cal %>% 
+  select(-starts_with('dens')) %>% 
+  select(-d_Calories_kcal) %>% 
+  gather('event','d_gram', d_carb:d_Sugars_g) %>% 
+  group_by(pid,fdrt) |> 
+  mutate(sumvalue = sum(d_gram),
+         prop = d_gram/sumvalue,
+         fdrt = factor(fdrt)) %>% 
+   mutate(cluster_label = if_else(modal_diet == 'cluster2:higher-intake', '2higher','1lower')) %>% 
+  split(.$event)
+
+
+prop_plots <- df_g_prop %>% 
+  imap(function(df, .y){
+      
+     ggplot(df, aes(x = fdrt, y = prop)) +
+        geom_boxplot(
+          outlier.shape = NA,    
+          outlier.size = 1,    
+          outlier.alpha = 0.5,   
+          outlier.color = "red" 
+        ) +
+        labs(title = str_glue('{.y}'),y = '',x = '') +
+        stat_summary(fun = median, geom = "line", aes(group = 1), color = 'red', size = 1) +
+        scale_x_discrete( breaks = seq(0, 10, 10)) +
+      ylim(0,1) +
+        facet_wrap(~ cluster_label ) +theme_bw()  +  theme(aspect.ratio = 3.5)
+     
+  })  
+combined <- plot_grid(plotlist = prop_plots, nrow = 1)
+combined
 ```
 
