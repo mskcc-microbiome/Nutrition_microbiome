@@ -1,0 +1,234 @@
+---
+title: "Define patients trajectory clusters"
+output: html_document
+date: "2025-05-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(LCAtoolbox)
+library(gtsummary)
+library(ggsurvfit)
+library(tidycmprsk)
+library(survival)
+```
+
+
+```{r}
+df_pt <- readr::read_csv("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/156_combined_PTB_original.csv")
+df_diet <- readr::read_csv("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/152_combined_DTB.csv")
+df_med <- readr::read_csv("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/169_all_medication.csv")
+df_prophylaxis <- readr::read_csv("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/for_angel_new_column.csv") 
+
+df_diet_pd <- df_diet |> 
+  group_by(mrn,fdrt) |> 
+  filter(fdrt <= 12 & fdrt >= -7) |> 
+  summarise(Protein_g = log(sum(Protein_g)+1),
+            Fat_g = log(sum(Fat_g)+1),
+            Carbohydrates_g = log(sum(Carbohydrates_g)+1),
+            Fibers_g = log(sum(Fibers_g)+1),
+            Sugars_g = log(sum(Sugars_g)+1)) |> 
+  arrange(mrn,fdrt) |> 
+  mutate(logProtein = log(Protein_g+1e-1),
+         logFat = log(Fat_g+1e-1),
+         logCarb = log(Carbohydrates_g+1e-1),
+         logFiber = log(Fibers_g+1e-1),
+         logSugar = log(Sugars_g+1e-1),
+         isProtein = as.numeric(Protein_g > 0),
+         isFat = as.numeric(Fat_g > 0),
+         isCarb = as.numeric(Carbohydrates_g > 0),
+         isFiber = as.numeric(Fibers_g > 0),
+         isSugar = as.numeric(Sugars_g > 0)) |> 
+  rename(Protein=Protein_g,
+         Fat=Fat_g,
+         Carb=Carbohydrates_g,
+         Fiber=Fibers_g,
+         Sugar=Sugars_g)
+
+df_diet_pd |> 
+  pivot_longer(cols=Protein:isSugar) |> 
+  ggplot(aes(x=fdrt,y=value,group=mrn)) +
+  geom_line(alpha=0.1) +
+  facet_wrap(.~name,scales="free")
+
+df_diet_pd <- df_diet_pd |> 
+  ungroup() |> 
+  left_join(df_pt) |> 
+  rename(id=mrn,
+         time=fdrt) |> 
+  group_by(id) |> 
+  mutate(num_obs = row_number()) |> 
+  arrange(id, time)
+
+library(tidyverse)
+library(ggplot2)
+library(LCAtoolbox)
+library(gtsummary)
+
+df_med <- df_med |> 
+  filter(drug_name_clean %in% c("vancomycin", 
+                                "imipenem_cilastatin",
+                                "meropenem",
+                                "ertapenem", 
+                                "cefepime", 
+                                "linezolid",
+                                "metronidazole",
+                                "piperacillin_tazobactam")) |> 
+  filter(together != "vancomycin__IVPB") |> 
+  full_join(df_pt, by="mrn") |> 
+  mutate(start = start_date - hct,
+         stop = stop_date - hct)
+
+ddist <- sapply(-7:12,function(x) as.numeric(df_med$start <= x & df_med$stop >= x))
+colnames(ddist) <- paste("Day",-7:12)
+ddist <- data.frame(ddist,check.names = FALSE)
+ddist[is.na(ddist)] <- 0
+ddist$mrn <- df_med$mrn
+
+df_abx <- ddist %>% 
+  gather(v,value,`Day -7`:`Day 12`) %>%
+  # filter(value == 1) %>% 
+  separate(v, c("name1", "name2"), sep=" ") %>%
+  mutate(Day = as.numeric(name2)) %>% 
+  select(-name1,-name2) %>% 
+  distinct() |> 
+  group_by(mrn,Day) |> 
+  summarise(abx = as.numeric(sum(value) > 0)) |> 
+  rename(time=Day,
+         id=mrn)|> 
+  ungroup() |> 
+  group_by(id) |> 
+  mutate(num_obs = row_number()) |> 
+  mutate(day_exposed = sum(abx)) |> 
+  ungroup()
+
+dat_diet <- model.matrix(~.+splines::ns(time,knots=c(quantile(unique(df_diet_pd$time),c(0.1,0.5,0.9)))),data=df_diet_pd)
+colnames(dat_diet)[37:40] <- paste0("time",1:4)
+dat_diet <- data.frame(dat_diet,check.names = FALSE)
+
+fitdiet <- SLTCA(dat_diet,
+                 num_class=2,
+                 covx=NULL,
+                 vary=c("Fat",
+                        "Sugar",
+                        "Fiber",
+                        "Protein"),
+                 covgee=c("time1","time2","time3","time4"),
+                 Y_dist=c(rep("normal",4)),
+                 varest=TRUE,
+                 verbose=TRUE,
+                 stop.rule="tau",
+                 cor="ind",
+                 maxiterEM=100,
+                 tolEM=1e-4,
+                 keep.switch = F)
+
+fitdiet$beta$time1[2,1] + 1.96*fitdiet$ASE$betarb["Class 1 Sugar time1",]
+fitdiet$beta$time1[2,1] - 1.96*fitdiet$ASE$betarb["Class 1 Sugar time1",]
+
+fitdiet$beta$time1[2,2] + 1.96*fitdiet$ASE$betarb["Class 2 Sugar time1",]
+fitdiet$beta$time1[2,2] - 1.96*fitdiet$ASE$betarb["Class 2 Sugar time1",]
+
+timevec = unique(sort(dat_diet$time))
+timespl = cbind(1,splines::ns(timevec,knots=c(quantile(unique(dat_diet$time),c(0.1,0.5,0.9)))))
+
+Coef = matrix(unlist(fitdiet$beta),ncol=5,nrow=8)
+pred <- timespl %*% t(Coef)
+
+colnames(pred) <- c(paste0(c("Fat",
+                             "Sugar",
+                             "Fiber",
+                             "Protein"),"_1"),
+                    paste0(c("Fat",
+                             "Sugar",
+                             "Fiber",
+                             "Protein"),"_2"))
+
+df_pred1 <- data.frame(time=timevec,
+                       pred,
+                       check.names = FALSE)
+
+df_pred_long2 <- df_pred1 |>  
+  pivot_longer(cols = -time) 
+
+df_pred_long2$event = sapply(df_pred_long2$name, function(x) strsplit(x,"_")[[1]][1])
+df_pred_long2$modal_diet = sapply(df_pred_long2$name, function(x) strsplit(x,"_")[[1]][2])
+df_pred_long2$event = factor(df_pred_long2$event)
+
+modal <- data.frame(newid=as.numeric(names(fitdiet$modal)), modal=fitdiet$modal)
+dat_diet$modal_diet = NA
+dat_diet$modal_diet[modal$newid] = modal$modal
+dat_diet <- dat_diet %>%
+  group_by(id) %>%
+  mutate(modal_diet = first(modal_diet))
+
+df_class <- dat_diet |> 
+  select(id,modal_diet) |> 
+  distinct()
+
+# df_abx <- df_abx |> 
+#   left_join(df_class) #|> 
+# #mutate(modal_abx = ifelse(day_exposed == 0,4,modal_abx))
+# 
+# df_class <- df_abx |> 
+#   select(id,modal_diet) |> 
+#   distinct()
+
+df_diet_pd <- df_diet_pd |> 
+  left_join(df_class)
+
+pdiet <- df_pred_long2 |> 
+  ggplot(aes(x=time,
+             y=value,
+             color=modal_diet)) + 
+  geom_line() +
+  facet_grid(event~.,scales="free_y")+
+  ylab("Log-transformed daily intake (grams)") +
+  xlab("Days relative to HCT") + 
+  ylab("")
+
+pdiet2 <- df_diet_pd |> 
+  pivot_longer(cols=c("Fat",
+                      "Sugar",
+                      "Fiber",
+                      "Protein"),
+               values_to = "value",
+               names_to = "event") |>
+  rename(Clusters = modal_diet) |> 
+  ggplot(aes(x=time,y=exp(value)-1)) + 
+  geom_line(aes(group=id),alpha=0.02) + 
+  facet_grid(event~Clusters,scales="free_y") + 
+  geom_line(data=df_pred_long2 |> rename(Clusters = modal_diet),aes(x=time,y=exp(value),color=Clusters)) +
+  ylab("Daily intake (grams)") + 
+  xlab("Days relative to HCT")
+
+ggsave("../data/10_Individual_intake_Oct21.pdf")
+
+pdiet2_comp <- df_diet_pd |> 
+  pivot_longer(cols=c("Fat",
+                      "Sugar",
+                      "Fiber",
+                      "Protein"),
+               values_to = "value",
+               names_to = "event") |>
+  group_by(id,time) |> 
+  mutate(value = exp(value)-1,
+         sumvalue = sum(value),
+         prop = value/sumvalue) |> 
+  rename(Clusters = modal_diet) |> 
+  ggplot(aes(x=time,y=prop)) + 
+  geom_line(aes(group=id),alpha=0.02) + 
+  facet_grid(event~Clusters) + 
+  geom_line(data=df_pred_long2 |> rename(Clusters = modal_diet) |> group_by(time,Clusters) |> mutate(value = exp(value), sumvalue=sum(value), prop = value/sumvalue),
+            aes(x=time,y=prop,color=Clusters)) +
+  ylab("Propotion of intake (grams)") + 
+  xlab("Days relative to HCT")
+
+ggsave("../data/10_Individual_intake_proportions_Oct21.pdf")
+```
+
