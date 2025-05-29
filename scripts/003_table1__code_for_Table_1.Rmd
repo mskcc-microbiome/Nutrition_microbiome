@@ -16,8 +16,17 @@ library(cowplot)
 ```
 
 ```{r}
+los <- read_csv('../data/003_leng_of_stay_pid.csv')# could be combined to the above PTBs
+
 # finally the below table is comprehensive and deidentified!
-PTB <- read_csv('../data/003_combined_PTB_pid.csv')
+PTB <- read_csv('../data/003_combined_PTB_pid.csv') %>% 
+  select(pid, age:batch, source:intensity, modal_diet:day_exposed) %>% 
+  select(-modal_diet, -batch) %>% 
+  full_join(los)
+
+PTB %>% write_csv('../data/003_combined_PTB_pid_updated.csv')
+
+glimpse(PTB) 
 ```
 # clean up the info
 
@@ -73,16 +82,16 @@ final %>%
   bold_labels() %>% 
   as_gt() %>%
   #gt::tab_footnote(footnote = "MDS/MPN = Myelodysplastic/myeloproliferative neoplasms") %>% 
-  gt::gtsave(filename = "../data/003_patient_summary.png")
+  gt::gtsave(filename = "../intermediate_data/003_patient_summary.png") 
 ```
 # the table 1 figure
 
 ```{r}
-table1 <- ggdraw() + draw_image("../data/003_patient_summary.png", scale = 0.8)
+table1 <- ggdraw() + draw_image("../intermediate_data/003_patient_summary.png", scale = 0.8)
 
  title <- ggdraw() + 
   draw_label(
-    "Table 1",
+    "Table 1", 
     fontface = 'bold',
     x = 0,
     hjust = 0
@@ -91,7 +100,6 @@ table1 <- ggdraw() + draw_image("../data/003_patient_summary.png", scale = 0.8)
     plot.margin = margin(0, 0, 0, 5)
   )
  
-
  
 combined <- plot_grid(
   title, table1,
@@ -100,27 +108,20 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/Table_1_patient_summary_003.pdf',
+ggsave('../results/Table_1_patient_summary_003.pdf', 
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
 
-# create another for the 158
+
+# Table S1
 
 ```{r}
-# create and save the table about patients length of stay     
-# load('../data/df_main_Sep18.Rdata')
-# link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
-# 
-# los <- df_main %>%
-#   select(mrn, leng_of_stay) %>%
-#   full_join(link) %>%
-#    select( pid, leng_of_stay)
-# 
-# los %>% write_csv('../data/003_leng_of_stay_pid.csv')
 
-los <- read_csv('../data/003_leng_of_stay_pid.csv')
 meta <- read_csv('../data/153_combined_META.csv')
+```
 
+
+```{r}
 PTB2 <- PTB %>% 
   full_join(los) %>% 
   # to include only the subset 158
@@ -177,13 +178,13 @@ final2 %>%
   ) %>%
   bold_labels() %>% 
   as_gt() %>%
-  gt::gtsave(filename = "../data/003_patient_summary_for_158.png")
+  gt::gtsave(filename = "../intermediate_data/003_patient_summary_for_158.png")
 
 summary(PTB2$leng_of_stay)
 ```
 
 ```{r}
-table_S1 <- ggdraw() + draw_image("../data/003_patient_summary_for_158.png", scale = 0.8)
+table_S1 <- ggdraw() + draw_image("../intermediate_data/003_patient_summary_for_158.png", scale = 0.8)
 
 title <- ggdraw() + 
   draw_label(
@@ -205,7 +206,9 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/Table_S1_patient_summary_158_003.pdf',
+ggsave('../results/Table_S1_patient_summary_158_003.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+# test
 ```
+
 
