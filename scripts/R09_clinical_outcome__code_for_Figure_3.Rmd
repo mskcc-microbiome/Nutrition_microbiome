@@ -174,9 +174,7 @@ title <- ggdraw() +
 
 
 table_OS <- ggdraw() + draw_image("../data/09_OS_model_multi.png", scale = .8)
-
-
-
+    
 combined <- plot_grid(
   title, table_OS,
   ncol = 1,
@@ -190,7 +188,45 @@ ggsave('../results//Table_S3_OS_multivariate_R09.pdf',
  
 ## F3C  
 
+```{r}
+## The following lines construct a Wald test on the association between abx exposure and OS for high intake patients.
+diff <- sum(coef(fit)[c(2,9)])
+p <- aod::wald.test(Sigma=vcov(fit)[c(2,9),c(2,9)],
+                    b=coef(fit)[c(2,9)],
+                    L=t(c(1,1)))
 
+## Visualizing associations between abx and OS for low and high intake patient groups:
+loghr <- data.frame(exposure = 0:20,
+                    hr = exp(c(coef(fit)[2]*0:20,
+                               diff*0:20)),
+                    group = c(rep("Lower intake",21),
+                              rep("Higher intake",21)),
+                    ub = exp(c((coef(fit)[2]+sqrt(vcov(fit)[2,2])*1.96)*0:20,
+                               (diff+1.96*sqrt(sum(vcov(fit)[c(2,9),c(2,9)])))*0:20)),
+                    lb = exp(c((coef(fit)[2]-sqrt(vcov(fit)[2,2])*1.96)*0:20,
+                               (diff-1.96*sqrt(sum(vcov(fit)[c(2,9),c(2,9)])))*0:20))
+)
+```
+
+
+```{r abx_VS_diet_logHR}
+abx_diet_logHR <- loghr |> 
+  ggplot(aes(x=exposure,y=hr)) + 
+  geom_line(aes(color=group), size = 1.5)+
+  geom_ribbon(aes(ymin=lb,ymax=ub),alpha=0.2) +
+  geom_hline(yintercept = 1,color="black",linetype=2)+
+  scale_y_continuous(transform = "log",labels=function(x) sprintf("%.0f", x))+
+  #facet_grid(.~group, labeller = labeller(facet_var = c("Higher intake" = "Lower intake", "Lower intake" = "Higher intake"))) +
+  facet_grid(.~group) +
+  ylab("log(Hazard ratio) compared to\nnon-exposure patients") + 
+  xlab("Number of days exposed to broad-spectrum\nantibiotics between day -7 to 12\nrelative to transplant") + theme_light()+
+  scale_color_manual(values = c( "darkgoldenrod2", "darkslateblue"), name = '') +
+  theme(aspect.ratio = 1,  legend.position = 'none') 
+
+abx_diet_logHR
+```
+
+# me  
  
 ```{r}
 fit_original <- coxph(Surv(OStime_30,OSevent)~modal_diet*day_exposed  +intensity + source_and_gvhdppx,
