@@ -9,3 +9,24 @@ renv/library/
 renv/host-info.json
 renv/state.json
 renv/settings.json # (Optional: if you don't want to track renv settings)
+
+
+# Directories
+data/
+include_data/
+intermediate_data/
+software/
+
+# Files (specific files and files within the results/ and scripts/ directories)
+Snakefile
+results/173_div_model_fg_post_interaction.csv
+results/output_food_tree_datatree.newick
+results/output_food_tree_datatree_name.newick
+scripts/R10.Rmd
+scripts/R16_new_clinical.Rmd
+scripts/R17_resequenced_same_samples.Rmd
+scripts/R18_FQ_battle.Rmd
+scripts/R19_resizing_figures.Rmd
+scripts/R20_poster.Rmd
+scripts/R22_aGVHD_onset_clinical_outcome.Rmd
+scripts/Trajectory_clustering.R
