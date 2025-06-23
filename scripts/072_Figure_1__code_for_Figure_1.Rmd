@@ -120,7 +120,7 @@ p1d <- meta %>%
 
 ```{r spectral_legend}
 library(RColorBrewer)
-pdf(file = "../data/072_F1_spectral_legend.pdf",   # The directory you want to save the file in
+pdf(file = "../intermediate_data/072_F1_spectral_legend.pdf",   # The directory you want to save the file in
     width = 4, # The width of the plot in inches
     height = 3)
 display.brewer.pal(9, "Spectral")
@@ -151,7 +151,7 @@ smoothie <- dtb %>%
 
 ```{r tree}
 # import the tree from pdf to a ggplot kind of object
-schematic <- '../data/transplant_schematic.png'
+schematic <- '../intermediate_data/transplant_schematic.png'
 schematic_plot <- ggdraw() +
   draw_image(schematic,   scale = 1.1)  
 
@@ -168,13 +168,14 @@ diet_hist <- dtb %>%
               color = diet_line_color, fill = diet_line_color, alpha = 0.5)+
     scale_x_continuous( breaks = seq(-10, 50, 20)) + 
   geom_vline(xintercept = transplant_day, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
-  annotate("text", x = 5, y = 900, label = "173 patients,\n9,419 total meals\n40,702 food items", hjust = 0, size = 2.5) +
+  annotate("text", x = 30, y = 600, label = "173 patients,\n9,419 total meals\n40,702 food items", hjust = 0, size = 2.5) +
   theme_classic(base_size = 8) +
   theme(aspect.ratio=1/1.5,
          axis.title=element_text(size=axis_title_size))
     
 diet_hist
 ```
+
 
 
 # 1C: stool_hist 
@@ -188,7 +189,7 @@ stool_hist <- meta %>%
   geom_vline(xintercept = transplant_day, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
   labs(x = 'Transplant day', y = 'Stool samples') +
   scale_x_continuous( breaks = seq(-10, 50, 20)) + 
-  annotate("text", x = 20, y = 110, label = "1,009\nstool samples", hjust = 0, size = 2.5) +
+  annotate("text", x = 30, y = 60, label = "1,009\nstool samples", hjust = 0, size = 2.5) +
   theme_classic(base_size = 8) +
   theme(aspect.ratio=1/1.5,   axis.title=element_text(size=axis_title_size))
 stool_hist   
@@ -198,12 +199,10 @@ stool_hist
 
 ```{r tree}
 # import the tree from pdf to a ggplot kind of object
-p <- '../data/080_food_tree_ring.jpg'
+p <- '../intermediate_data/080_food_tree_ring.jpg'
 tree <- ggdraw() +
   draw_image(p,   scale = 1.1) 
 ```
-
-
 
 
 # 1M: stool line 
@@ -301,38 +300,38 @@ faith_line
 
 ```{r}
 # the p value from GEE about the G and H
-# 1G caloric intake
-# mod_cal <- geeglm(log(daycal+1) ~ fdrt,
-#                           family=gaussian,
-#                           corstr = "ar1",
-#                           id=pid,
-#                           data=food %>% mutate(pid = as.factor(pid)))
-# 
-# # Wald p-value
-# # Alternative hypothesis: slope is less than zero
-# # Z-score calculation
-# zscore = coef(mod_cal)[2]/sqrt(vcov(mod_cal)[2,2])
-# # One-sided p-value
-# pval <- 1-pnorm(abs(zscore))
-# # the p value for the 1G
-# pval
+#1G caloric intake
+mod_cal <- geeglm(log(daycal+1) ~ fdrt,
+                          family=gaussian,
+                          corstr = "ar1",
+                          id=pid,
+                          data=day_calori %>% mutate(pid = as.factor(pid)))
+
+# Wald p-value
+# Alternative hypothesis: slope is less than zero
+# Z-score calculation
+zscore = coef(mod_cal)[2]/sqrt(vcov(mod_cal)[2,2])
+# One-sided p-value
+pval <- 1-pnorm(abs(zscore))
+# the p value for the 1G
+pval
 ```
 ```{r}
 # 1H diet diversity
-# mod_faith_pd <- geeglm(log(faith_pd) ~ fdrt,
-#                           family=gaussian,
-#                           corstr = "ar1",
-#                           id=pid,
-#                           data=food%>% mutate(pid = as.factor(pid)))
-# 
-# # Wald p-value
-# # Alternative hypothesis: slope is less than zero
-# # Z-score calculation
-# zscore = coef(mod_faith_pd)[2]/sqrt(vcov(mod_faith_pd)[2,2])
-# # One-sided p-value
-# pval <- 1-pnorm(abs(zscore))
-# # the p value for the 1H
-# pval
+mod_faith_pd <- geeglm(log(faith_pd) ~ fdrt,
+                          family = gaussian,
+                          corstr = "ar1",
+                          id = pid,
+                          data= faith %>%  mutate(pid = as.factor(pid)))
+
+# Wald p-value
+# Alternative hypothesis: slope is less than zero
+# Z-score calculation
+zscore = coef(mod_faith_pd)[2]/sqrt(vcov(mod_faith_pd)[2,2])
+# One-sided p-value
+pval <- 1-pnorm(abs(zscore))
+# the p value for the 1H
+pval
 ```
 
 # 1E-H: UMAPs
@@ -340,6 +339,7 @@ faith_line
 ```{r}
 # calculate the dominant food group of that day
 key <- read_csv('../data/food_group_color_key_final.csv') %>% mutate(fgrp1 = as.character(fgrp1))
+
 fg_daily <- dtb %>% 
   group_by(pid, fdrt ) %>% 
   summarise(daily_total = sum(dehydrated_weight))
@@ -357,7 +357,7 @@ fg_sum <- dtb %>%
   slice(1)
 
 # find out why the few dots are on that far island
-OUT <- read_csv('../data/072_taxumap_embedding_cleaned_pid.csv')
+OUT <- read_csv('../intermediate_data/072_taxumap_embedding_cleaned_pid.csv')
   
 color_key <- OUT %>% 
   distinct( color, shortname) %>% select(shortname, color) %>% 
@@ -689,7 +689,7 @@ top_left <- plot_grid(schematic_plot, two_hist,
 
 top_row <- plot_grid(top_left, tree,
           nrow = 1, 
-          labels = c(NA, 'D'))
+          labels = c(NA, 'D')) 
 
 
 # assemble the 4 UMAPs
@@ -698,6 +698,8 @@ middle_maps <- plot_grid( out2_caloric, umap_faith, out2_umap, umap_drt_high_to_
           align = 'hv',
           labels = c( 'E', "F", 'G','H'),
           axis = 'tblr')
+
+ggsave('../results/F1_B_C_0072.pdf', plot = two_hist)
 ```
 
 # bottom_left 
@@ -710,9 +712,7 @@ bottom_left <- plot_grid(cal_line, NA, faith_line, NA, stool_alpha,
           align = 'hv',
           axis = 'tblr')
 
-```
 
-```{r}
 bottom_row <- plot_grid(bottom_left,m_panel, fg_panel, 
           nrow = 1, 
           #align = 'h',
@@ -726,7 +726,10 @@ f1 <-  plot_grid(top_row, middle_maps, bottom_row,
                  #labels = c(NA, NA, NA, NA, 'L'),
                  rel_heights = c(1,0.7, 1.5),
                  ncol = 1)
+```
 
+
+```{r}
 combined <- plot_grid(
   title, f1,
   ncol = 1,
@@ -734,33 +737,8 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/F1_overview_raw_072_new_test.pdf',
+ggsave('../results/F1_overview_raw_072_new_test.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', 
-      dpi = 300)   
+      dpi = 300)    
 ```
 
-```{r}
-# library(ggplot2)
-# 
-# # Create a data frame
-# df <- data.frame(x = key$shortname, y = rep(1, 9), colors = key$color) %>% 
-#   arrange(x) %>% 
-#   mutate(x  =  factor(x, levels = key$shortname))
-# 
-# 
-# fg_colors <- key %>% 
-#   distinct(shortname, color) %>% 
-#   select(shortname, color) %>% 
-#   mutate(shortname = factor(shortname, levels= key$shortname)) %>% 
-#   deframe()
-# 
-# # Create the plot
-# ggplot(df, aes(x, y)) +
-#   geom_bar(stat = "identity", fill = colors) +
-#   scale_color_manual(values = colors) +theme_classic() +
-#   theme(axis.text.x=element_text(colour=fg_colors, family = "Arial", face = 'bold', size = 10))
-# 
-# ggsave('../data/072_foodgroup_color_name.svg')
-```
-
- 
