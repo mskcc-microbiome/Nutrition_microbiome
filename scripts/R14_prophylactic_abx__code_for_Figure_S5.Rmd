@@ -140,6 +140,7 @@ two_time %>%
 
 ```{r}
 two <- exposure_grps %>% filter(med_exposure_type %in% c('broad_spectrum','fluoroquinolones')) %>% pull(sampleid)
+two %>% write_csv('../data/14_two_abx.csv')
 
 meta <- read_csv('../data/153_combined_META.csv') %>% 
   mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
@@ -154,7 +155,7 @@ meta <- read_csv('../data/153_combined_META.csv') %>%
          fg_oils = fg_oils/100,
          fg_sweets = fg_sweets/100,
          fg_veggie = fg_veggie/100) %>% 
-  mutate(abx = if_else(sampleid %in% two, 1, 0),
+  mutate(abx = if_else(empirical == 'TRUE', 1, 0),
          TPN = if_else(TPN == 'TRUE', 1, 0),
          EN = if_else(EN == 'TRUE', 1, 0)) %>% 
   mutate(      fg_fruit_e= fg_fruit*abx,  
@@ -165,9 +166,11 @@ meta <- read_csv('../data/153_combined_META.csv') %>%
                 fg_grain_e=fg_grain*abx,
                 fg_sweets_e=fg_sweets*abx,
                 fg_legume_e=fg_legume*abx,
-                fg_veggie_e = fg_veggie*abx)
+                fg_veggie_e = fg_veggie*abx) %>% 
+  filter(sampleid %in% two) %>% 
+  filter(!sampleid %in% empirical_and_fq)
 
-
+meta %>% count(abx)
 ```
 ```{r}
 div_model  <- log(simpson_reciprocal) ~ 0 +
@@ -236,14 +239,13 @@ model_div <- brm( div_model,
               cores = ncores, 
               chains = 2, 
                control = list(adapt_delta = 0.99),
-              seed = 123, sample_prior = T, file = '../data/14_div_model_interaction_two_abx') 
+              seed = 123, sample_prior = T) 
 
 # actually draw samples from the priors 
 samples_prior <- prior_draws(model_div)
 # save it for future use
 post_res <- suppressWarnings(posterior_samples(model_div)) 
 post_res %>%  write_csv('../data/14_div_model_interaction_two_abx.csv')
-plot(model_div)
 ```
 
 
@@ -409,6 +411,37 @@ ggsave('../data/14_two_abx.png', width = 10)
 ```
 
 
+```{r}
+# to filter from the empircial ones the only exposed to empirical ones
+library(vdbR)
+connect_database()
+get_table_from_database('samples_castori_ag')
+
+meta <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/153_combined_META.csv')
+  
+fluoroquinolones <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/169_all_medication.csv') %>% 
+  # find the fq in this dataset
+  filter(str_detect(together, 'ciprofloxacin|levofloxacin')) %>% 
+  filter(!str_detect(together, 'otic')) %>% 
+  mutate(med_int = interval(start_date, stop_date)) 
+
+
+fluoro_exposed <- meta %>% filter(empirical == 'TRUE') %>%   
+  select(sampleid, mrn) %>% 
+  inner_join(samples_castori_ag %>% select(sampleid, datecollection)) %>% 
+  mutate(p1d = datecollection -1,
+         p2d = datecollection -2) %>% 
+  mutate(p2d_int = interval(p2d, p1d)) %>% 
+  select(sampleid, datecollection, mrn, p1d, p2d, p2d_int) %>% 
+  inner_join(fluoroquinolones, by = "mrn") %>% 
+  mutate(had_fluoroquinolones = int_overlaps(p2d_int, med_int)) %>% 
+  filter(had_fluoroquinolones == 'TRUE') 
+ 
+fluoro_exposed %>% distinct(sampleid)       
+
+empirical_and_fq <- fluoro_exposed %>% distinct(sampleid)       %>% pull(sampleid)
+# let's just remove these 89 from the empirical samples and run again 
+```
 
 
 
