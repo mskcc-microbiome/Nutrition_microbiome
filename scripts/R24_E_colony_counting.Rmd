@@ -14,12 +14,21 @@ library(readxl)
 library(janitor)
 library(ggpubr)
 library(broom)
+library(emmeans)
 ```
+
+# day 3
 
 ```{r}
 # revisiting the original files that Madhu sent me 
 sucrose <- read_excel('../data/Sucrose_All Experiments Consolidated.xlsx') %>% clean_names() %>% 
-  mutate(treatment = str_replace(treatment, 'Biapenam','Biapenem'))
+  mutate(treatment = str_replace(treatment, 'Biapenam','Biapenem')) %>% 
+   mutate(
+    cfu_corrected = colonies_counted * 10^(-dilution_factor),
+    # It's crucial to log-transform this new value for plotting and modeling.
+    # We use log10 because the data spans orders of magnitude. Add 1 to handle zeros.
+    log10_cfu = log10(cfu_corrected + 1)
+  )
 
 day3_data <- sucrose %>%
   filter(
@@ -32,11 +41,102 @@ day3_data <- sucrose %>%
     experiment = as.factor(experiment)
   )
 
-day3_model <- lm(log1p(colonies_counted) ~ treatment + experiment, data = day3_data)
+day3_model <- lm(log10_cfu ~ treatment + experiment, data = day3_data)
 
 day3_results <- tidy(day3_model, conf.int = TRUE)
 
 print(day3_results)
+#For this specific day's data, although there was a trend towards higher colony counts in the sucrose-treated group (an increase of 0.298 on the log scale), you did not find a statistically significant difference between the 'Vehicle, Biapenem' and 'Sucrose, Biapenem' groups after controlling for the experiment effect (p = 0.27).
 
+
+# --- Get the model-predicted means on the ORIGINAL colony count scale ---
+predicted_means <- emmeans(day3_model, ~ treatment, type = "response") %>%
+  as_tibble()
+
+# The 'response' column now contains the predicted mean colony count
+print(predicted_means)
+
+ggplot(day3_data, aes(x = treatment, y = log10_cfu)) +
+  # Show the raw data as jittered points
+  geom_jitter(aes(color = experiment), width = 0.2, alpha = 0.7, size = 3) +
+  # --- Add the model's predictions ---
+  # Use geom_pointrange to show the predicted mean and its confidence interval
+  geom_pointrange(
+    data = predicted_means,
+    aes(y = emmean, ymin = lower.CL, ymax = upper.CL),
+    color = "black",
+    size = 1.2,
+    linewidth = 1.5,
+    shape = 23, # Use a diamond shape for the mean
+    fill = "white"
+  ) +
+  # Still use a log10 scale, but format the labels as regular numbers
+  scale_y_log10(labels = scales::label_number_auto()) +
+  annotation_logticks(sides = "l") +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "log10_cfu on Day 3",
+    subtitle = "Black diamonds show the model-adjusted mean and 95% CI\n(after correcting for any differences between experiments)",
+    x = "Treatment Group",
+    y = "log10(Colonies Counted)"
+  ) +
+  theme_bw(base_size = 14)
 ```
+
+# day 6
+
+```{r}
+day6_data <- sucrose %>%
+  filter(
+    day == 6,
+    treatment %in% c('Vehicle, Biapenem', 'Sucrose, Biapenem')
+  ) %>%
+  mutate(
+    # Make sure treatment is a factor with the vehicle as the reference level
+    treatment = factor(treatment, levels = c('Vehicle, Biapenem', 'Sucrose, Biapenem')),
+    experiment = as.factor(experiment)
+  )
+
+day6_model <- lm(log10_cfu ~ treatment + experiment, data = day6_data)
+
+day6_results <- tidy(day6_model, conf.int = TRUE)
+
+print(day6_results)
+#For this specific day's data, although there was a trend towards higher colony counts in the sucrose-treated group (an increase of 0.298 on the log scale), you did not find a statistically significant difference between the 'Vehicle, Biapenem' and 'Sucrose, Biapenem' groups after controlling for the experiment effect (p = 0.27).
+
+
+# --- Get the model-predicted means on the ORIGINAL colony count scale ---
+predicted_means <- emmeans(day6_model, ~ treatment, type = "response") %>%
+  as_tibble()
+
+# The 'response' column now contains the predicted mean colony count
+print(predicted_means)
+
+ggplot(day6_data, aes(x = treatment, y = log10_cfu)) +
+  # Show the raw data as jittered points
+  geom_jitter(aes(color = experiment), width = 0.2, alpha = 0.7, size = 3) +
+  # --- Add the model's predictions ---
+  # Use geom_pointrange to show the predicted mean and its confidence interval
+   geom_pointrange(
+    data = predicted_means,
+    aes(y = emmean, ymin = lower.CL, ymax = upper.CL),
+    color = "black",
+    size = 1.2,
+    linewidth = 1.5,
+    shape = 23, # Use a diamond shape for the mean
+    fill = "white"
+  ) +
+  # Still use a log10 scale, but format the labels as regular numbers
+  scale_y_log10(labels = scales::label_number_auto()) +
+  annotation_logticks(sides = "l") +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Colony Counts on Day 6",
+    subtitle = "Black diamonds show the model-adjusted mean and 95% CI\n(after correcting for any differences between experiments)",
+    x = "Treatment Group",
+    y = "log10(Colonies Counted)"
+  ) +
+  theme_bw(base_size = 14)
+```
+
 
