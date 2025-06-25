@@ -1,0 +1,42 @@
+---
+title: "Revisiting colony counting in the mice Enterococcus"
+output: html_document
+date: "2025-06-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(ggpubr)
+library(broom)
+```
+
+```{r}
+# revisiting the original files that Madhu sent me 
+sucrose <- read_excel('../data/Sucrose_All Experiments Consolidated.xlsx') %>% clean_names() %>% 
+  mutate(treatment = str_replace(treatment, 'Biapenam','Biapenem'))
+
+day3_data <- sucrose %>%
+  filter(
+    day == 3,
+    treatment %in% c('Vehicle, Biapenem', 'Sucrose, Biapenem')
+  ) %>%
+  mutate(
+    # Make sure treatment is a factor with the vehicle as the reference level
+    treatment = factor(treatment, levels = c('Vehicle, Biapenem', 'Sucrose, Biapenem')),
+    experiment = as.factor(experiment)
+  )
+
+day3_model <- lm(log1p(colonies_counted) ~ treatment + experiment, data = day3_data)
+
+day3_results <- tidy(day3_model, conf.int = TRUE)
+
+print(day3_results)
+
+```
+
