@@ -223,4 +223,52 @@ diversity_plot <- ggplot(df, aes(x = exposure_category, y = simpson_reciprocal))
   )
 diversity_plot
 ```
+```{r}
+# --- Fit the model with ONLY the confounders ---
+# This model captures the variation due to patient and time
+nuisance_model <- lmer(simpson_reciprocal ~ (1 | pid) + (1 | timebin), data = df)
+
+# Extract the Residuals
+# The residuals are what's left of your diversity data after the effects of pid and week have been mathematically accounted for.
+
+df$time_and_pid_adjusted_diversity <- residuals(nuisance_model) 
+
+
+# --- Perform pairwise Wilcoxon tests on the residuals ---
+# The formula means "test time_adjusted_diversity grouped by exposure_category"
+stat.test <- df %>%
+  wilcox_test(time_and_pid_adjusted_diversity ~ exposure_category) %>%
+  add_significance("p.adj") # Adds a column with significance stars, e.g., *, **, ns
+
+# Prepare the stats table for ggplot by calculating the bracket positions
+stat.test <- stat.test %>%
+  add_xy_position(x = "exposure_category")
+```
+
+
+```{r}
+ggplot(df, aes(x = exposure_category, y = time_and_pid_adjusted_diversity)) +
+  # Add a horizontal line at 0. A value of 0 means "average after adjustment".
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  
+  geom_boxplot(, alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.3) +
+  
+ # --- ADD THIS LAYER TO PUT THE STATS ON THE PLOT ---
+  stat_pvalue_manual(
+    stat.test,
+    label = "p.adj.signif", # Use significance stars for a clean look
+    tip.length = 0.01,
+    bracket.nudge.y = 1 # Adjust to move brackets up slightly
+  ) +
+  
+  labs(
+    title = "Microbiome Diversity After Adjusting for Time and Patient Effects",
+    subtitle = "Plotting the residuals of a time + patient model",
+    x = "Antibiotic Exposure Category",
+    y = "Time and patients\nAdjusted Diversity (Residuals)"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "none")        
+```
 
