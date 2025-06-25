@@ -1,0 +1,146 @@
+---
+title: "Antibiotic heterogeneity"
+output: html_document
+date: "2025-06-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(cowplot)
+library(ggridges)
+library(brmstools)
+library(bayesplot)
+options(mc.cores = parallel::detectCores())
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+ncores <- parallel::detectCores()
+```
+
+# The Exclusion Analysis: 
+
+removing the patients who got antibiotics for neutropenic fever, bloodstream infections, or C. diff. The remaining cohort will mostly consist of patients on no antibiotics or only prophylactic ones.
+
+```{r}
+med <- read_csv('~/Downloads/Data_S4_Medication_Exposures_in_the_Two_Days_Prior_to_Stool_Sample_Collection.csv') %>%
+    distinct() %>% 
+    group_by(sampleid, sdrt) %>%
+  summarise(
+    exposure_category = case_when(
+      any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",  # Only broad_spectrum or both
+      any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
+      any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterials",
+      TRUE ~ "not_antibacterial"
+    ), .groups = "drop")
+
+
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) %>% 
+  mutate(fg_egg = fg_egg/100,
+         fg_fruit = fg_fruit/100,
+         fg_grain = fg_grain/100,
+         fg_legume = fg_legume/100,
+         fg_meat = fg_meat/100,
+         fg_milk = fg_milk/100,
+         fg_oils = fg_oils/100,
+         fg_sweets = fg_sweets/100,
+         fg_veggie = fg_veggie/100) %>% 
+  full_join(med, by = join_by(sampleid, sdrt)) %>% 
+  # remove the samples exposed to broad spectrum abx
+  filter(exposure_category!= 'broad_spectrum') %>% 
+  # make the samples exposed to any abx to be "exposed"
+  mutate(any_abx = if_else(exposure_category == 'not_antibacterial', F, T))
+
+
+mod <- log(simpson_reciprocal) ~ 0 +        
+                intensity+
+                any_abx+
+               fg_fruit:any_abx+
+                fg_meat:any_abx+
+                fg_milk:any_abx+
+                fg_oils:any_abx+
+                fg_egg:any_abx+
+                fg_grain:any_abx+
+                fg_sweets:any_abx+
+                fg_legume:any_abx+
+                fg_veggie:any_abx+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+get_prior(mod,data = meta )
+```
+
+
+```{r}
+div_priors <- c(# for the food group variables 
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_veggie"),
+            # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "any_abxTRUE:fg_veggie"),
+
+            # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "ENTRUE"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "any_abxTRUE"),
+            # for the intensity
+            prior(normal( 2, .1), class = 'b', coef = "intensityablative"),
+            prior(normal( 2, .1), class = 'b', coef = "intensityreduced"),
+            prior(normal( 2, .1), class = 'b', coef = "intensitynonablative")
+            )
+
+model_div_original <- brm( mod,  
+              data = meta, 
+              warmup = 1000, iter = 3000, 
+              prior = div_priors,
+              cores = ncores, 
+              chains = 2, 
+               control = list(adapt_delta = 0.99),
+              seed = 123, sample_prior = T)
+```
+
+
+```{r}
+model_div_original %>%
+  gather_draws(`^b_.*`, regex = TRUE) %>% # This is the magic line!
+  filter(.variable %in% c('b_any_abxTRUE:fg_sweets','b_any_abxTRUE')) %>%
+  mutate(.variable = fct_reorder(.variable, .value)) %>%
+  ggplot(aes(x = .value, y = .variable)) + # fct_rev makes the order more intuitive
+  stat_pointinterval( .width = 0.95, fatten_point = 1.5) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") + # add a line at 0 for reference
+  labs(
+    title = "",
+    x = "Coefficient Value",
+    y = "Parameter"
+  ) +
+  theme_minimal()+
+  theme(legend.position = "none") 
+```
+
+
+
