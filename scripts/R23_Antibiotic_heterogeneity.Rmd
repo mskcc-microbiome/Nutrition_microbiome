@@ -9,7 +9,11 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
+library(lme4)
+library(lmerTest) # This enhances lmer() to provide p-values
+library(emmeans)  # For pairwise comparisons
 library(tidyverse)
+library(rstatix)
 library(brms)   
 library(ggpubr)
 library(tidybayes)
@@ -53,7 +57,9 @@ meta <- read_csv('../data/153_combined_META.csv') %>%
          fg_oils = fg_oils/100,
          fg_sweets = fg_sweets/100,
          fg_veggie = fg_veggie/100) %>% 
-  full_join(med, by = join_by(sampleid, sdrt)) %>% 
+  full_join(med, by = join_by(sampleid, sdrt)) 
+
+meta_subset <- meta %>% 
   # remove the samples exposed to broad spectrum abx
   filter(exposure_category!= 'broad_spectrum') %>% 
   # make the samples exposed to any abx to be "exposed"
@@ -76,7 +82,7 @@ mod <- log(simpson_reciprocal) ~ 0 +
                 EN+
                (1 | pid) +
                 (1 | timebin)
-get_prior(mod,data = meta )
+get_prior(mod,data = meta_subset )
 ```
 
 
@@ -115,7 +121,7 @@ div_priors <- c(# for the food group variables
             )
 
 model_div_original <- brm( mod,  
-              data = meta, 
+              data = meta_subset, 
               warmup = 1000, iter = 3000, 
               prior = div_priors,
               cores = ncores, 
@@ -142,5 +148,79 @@ model_div_original %>%
   theme(legend.position = "none") 
 ```
 
+## boxplots comparing alpha-diversity and Enterococcus abundance across different antibiotic exposure groups
 
+boxplots comparing alpha-diversity and Enterococcus abundance across different antibiotic exposure groups (No Abx vs. Prophylactic vs. Broad-Spectrum). This will visually prove that the broad-spectrum group has a uniquely severe dysbiosis.
+
+```{r}
+# create df that has the med group , Enterococcus relab and the alpha diversity together
+g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
+  spread('genus','relab', fill = 0) %>% 
+  select(sampleid, Enterococcus_relab = Enterococcus)
+
+disrupted <- meta %>% 
+  full_join(g_relab) %>% 
+  select(sampleid, sdrt, pid,simpson_reciprocal, Enterococcus_relab, exposure_category , timebin)
+```
+```{r}
+df <- disrupted %>% filter(exposure_category != 'other_antibacterials')
+# --- 1. MODELING ---
+# Fit the new mixed-effects model with two random intercepts
+model_diversity_adj <- lmer(
+  simpson_reciprocal ~ exposure_category + (1 | pid) + (1 | timebin),
+  data = df 
+)
+
+# The "Tukey" method (Tukey's Honest Significant Difference) is a standard and highly respected procedure specifically designed to adjust the p-values for all pairwise comparisons within a family of tests. It controls the "family-wise error rate," which is the probability of making even one false positive discovery.
+stats_to_plot <- emmeans(model_diversity_adj, ~ exposure_category) %>%
+  pairs(adjust = "tukey") %>%
+  as_tibble() %>%
+  separate(
+    col = contrast,
+    into = c("group1", "group2"),
+    sep = " - ",
+    remove = FALSE
+  ) %>% 
+  mutate(p.value = round(p.value, 2))
+
+exposure_colors <- c(
+  "not_antibacterial" = "#1B9E77",
+  "fluoroquinolones" = "#D95F02",
+  "broad_spectrum" = "#7570B3"
+)
+```
+
+
+```{r}
+diversity_plot <- ggplot(df, aes(x = exposure_category, y = simpson_reciprocal)) +
+  # Use geom_violin for a better sense of the distribution, with boxplots inside
+  #geom_violin(aes(fill = exposure_category), alpha = 0.6, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, fill = "white") +
+  # Add individual data points with some transparency
+  geom_jitter(width = 0.1, alpha = 0.1, size = 1.5) +
+  # Use the custom color palette
+  scale_fill_manual(values = exposure_colors) +
+  # Add the statistical annotations, now showing the p-value
+  stat_pvalue_manual(
+    stats_to_plot,
+    label = "p.value", # Use a formatted p-value
+    tip.length = 0.01,
+    y.position = c(40, 46, 50) # Manually adjust y-axis position for the bars
+  ) +
+  # Add cleaner labels and a more descriptive title
+  labs(
+    title = "Microbiome Diversity by Antibiotic Exposure",
+    subtitle = "Adjusted for patient and time effects",
+    x = NULL, # Remove x-axis title for a cleaner look
+    y = "Alpha Diversity (Simpson Reciprocal)"
+  ) +
+  # Use a classic, publication-ready theme
+  theme_bw(base_size = 14) +
+  theme(
+    legend.position = "none", # Hide legend as the x-axis is clear
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1) # Angle labels if they overlap
+  )
+diversity_plot
+```
 
