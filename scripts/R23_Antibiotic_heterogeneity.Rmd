@@ -152,6 +152,8 @@ model_div_original %>%
 
 boxplots comparing alpha-diversity and Enterococcus abundance across different antibiotic exposure groups (No Abx vs. Prophylactic vs. Broad-Spectrum). This will visually prove that the broad-spectrum group has a uniquely severe dysbiosis.
 
+### diversity
+
 ```{r}
 # create df that has the med group , Enterococcus relab and the alpha diversity together
 g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
@@ -160,7 +162,8 @@ g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>%
 
 disrupted <- meta %>% 
   full_join(g_relab) %>% 
-  select(sampleid, sdrt, pid,simpson_reciprocal, Enterococcus_relab, exposure_category , timebin)
+  select(sampleid, sdrt, pid,simpson_reciprocal, Enterococcus_relab, exposure_category , timebin) %>% 
+  mutate(Entero_log10 = log10(Enterococcus_relab + 1e-05))
 ```
 ```{r}
 df <- disrupted %>% filter(exposure_category != 'other_antibacterials')
@@ -205,7 +208,7 @@ diversity_plot <- ggplot(df, aes(x = exposure_category, y = simpson_reciprocal))
     stats_to_plot,
     label = "p.value", # Use a formatted p-value
     tip.length = 0.01,
-    y.position = c(40, 46, 50) # Manually adjust y-axis position for the bars
+    y.position = c(38, 43, 48) # Manually adjust y-axis position for the bars
   ) +
   # Add cleaner labels and a more descriptive title
   labs(
@@ -222,7 +225,20 @@ diversity_plot <- ggplot(df, aes(x = exposure_category, y = simpson_reciprocal))
     axis.text.x = element_text(angle = 45, hjust = 1) # Angle labels if they overlap
   )
 diversity_plot
+
+
+ggsave(
+  filename = "../data/R23_diversity_plot_exposure.png", # The name of the file you want to create
+  plot = diversity_plot,                         # The plot object you want to save
+  width = 6,                                     # Set the width (e.g., in inches)
+  height = 6,                                    # Set the height to be larger than the width
+  units = "in",                                  # Specify the units
+  dpi = 300                                      # Set the resolution (300 is good for publications)
+)
 ```
+
+#### residuals viz 
+
 ```{r}
 # --- Fit the model with ONLY the confounders ---
 # This model captures the variation due to patient and time
@@ -235,6 +251,7 @@ df$time_and_pid_adjusted_diversity <- residuals(nuisance_model)
 
 
 # --- Perform pairwise Wilcoxon tests on the residuals ---
+# the time and patients effects are already accounted for!
 # The formula means "test time_adjusted_diversity grouped by exposure_category"
 stat.test <- df %>%
   wilcox_test(time_and_pid_adjusted_diversity ~ exposure_category) %>%
@@ -243,11 +260,9 @@ stat.test <- df %>%
 # Prepare the stats table for ggplot by calculating the bracket positions
 stat.test <- stat.test %>%
   add_xy_position(x = "exposure_category")
-```
 
-
-```{r}
-ggplot(df, aes(x = exposure_category, y = time_and_pid_adjusted_diversity)) +
+# for a residuals plot, it's generally clearer to keep the original scale. The current plot effectively shows the difference between the groups. Transforming the data does not change the p-value from the Wilcoxon test I just ran. This is a major advantage of using a non-parametric test
+residuals_plot <- ggplot(df, aes(x = exposure_category, y = time_and_pid_adjusted_diversity)) +
   # Add a horizontal line at 0. A value of 0 means "average after adjustment".
   geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
   
@@ -269,6 +284,79 @@ ggplot(df, aes(x = exposure_category, y = time_and_pid_adjusted_diversity)) +
     y = "Time and patients\nAdjusted Diversity (Residuals)"
   ) +
   theme_bw(base_size = 14) +
-  theme(legend.position = "none")        
+  theme(legend.position = "none")    
+
+ggsave(
+  filename = "../data/R23_time_adjusted_diversity_plot.png", # The name of the file you want to create
+  plot = residuals_plot,                         # The plot object you want to save
+  width = 6,                                     # Set the width (e.g., in inches)
+  height = 8,                                    # Set the height to be larger than the width
+  units = "in",                                  # Specify the units
+  dpi = 300                                      # Set the resolution (300 is good for publications)
+)
+```
+
+### Enterococcus
+
+```{r}
+model_E_adj <- lmer(
+  Entero_log10 ~ exposure_category + (1 | pid) + (1 | timebin),
+  data = df 
+)
+
+# The "Tukey" method (Tukey's Honest Significant Difference) is a standard and highly respected procedure specifically designed to adjust the p-values for all pairwise comparisons within a family of tests. It controls the "family-wise error rate," which is the probability of making even one false positive discovery.
+stats_to_plot <- emmeans(model_E_adj, ~ exposure_category) %>%
+  pairs(adjust = "tukey") %>%
+  as_tibble() %>%
+  separate(
+    col = contrast,
+    into = c("group1", "group2"),
+    sep = " - ",
+    remove = FALSE
+  ) %>% 
+  mutate(p.value = round(p.value, 2))
+```
+
+```{r}
+En_box_plot <- ggplot(df, aes(x = exposure_category, y = Entero_log10)) +
+  # Use geom_violin for a better sense of the distribution, with boxplots inside
+  #geom_violin(aes(fill = exposure_category), alpha = 0.6, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, fill = "white") +
+  # Add individual data points with some transparency
+  geom_jitter(width = 0.1, alpha = 0.1, size = 1.5) +
+  # Use the custom color palette
+  scale_fill_manual(values = exposure_colors) +
+  # Add the statistical annotations, now showing the p-value
+  stat_pvalue_manual(
+    stats_to_plot,
+    label = "p.value", # Use a formatted p-value
+    y.position = c(0.2, .6, 1) ,# Manually adjust y-axis position for the bars
+    tip.length = 0.01
+  ) +
+  # Add cleaner labels and a more descriptive title
+  labs(
+    title = "Enterococcus abundance (log10) by Antibiotic Exposure",
+    subtitle = "Adjusted for patient and time effects",
+    x = NULL, # Remove x-axis title for a cleaner look
+    y = "Enterococcus abundance (log10)"
+  ) +
+  # Use a classic, publication-ready theme
+  theme_bw(base_size = 14) +
+  theme(
+    legend.position = "none", # Hide legend as the x-axis is clear
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1) # Angle labels if they overlap
+  )
+En_box_plot
+
+
+ggsave(
+  filename = "../data/R23_En_box_plot_exposure.png", # The name of the file you want to create
+  plot = En_box_plot,                         # The plot object you want to save
+  width = 6,                                     # Set the width (e.g., in inches)
+  height = 6,                                    # Set the height to be larger than the width
+  units = "in",                                  # Specify the units
+  dpi = 300                                      # Set the resolution (300 is good for publications)
+)
 ```
 
