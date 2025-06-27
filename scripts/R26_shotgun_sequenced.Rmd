@@ -1,0 +1,73 @@
+---
+title: "How many shotgun samples we have & Enterococcus spp"
+output: html_document
+date: "2025-06-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vdbR)
+library(tidyverse)
+connect_database()
+get_table_from_database('shotgun_lookup_ad')
+df_ad <-   shotgun_lookup_ad %>% distinct(sampleid, .keep_all = T) # 5679 samples
+
+g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
+  spread('genus','relab', fill = 0) %>% 
+  select(sampleid, Enterococcus_relab = Enterococcus)
+
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(in_shotgun_lookup = if_else(sampleid %in% df_ad$sampleid, T, F)) %>% 
+  full_join(g_relab) %>% 
+  mutate(Entero_log10 = log10(Enterococcus_relab + 1e-05))
+
+# library(vdbR)
+# vdb_make_phylo_mgx(metadata = meta, sampleid_col = 'sampleid') 
+
+meta %>% 
+  count(in_shotgun_lookup)
+```
+
+```{r}
+
+
+ggplot(meta, aes(x = sdrt, y = Entero_log10, group = pid)) +
+
+  # Draw the lines connecting the points for each patient
+  geom_line(color = "grey50", alpha = 0.8) +
+
+  # Draw the points, with shape and fill determined by the 'in_shotgun_lookup' column
+  geom_point(aes(shape = in_shotgun_lookup, fill = in_shotgun_lookup), size = 2) +
+
+  # Manually define the shapes and fills we want
+  # Shape 21 is a circle with an outline that can be filled
+  scale_shape_manual(values = c("TRUE" = 21, "FALSE" = 21)) +
+  # We fill the circle with black if TRUE, and white (making it look empty) if FALSE
+  scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "white")) +
+
+
+
+  # Create a separate panel for each patient, with 3 panels per row
+  facet_wrap(~ pid, ncol = 10) +
+
+  # Add labels and a clean theme
+  labs(
+    title = "Enterococcus Abundance Time Course by Patient",
+    subtitle = "Solid points indicate shotgun sequencing data is available",
+    x = "Days Relative to Transplant (sdrt)",
+    y = "Enterococcus Relative Abundance (log10)",
+    fill = "In Shotgun Lookup", # Legend title for fill
+    shape = "In Shotgun Lookup" # Legend title for shape
+  ) +
+  theme_bw() +
+  theme(
+    strip.background = element_rect(fill = "grey90"), # Style the facet titles
+    legend.position = "bottom"
+  )
+
+ggsave('../data/R26_pt_timecourse.pdf', width = 20, height = 15)
+```
+
