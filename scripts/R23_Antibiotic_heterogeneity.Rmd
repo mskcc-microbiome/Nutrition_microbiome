@@ -83,10 +83,7 @@ mod <- log(simpson_reciprocal) ~ 0 +
                (1 | pid) +
                 (1 | timebin)
 get_prior(mod,data = meta_subset )
-```
 
-
-```{r}
 div_priors <- c(# for the food group variables 
             prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_egg"),
             prior(normal(0, 1), class = 'b', coef = "any_abxFALSE:fg_fruit"),
@@ -130,6 +127,7 @@ model_div_original <- brm( mod,
               seed = 123, sample_prior = T)
 ```
 
+## model with subset samples
 
 ```{r}
 model_div_original %>%
@@ -160,13 +158,19 @@ g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>%
   spread('genus','relab', fill = 0) %>% 
   select(sampleid, Enterococcus_relab = Enterococcus)
 
+clr_res <- read_csv('../data/171_genus_CLR_res.csv')
+
+clr_wide <- clr_res %>% 
+  spread('genus','clr')
+
 disrupted <- meta %>% 
   full_join(g_relab) %>% 
-  select(sampleid, sdrt, pid,simpson_reciprocal, Enterococcus_relab, exposure_category , timebin) %>% 
-  mutate(Entero_log10 = log10(Enterococcus_relab + 1e-05))
+  mutate(Entero_log10 = log10(Enterococcus_relab + 1e-05)) %>% 
+  inner_join(clr_wide %>% select(sampleid, Enterococcus_clr = Enterococcus))
 ```
 ```{r}
-df <- disrupted %>% filter(exposure_category != 'other_antibacterials')
+df <- disrupted %>% filter(exposure_category != 'other_antibacterials') %>% 
+  select(sampleid, sdrt, pid,simpson_reciprocal, Enterococcus_relab, exposure_category , timebin) 
 # --- 1. MODELING ---
 # Fit the new mixed-effects model with two random intercepts
 model_diversity_adj <- lmer(
@@ -358,5 +362,102 @@ ggsave(
   units = "in",                                  # Specify the units
   dpi = 300                                      # Set the resolution (300 is good for publications)
 )
+# "Interestingly, when analyzing the effect of antibiotic class alone while averaging across all diets, we did not detect a statistically significant difference in Enterococcus abundance between the broad-spectrum and no-antibiotic groups. This highlights the critical importance of our main finding: the expansion of Enterococcus is not uniformly driven by broad-spectrum antibiotics alone, but is powerfully magnified by the concurrent consumption of dietary sugars
+
+# No Antibiotics: A diverse community with a normal, low-level Enterococcus population.
+
+# Fluoroquinolones: A community under moderate antibiotic pressure, where even low-level commensals like Enterococcus are suppressed below their normal baseline.
+# 
+# Broad-Spectrum: A severely disrupted community (as shown by your alpha diversity analysis), creating a "vacant" niche. This state, when combined with a high-sugar diet, allows the few remaining or newly resistant Enterococcus to expand dramatically and reach abundances far higher than in the other two groups.
+```
+
+## two models with Entercococcus dominating samples or not 
+```{r}
+mod_entero <- Enterococcus_clr ~ 0 +        
+                intensity+
+                empirical+
+               fg_fruit:empirical+
+                fg_meat:empirical+
+                fg_milk:empirical+
+                fg_oils:empirical+
+                fg_egg:empirical+
+                fg_grain:empirical+
+                fg_sweets:empirical+
+                fg_legume:empirical+
+                fg_veggie:empirical+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+
+get_prior(mod_entero, data = disrupted )
+```
+
+
+```{r}
+priors_entero <- c(# for the food group variables
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalFALSE:fg_veggie"),
+            # interaction terms
+             prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empiricalTRUE:fg_veggie"),
+            # for the TPN 
+            prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "ENTRUE"),
+            # for the empirical 
+            prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
+            )
+```
+
+
+```{r}
+# divide the samples to two parts, Enterococcus relab > 0.3 or not
+two <- disrupted %>% 
+  split(.$Enterococcus_relab > 0.2) %>% 
+  map(function(df){
+   
+    res = brm(mod_entero,  
+              data = df, 
+              warmup = 1000, iter = 3000, 
+              prior = priors_entero,
+              cores = ncores, 
+              chains = 2, 
+              control = list(adapt_delta = 0.99),
+              seed = 456)
+  })
+
+two %>%
+  map(function(model_){
+    model_ %>% 
+        gather_draws(`^b_.*`, regex = TRUE) %>% # This is the magic line!
+        filter(.variable %in% c('b_empiricalTRUE:fg_sweets','b_empiricalTRUE')) %>%
+        mutate(.variable = fct_reorder(.variable, .value)) %>%
+        ggplot(aes(x = .value, y = .variable)) + # fct_rev makes the order more intuitive
+        stat_pointinterval( .width = 0.95, fatten_point = 1.5) +
+        geom_vline(xintercept = 0, linetype = "dashed", color = "red") + # add a line at 0 for reference
+        labs(
+          title = "",
+          x = "Coefficient Value",
+          y = "Parameter"
+        ) +
+        theme_minimal()+
+        theme(legend.position = "none") 
+  })
+
 ```
 
