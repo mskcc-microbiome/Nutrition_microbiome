@@ -116,6 +116,8 @@ top_hits_filtered %>% write_csv('../data/R25_top_hits_filtered_enterococcus_asv.
 # find the taxa name from ncbi
 
 ```{r}
+top_hits_filtered <- read_csv('../data/R25_top_hits_filtered_enterococcus_asv.csv')
+
 accession_ids <- top_hits_filtered %>% 
   distinct(sseqid) %>% pull(sseqid)
 
@@ -139,7 +141,8 @@ top_entero_asv_taxa <- top_hits_filtered %>%
   rename(accession_id = sseqid) %>% 
   left_join(organism_names) %>% 
   rename(asv_key = qseqid) %>% 
-  left_join(unique_e_asv %>% select(asv_key, total_abun))
+  left_join(unique_e_asv %>% select(asv_key, total_abun, asv_sequence))
 
+top_entero_asv_taxa %>% write_csv('../data/R25_Enterococcus_asv_blast_res_full_sorted.csv')
 ```
 
