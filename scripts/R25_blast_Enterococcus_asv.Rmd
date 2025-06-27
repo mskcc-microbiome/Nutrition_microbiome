@@ -12,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(rBLAST)
 library(tidyverse)
 library(Biostrings)
+library(rentrez)
 ```
 
 
@@ -78,37 +79,67 @@ bl
 # Run the query. This is now much faster as it doesn't use the internet.
 blast_results <- predict(bl, query_sequences)
 
-blast_results %>% write_csv('../data/R25_asv_entero_blast_full_res.csv') 
+# extrememly confident
+#Perfect Identity: You have a pident of 100%. Your sequence is a perfect match.
+
+# Extremely Low E-value: The e-value of 1.52e-175 essentially rules out the possibility of a random match.
+# 
+# High Bitscore: The bitscore of 614 further confirms the quality of the alignment.
 ```
 
+```{r}
+# Apply the filtering logic   
+top_hits_filtered <- blast_results %>%
+  # Work on each ASV independently
+  group_by(qseqid) %>%
+  # Apply a conditional filter
+  filter(
+    # The 'if/else' gets evaluated once for the entire group
+    if (any(pident == 100)) {
+      # If any 100% match exists, this is the rule: keep only the 100s
+      pident == 100
+    } else {
+      # Otherwise, this is the rule: keep the row(s) with the highest bitscore
+      bitscore == max(bitscore)
+    }
+  ) %>%
+  # It's good practice to ungroup after you're done with group operations
+  ungroup()
+ 
+# View the result
+print(top_hits_filtered)
 
+top_hits_filtered %>% write_csv('../data/R25_top_hits_filtered_enterococcus_asv.csv')
+```
 
-
-
+ 
+# find the taxa name from ncbi
 
 ```{r}
-# --- Tidy the Results ---
-# This part remains the same. It selects and cleans up the key columns.
-tidy_blast_results <- blast_results %>%
-  select(
-    Query_ID = qseqid,
-    Match_Description = stitle,
-    Percent_Identity = pident,
-    E_Value = evalue,
-    Bitscore = bitscore
-  ) %>%
-  mutate(
-    Organism = str_extract(Match_Description, "^[a-zA-Z]+\\s[a-zA-Z]+")
-    ) %>%
-  group_by(Query_ID) %>%
-  slice_max(order_by = Bitscore, n = 1) %>%
-  ungroup() %>%
-  select(Query_ID, Organism, Percent_Identity, E_Value, Match_Description)
+accession_ids <- top_hits_filtered %>% 
+  distinct(sseqid) %>% pull(sseqid)
 
-# Display the final, cleaned-up results table
-print(tidy_blast_results)
+# Step 3: Fetch summary records for all IDs at once
+# This might take a few seconds
+summary_records <- entrez_summary(db = "nuccore", id = accession_ids)
 
-# Optionally, save the results to a CSV file
-# write_csv(tidy_blast_results, "enterococcus_16S_blast_results.csv")
+# Step 4: Extract just the title for each record, which contains the name
+# The sapply() function is a clean way to pull the same piece of info from every item in a list
+organism_names <- sapply(summary_records, "[[", "title") %>% enframe('name','taxa_desc') %>% 
+  mutate(accession_id = accession_ids)
+
+# Print the resulting vector of names
+print(organism_names)
+```
+
+# organize them into a table
+
+```{r}
+top_entero_asv_taxa <- top_hits_filtered %>% 
+  rename(accession_id = sseqid) %>% 
+  left_join(organism_names) %>% 
+  rename(asv_key = qseqid) %>% 
+  left_join(unique_e_asv %>% select(asv_key, total_abun))
+
 ```
 
