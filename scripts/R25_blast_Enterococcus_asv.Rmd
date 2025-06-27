@@ -1,0 +1,114 @@
+--- 
+title: "Blast the asv seq from the Enterococcus genus thru the API myself"    
+output: html_document
+date: "2025-06-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(rBLAST)
+library(tidyverse)
+library(Biostrings)
+```
+
+
+Step 1: Install NCBI BLAST+
+Before running the R script, you must install the BLAST+ command-line tools from the NCBI. rBLAST will not work without them.
+
+Go to the NCBI BLAST+ download page: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+Download and run the installer for your operating system (e.g., ...-win64.exe for Windows, ...-x64-linux.tar.gz for Linux, or ...-universal-macosx.tar.gz for macOS).
+
+Ensure it's in your system's PATH. The installers for Windows and macOS usually handle this automatically. For Linux, you may need to extract the archive and add the bin directory to your system's PATH. A quick way to check is to open a new terminal or command prompt and type blastn -version. If it prints a version number, you are all set.
+
+
+```{r}
+# --- Input Your Data Here ---
+# Create a character vector of your ASV sequences.
+# Using example Enterococcus faecalis 16S rRNA gene sequences below.
+library(vdbR)
+connect_database()
+#get_table_from_database('asv_annotation_blast_detailed_ag')
+get_table_from_database('asv_sequences_ag')
+# list_table_from_database('detailed')
+# 
+# meta <- read_csv('../data/153_combined_META.csv')
+# cts <- get_counts_subset(meta$sampleid)
+# 
+# cts_e <- cts  %>%
+#   left_join(asv_annotation_blast_ag %>% select(asv_key, genus)) %>%
+#   filter(genus == 'Enterococcus') %>%
+#   select(asv_key, sampleid,  count, count_relative, genus)
+# 
+# cts_e %>% write_csv('../data/R25_all_enterococcus_asv_in_sample.csv')
+```
+
+```{r}
+cts_e <- read_csv('../data/R25_all_enterococcus_asv_in_sample.csv')
+
+unique_e_asv <- cts_e %>% 
+  group_by(asv_key, genus) %>% summarise(total_abun = sum(count_relative)) %>% 
+  arrange(desc(total_abun)) %>% 
+  ungroup() %>% 
+  inner_join(asv_sequences_ag %>% select(asv_key, asv_sequence))
+
+asv_sequences <- unique_e_asv %>% select(asv_key, asv_sequence) %>% deframe()
+
+
+# Convert the character vector to a DNAStringSet, which rBLAST uses.
+# We also give them names so we can track them in the output.
+query_sequences <- DNAStringSet(asv_sequences)
+```
+
+```{r}
+#Download the prebuilt 16S Microbial data base from NCBI’s ftp server at: https://ftp.ncbi.nlm.nih.gov/blast/db/
+tgz_file <- blast_db_get("16S_ribosomal_RNA.tar.gz")
+untar(tgz_file, exdir = "../software/blast/16S_rRNA_DB")
+```
+
+
+```{r}
+# Load the downloaded BLAST database.
+bl <- blast(db = "../software/blast/16S_rRNA_DB/16S_ribosomal_RNA")
+bl
+
+# Run the query. This is now much faster as it doesn't use the internet.
+blast_results <- predict(bl, query_sequences)
+
+blast_results %>% write_csv('../data/R25_asv_entero_blast_full_res.csv') 
+```
+
+
+
+
+
+
+```{r}
+# --- Tidy the Results ---
+# This part remains the same. It selects and cleans up the key columns.
+tidy_blast_results <- blast_results %>%
+  select(
+    Query_ID = qseqid,
+    Match_Description = stitle,
+    Percent_Identity = pident,
+    E_Value = evalue,
+    Bitscore = bitscore
+  ) %>%
+  mutate(
+    Organism = str_extract(Match_Description, "^[a-zA-Z]+\\s[a-zA-Z]+")
+    ) %>%
+  group_by(Query_ID) %>%
+  slice_max(order_by = Bitscore, n = 1) %>%
+  ungroup() %>%
+  select(Query_ID, Organism, Percent_Identity, E_Value, Match_Description)
+
+# Display the final, cleaned-up results table
+print(tidy_blast_results)
+
+# Optionally, save the results to a CSV file
+# write_csv(tidy_blast_results, "enterococcus_16S_blast_results.csv")
+```
+
