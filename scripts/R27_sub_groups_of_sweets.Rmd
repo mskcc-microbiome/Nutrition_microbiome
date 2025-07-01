@@ -10,6 +10,18 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(broom.mixed)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(cowplot)
+library(ggridges)
+library(brmstools)
+library(bayesplot)
+options(mc.cores = parallel::detectCores())
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+ncores <- parallel::detectCores()
 ```
 
 # Major Critiques and Challenges
@@ -105,11 +117,7 @@ daily_intake_summary <- dtb_ %>%
 # --- View the final summary table ---
 # This table is now in a "tidy" format, ready for analysis or plotting.
 # Each row shows the total grams of a food category consumed by a patient on a specific day.
-print(daily_intake_summary)
-```
 
-
-```{r}
 # You can also use pivot_wider() to create a "wide" table where each food category
 # has its own column. This format is often required for statistical models.
 daily_intake_wide <- daily_intake_summary %>%
@@ -119,10 +127,7 @@ daily_intake_wide <- daily_intake_summary %>%
     values_fill = 0 # Fill in 0 for categories a patient didn't eat on a given day
   )
 
-print(daily_intake_wide)
-```
 
-```{r}
 # finding the prior two day average of the above groups
 stool_samples_df <- read_csv('../data/153_combined_META.csv') %>% 
   select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
@@ -176,9 +181,107 @@ final_model_data <- stool_samples_with_window %>%
   mutate(pid = factor(pid)) 
 
 
-# View the final, model-ready table.
-# Each row is a unique stool sample with columns for the prior 2-day average intake.
-colnames(final_model_data)
+```
 
+# iterative modeling 
+
+```{r}
+
+# --- Step 2: Define the food categories for the iterative analysis ---
+
+# Define the "sweets" subcategories that will be swapped in and out of the model
+sweets_subcategories_to_test <- c(
+  "avg_intake_fg_Solid_Sweets",
+  "avg_intake_fg_Liquid_Sweets",
+  "avg_intake_fg_ONS",
+  "avg_intake_fg_Coffee_Tea",
+  "avg_intake_fg_Functional_Beverages"
+)
+
+# Define the 8 main food groups that will be included as covariates in every model
+main_food_groups <- c(
+  "avg_intake_fg_milk", "avg_intake_fg_meat", "avg_intake_fg_egg", "avg_intake_fg_legume", "avg_intake_fg_grain",
+  "avg_intake_fg_fruit", "avg_intake_fg_veggie", "avg_intake_fg_oils"
+)
+
+
+# --- Step 3: Create a function that runs one iteration of the Bayesian model ---
+# This function takes one of the "sweets" subcategory names as input,
+# builds the full model formula, sets all priors, runs the model,
+# and returns the key results.
+run_iterative_model <- function(sweet_variable, data) {
+
+  # Combine the main food groups and the current sweet variable
+  all_food_vars <- c(main_food_groups, sweet_variable)
+
+  # Create the interaction terms for all food variables in this iteration
+  interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+  # Build the full formula string dynamically
+  formula_string <- paste(
+    "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
+    paste(interaction_terms, collapse = " + "),
+    "+ (1 | pid) + (1 | timebin)"
+  )
+
+  # Convert the string to a formula object
+  formula <- brms::bf(as.formula(formula_string))
+
+  # Build the priors by adding them together.
+  # This single prior() call applies to all coefficients listed in `all_food_coefs`.
+  priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+  # Fit the model (using fewer iterations for this example to run quickly)
+  model_fit <- brm(
+    formula = formula,
+    data = data,
+    prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 2, cores = 10, # Adjust cores as needed
+    seed = 123,
+    silent = 2
+  )
+
+  # Tidy the output and return only the interaction term for the sweet subcategory
+  tidy(model_fit, conf.int = TRUE) %>%
+    filter(term == paste0("empiricalTRUE:", sweet_variable))
+}
+
+
+# --- Step 4: Run the iterative analysis using purrr::map ---
+# This will apply the function to each "sweets" subcategory.
+# This step will take a significant amount of time to run.
+all_results <- map(
+  sweets_subcategories_to_test,
+  ~run_iterative_model(sweet_variable = .x, data = final_model_data)
+)
+```
+
+```{r}
+# Combine the list of results into a single, clean data frame
+comparison_df <- bind_rows(all_results) %>%
+  # Clean up the term name to be used as a label
+  mutate(food_category = str_remove(term, "empiricalTRUE:"))
+
+# Create a forest plot to visualize and compare the effects
+ggplot(comparison_df, aes(x = estimate, y = fct_reorder(food_category, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(size = 4, color = "dodgerblue") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1, color = "dodgerblue") +
+  labs(
+    title = "Interaction Effect of Sweet Subcategories with Antibiotics on Diversity",
+    subtitle = "Each estimate is from a separate model controlling for other main food groups",
+    x = "Interaction Coefficient (Effect per 100g intake during antibiotic exposure)",
+    y = "Sweet Subcategory"
+  ) +
+  theme_bw(base_size = 14)
 ```
 
