@@ -1,0 +1,184 @@
+---
+title: "sub groups of the sweets"
+output: html_document
+date: "2025-06-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+# Major Critiques and Challenges
+
+Lack of Interpretability (The "Black Box" Problem): This is the biggest critique. The model's output can be incredibly difficult to understand. What does the coefficient for "apples" mean after being adjusted for 499 other foods, many of which are highly correlated? The complexity often obscures, rather than clarifies, the biological story.
+
+Extreme Collinearity: Dietary data is notoriously collinear (e.g., people who eat hot dogs often eat hot dog buns). Putting hundreds of correlated food items into one model can make the individual coefficient estimates highly unstable and unreliable. The model may struggle to assign the effect correctly between two highly correlated foods.
+
+Risk of Overfitting: Without very careful and robust regularization, a model with so many predictors is at high risk of "overfitting"—finding spurious patterns in the random noise of your specific dataset that will not be reproducible in the future.
+
+It May Be Overkill: If the dominant biological signal comes from a broad nutritional pattern (like high sugar intake), modeling every single food item individually might not provide any more insight than the more logical, hierarchical approach you are taking.
+
+# the sub groups of sweets
+
+```{r}
+sweets3 <- read_tsv('../data/NodeLabels.txt', col_types = 'cc')  %>% 
+  filter(str_detect(Level.code, '^953')) 
+
+dtb  %>% 
+  filter(str_detect(Food_code, '^923'))  %>% distinct(Food_code, description)
+
+```
+
+
+```{r}
+# what's the subgroup of sweets?
+sweets3 <- read_tsv('../data/NodeLabels.txt', col_types = 'cc')  %>% 
+  filter(str_detect(Level.code, '^9')) %>% 
+  filter(str_length(Level.code) == 3) 
+
+# testing the solid and liquid sugar foods association with abx !     
+dtb_ <- dtb %>% 
+  select(pid, fdrt, Food_NSC, Food_code, dehydrated_weight) 
+```
+```{r}
+daily_intake_summary <- dtb_ %>%
+
+  # Create a new 'food_category' column based on FNDDS codes.
+  # The case_when() function checks conditions in order.
+  # This is why we put the more specific 3-digit rules before the general 1-digit rules.
+  mutate(
+    food_category = case_when(
+      
+      # Rule for high-sugar sports drinks, grouping them with other liquid sweets
+      Food_code == "95320200" ~ "fg_Liquid_Sweets",
+      # Rule for low-sugar/electrolyte drinks, creating a new category
+      Food_code %in% c("95322200", "95330100") ~ "fg_Functional_Beverages",
+      
+      # --- Define Oral Nutritional Supplements (ONS) ---
+      str_starts(Food_code, "951") | str_starts(Food_code, "952") ~ "fg_ONS",
+      
+      # Solid Sweets & Sugars
+      str_starts(Food_code, "911") | str_starts(Food_code, "913") |
+      str_starts(Food_code, "914") | str_starts(Food_code, "915") |
+      str_starts(Food_code, "917") | str_starts(Food_code, "918") ~ "fg_Solid_Sweets",
+
+      # Liquid Sugar (Sugar-Sweetened Beverages)
+      str_starts(Food_code, "924") | str_starts(Food_code, "925") |
+      str_starts(Food_code, "926") ~ "fg_Liquid_Sweets",
+      
+       # Define Coffee & Tea
+      str_starts(Food_code, "921") | str_starts(Food_code, "922") |
+      str_starts(Food_code, "923") ~ "fg_Coffee_Tea",
+
+      # --- Define the 8 main food categories using the first digit ---
+      str_starts(Food_code, "1") ~ "fg_milk",
+      str_starts(Food_code, "2") ~ "fg_meat",
+      str_starts(Food_code, "3") ~ "fg_egg",
+      str_starts(Food_code, "4") ~ "fg_legume",
+      str_starts(Food_code, "5") ~ "fg_grain",
+      str_starts(Food_code, "6") ~ "fg_fruit",
+      str_starts(Food_code, "7") ~ "fg_veggie",
+      str_starts(Food_code, "8") ~ "fg_oils",
+
+      # Any food code that doesn't match the rules above will be assigned NA
+      TRUE ~ NA_character_
+    )
+  ) %>%
+
+  # Remove any rows that were not assigned to a category (e.g., ONS, water, etc.)
+  filter(!is.na(food_category)) %>%
+
+  # Group the data by patient, day, and our new food category
+  group_by(pid, fdrt, food_category) %>%
+
+  # Calculate the total dehydrated weight for each group
+  # The na.rm = TRUE argument handles any missing weight values gracefully
+  summarise(
+    total_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+    .groups = 'drop' # Ungroup the data after summarizing
+  )
+
+# --- View the final summary table ---
+# This table is now in a "tidy" format, ready for analysis or plotting.
+# Each row shows the total grams of a food category consumed by a patient on a specific day.
+print(daily_intake_summary)
+```
+
+
+```{r}
+# You can also use pivot_wider() to create a "wide" table where each food category
+# has its own column. This format is often required for statistical models.
+daily_intake_wide <- daily_intake_summary %>%
+  pivot_wider(
+    names_from = food_category,
+    values_from = total_dehydrated_weight,
+    values_fill = 0 # Fill in 0 for categories a patient didn't eat on a given day
+  )
+
+print(daily_intake_wide)
+```
+
+```{r}
+# finding the prior two day average of the above groups
+stool_samples_df <- read_csv('../data/153_combined_META.csv') %>% 
+  select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
+```
+
+
+```{r}
+# ---  Calculate the 2-Day Prior Average Intake ---
+
+# This single pipe performs the entire calculation.
+# It joins the two tables, filters for the correct time window,
+# calculates the average, and reshapes the data into the final format.
+
+stool_samples_with_window <- stool_samples_df %>%
+  mutate(
+    # The 2-day window starts 2 days before the stool sample...
+    window_start = sdrt - 2,
+    # ...and ends 1 day before the stool sample.
+    window_end = sdrt - 1
+  )
+
+# Now, perform the join using these new, pre-calculated columns
+final_model_data <- stool_samples_with_window %>%
+  left_join(
+    daily_intake_summary,
+    # The join is performed using direct column comparisons
+    by = join_by(
+      pid,
+      window_start <= fdrt,
+      window_end >= fdrt
+    )
+  ) %>%
+  # This step reshapes the data into the final wide format needed for modeling.
+  # It calculates the average over the 2-day window.
+  pivot_wider(
+    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+    names_from = food_category,
+    values_from = total_dehydrated_weight,
+    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+    values_fill = 0, # If a category wasn't eaten, its value is 0
+    names_prefix = "avg_intake_" # Adds a clear prefix to the new columns
+  ) %>%
+    # This divides all the new intake columns by 100.
+  # The across() function efficiently applies the same operation to many columns.
+  mutate(across(starts_with("avg_intake_"), ~ .x / 100)) %>%
+  
+  # Joins back the original stool sample info
+  right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) 
+
+
+# View the final, model-ready table.
+# Each row is a unique stool sample with columns for the prior 2-day average intake.
+colnames(final_model_data)
+
+```
+
