@@ -395,3 +395,67 @@ ggplot(plot_data, aes(x = grams, y = food_category, fill = intake_type)) +
 
 ```
 
+```{r}
+# find the top foods in the coffee/tea sub group
+#  Filter, Summarize, and Prepare Data for Plotting ---
+
+# This data wrangling pipe will isolate the coffee/tea items, find the top
+# contributors, and calculate their sugar content for visualization.
+coffee_tea_plot_data <- dtb_ %>%
+  # Ensure Food_code is a character for string matching
+  mutate(Food_code = as.character(Food_code)) %>%
+
+  # Filter for only the food codes corresponding to Coffee & Tea
+  filter(str_starts(Food_code, "921") | str_starts(Food_code, "922") | str_starts(Food_code, "923")) %>%
+
+  # Group by the specific food name to aggregate all consumption records
+  group_by(Food_NSC) %>%
+
+  # Calculate the total intake and total sugar for each specific food item
+  summarise(
+    total_intake = sum(dehydrated_weight, na.rm = TRUE),
+    total_sugar = sum(Sugars_g, na.rm = TRUE)
+  ) %>%
+  
+  # Keep only the top 10 most consumed items for a clean plot
+  slice_max(order_by = total_intake, n = 10) %>%
+
+  # Calculate the non-sugar portion for the stacked bar
+  mutate(
+    non_sugar_mass = total_intake - total_sugar
+  ) %>%
+
+  # Reshape the data into a "long" format for easy plotting with ggplot
+  pivot_longer(
+    cols = c(total_sugar, non_sugar_mass),
+    names_to = "component",
+    values_to = "grams"
+  ) %>%
+  # Clean up names for the plot legend
+  mutate(
+    component = if_else(component == "total_sugar", "Sugar", "Non-Sugar Mass")
+  )
+```
+
+
+```{r}
+# --- Step 3: Create the Stacked Bar Chart ---
+
+ggplot(coffee_tea_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fun = sum), fill = component)) +
+  # Use geom_col to create the bars
+  geom_col() +
+  # Use a color palette that clearly distinguishes sugar
+  scale_fill_manual(values = c("Sugar" = "#FF6B6B", "Non-Sugar Mass" = "#BDBDBD")) +
+  # Add informative labels
+  labs(
+    title = "Top 10 Consumed Items in the Coffee & Tea Category",
+    subtitle = "Showing total intake and the proportion from sugar",
+    x = "Total Dehydrated Weight Consumed (grams)",
+    y = "Food Item",
+    fill = "Component"
+  ) +
+  # Use a clean theme
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
