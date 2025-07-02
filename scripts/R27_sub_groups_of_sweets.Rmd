@@ -37,24 +37,19 @@ It May Be Overkill: If the dominant biological signal comes from a broad nutriti
 # the sub groups of sweets
 
 ```{r}
-sweets3 <- read_tsv('../data/NodeLabels.txt', col_types = 'cc')  %>% 
-  filter(str_detect(Level.code, '^953')) 
-
-dtb  %>% 
-  filter(str_detect(Food_code, '^923'))  %>% distinct(Food_code, description)
-
-```
-
-
-```{r}
 # what's the subgroup of sweets?
 sweets3 <- read_tsv('../data/NodeLabels.txt', col_types = 'cc')  %>% 
   filter(str_detect(Level.code, '^9')) %>% 
   filter(str_length(Level.code) == 3) 
+```
+
+
+```{r}
+dtb  <- read_csv('../data/152_combined_DTB.csv')
 
 # testing the solid and liquid sugar foods association with abx !     
 dtb_ <- dtb %>% 
-  select(pid, fdrt, Food_NSC, Food_code, dehydrated_weight) 
+  select(pid, fdrt, Food_NSC, Food_code, dehydrated_weight, Sugars_g) 
 ```
 ```{r}
 daily_intake_summary <- dtb_ %>%
@@ -111,6 +106,7 @@ daily_intake_summary <- dtb_ %>%
   # The na.rm = TRUE argument handles any missing weight values gracefully
   summarise(
     total_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+    total_sugars = sum(Sugars_g, na.rm = TRUE),
     .groups = 'drop' # Ungroup the data after summarizing
   )
 
@@ -173,6 +169,37 @@ final_model_data <- stool_samples_with_window %>%
     # This divides all the new intake columns by 100.
   # The across() function efficiently applies the same operation to many columns.
   mutate(across(starts_with("avg_intake_"), ~ .x / 100)) %>%
+  
+  # Joins back the original stool sample info
+  right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) 
+
+# repeat the above process but only calculate the prior two day of sugar in those food categories
+final_model_sugar <- stool_samples_with_window %>%
+  left_join(
+    daily_intake_summary,
+    # The join is performed using direct column comparisons
+    by = join_by(
+      pid,
+      window_start <= fdrt,
+      window_end >= fdrt
+    )
+  ) %>%
+  # This step reshapes the data into the final wide format needed for modeling.
+  # It calculates the average over the 2-day window.
+  pivot_wider(
+    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+    names_from = food_category,
+    values_from = total_sugars,
+    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+    values_fill = 0, # If a category wasn't eaten, its value is 0
+    names_prefix = "avg_sugar_intake_" # Adds a clear prefix to the new columns
+  ) %>%
+    # This divides all the new intake columns by 100.
+  # The across() function efficiently applies the same operation to many columns.
+  mutate(across(starts_with("avg_sugar_intake_"), ~ .x / 100)) %>%
   
   # Joins back the original stool sample info
   right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
@@ -283,5 +310,88 @@ ggplot(comparison_df, aes(x = estimate, y = fct_reorder(food_category, estimate)
     y = "Sweet Subcategory"
   ) +
   theme_bw(base_size = 14)
+```
+
+# coffee and tea sugar proportion 
+
+```{r}
+merged_sugar <- final_model_data %>% 
+  full_join(final_model_sugar %>% select(pid : avg_sugar_intake_fg_Functional_Beverages))
+
+```
+
+```{r}
+plot_data <- merged_sugar %>%
+  # Select only the columns we need for this plot
+  select(pid,sdrt,  starts_with("avg_intake_"), starts_with("avg_sugar_intake_")) %>%
+  # Pivot the data from a wide format to a long format
+  pivot_longer(
+    cols = avg_intake_fg_Coffee_Tea:avg_sugar_intake_fg_Functional_Beverages,
+    names_to = "metric",
+    values_to = "grams"
+  ) %>%
+  # Extract the food category name from the column name
+  mutate(
+    food_category = str_remove(metric, "avg_intake_|avg_sugar_intake_"),
+    metric_type = if_else(str_starts(metric, "avg_sugar_intake_"), "sugar", "total")
+  ) %>%
+  # Reshape again to have total intake and sugar intake in separate columns
+  select(pid,sdrt, food_category, metric_type, grams) %>%
+  # revert it back to original value by * 100
+  mutate(grams = grams * 100) %>% 
+  pivot_wider(
+    names_from = metric_type,
+    values_from = grams
+  ) %>%
+  # Calculate the overall average intake across all samples for each category
+  group_by(food_category) %>%
+  summarise(
+    avg_total_intake = mean(total, na.rm = TRUE),
+    avg_sugar_intake = mean(sugar, na.rm = TRUE)
+  ) %>%
+  # Calculate the proportion of sugar for sorting purposes
+  mutate(
+    sugar_proportion = avg_sugar_intake / avg_total_intake
+  ) %>%
+  # Calculate the non-sugar portion for the stacked bar
+  mutate(
+    avg_nonsugar_intake = avg_total_intake - avg_sugar_intake
+  ) %>%
+  # Reshape one last time for easy plotting with ggplot
+  pivot_longer(
+    cols = c(avg_sugar_intake, avg_nonsugar_intake),
+    names_to = "intake_type",
+    values_to = "grams"
+  ) %>%
+  # Clean up names for the plot legend
+  mutate(
+    intake_type = if_else(intake_type == "avg_sugar_intake", "Sugar", "Non-Sugar Mass"),
+    # Clean up food category names for the axis labels
+    food_category = str_remove(food_category, "fg_") %>% str_replace_all("_", " "),
+    # Reorder the 'food_category' factor based on the sugar proportion
+    # The '.desc = TRUE' ensures it's in descending order (highest % at the top)
+    food_category = fct_reorder(food_category, sugar_proportion, .desc = F)
+  )
+
+
+# --- Step 3: Create the Sorted Stacked Bar Chart ---
+
+ggplot(plot_data, aes(x = grams, y = food_category, fill = intake_type)) +
+  # Use geom_col which is an alias for geom_bar(stat="identity")
+  geom_col() +
+  # Use a color palette that clearly distinguishes sugar
+  scale_fill_manual(values = c("Sugar" = "#FF6B6B", "Non-Sugar Mass" = "#BDBDBD")) +
+  # Add informative labels
+  labs(
+    title = "Average Sugar Content by Food Category",
+    subtitle = "Categories are sorted by the percentage of sugar content",
+    x = "Average Dehydrated Weight Consumed (grams)",
+    y = "Food Category",
+    fill = "Component"
+  ) +
+  # Use a clean theme
+  theme_bw() +
+  theme(legend.position = "bottom")
+
 ```
 
