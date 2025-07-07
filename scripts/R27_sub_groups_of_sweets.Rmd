@@ -37,10 +37,15 @@ It May Be Overkill: If the dominant biological signal comes from a broad nutriti
 # the sub groups of sweets
 
 ```{r}
-# what's the subgroup of sweets?
-sweets3 <- read_tsv('../data/NodeLabels.txt', col_types = 'cc')  %>% 
+# what's the subgroup of sweets?    
+sweets3 <- read_tsv('../data/NodeLabelsMCT.txt', col_types = 'cc')  %>%  
   filter(str_detect(Level.code, '^9')) %>% 
   filter(str_length(Level.code) == 3) 
+
+
+sweets2 <- read_tsv('../data/NodeLabelsMCT.txt', col_types = 'cc')  %>% 
+  filter(str_detect(Level.code, '^9')) %>% 
+  filter(str_length(Level.code) == 2)      
 ```
 
 
@@ -457,5 +462,394 @@ ggplot(coffee_tea_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fu
   # Use a clean theme
   theme_bw() +
   theme(legend.position = "bottom")
+```
+
+
+# the first 2 digit sub-group  
+
+```{r}
+# This pipe creates a tidy summary of daily intake per category.
+daily_intake_summary <- dtb %>%
+  # Ensures Food_code is a character for string matching
+  mutate(Food_code = as.character(Food_code)) %>%
+  # Create a new 'food_category' column based on the FNDDS code prefix.
+  # This logic now uses the first two digits for the 9x categories.
+  mutate(
+    food_category = case_when(
+      # --- Rules for the "Sugars, Sweets, and Beverages" major group ---
+      str_starts(Food_code, "91") ~ "Sugars_and_sweets",
+      str_starts(Food_code, "92") ~ "Nonalcoholic_beverages",
+      str_starts(Food_code, "93") ~ "Alcoholic_beverages",
+      str_starts(Food_code, "94") ~ "Water",
+      str_starts(Food_code, "95") ~ "Formulated_beverages",
+
+      # --- Rules for the other main food groups (using the first digit) ---
+      str_starts(Food_code, "1") ~ "fg_milk",
+      str_starts(Food_code, "2") ~ "fg_meat",
+      str_starts(Food_code, "3") ~ "fg_egg",
+      str_starts(Food_code, "4") ~ "fg_legume",
+      str_starts(Food_code, "5") ~ "fg_grain",
+      str_starts(Food_code, "6") ~ "fg_fruit",
+      str_starts(Food_code, "7") ~ "fg_veggie",
+      str_starts(Food_code, "8") ~ "fg_oils",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # Removes any rows that were not assigned to a category
+  filter(!is.na(food_category)) %>%
+  # Groups the data to sum up weights for each category within a patient-day
+  group_by(pid, fdrt, food_category) %>%
+  # Calculates the total dehydrated weight for each group
+  summarise(
+    total_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+
+# --- Part 2: Calculate 2-Day Prior Average Intake for Each Stool Sample ---
+
+# Create helper columns for the time window.
+stool_samples_with_window <- stool_samples_df %>%
+  mutate(
+    window_start = sdrt - 2,
+    window_end = sdrt - 1
+  )
+
+# Perform the join and calculate the averages.
+final_model_data <- stool_samples_with_window %>%
+  left_join(
+    daily_intake_summary,
+    by = join_by(
+      pid,
+      window_start <= fdrt,
+      window_end >= fdrt
+    )
+  ) %>%
+  # Reshape the data into the final wide format needed for modeling.
+  pivot_wider(
+    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+    names_from = food_category,
+    values_from = total_dehydrated_weight,
+    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+    values_fill = 0, # If a category wasn't eaten, its value is 0
+    names_prefix = "avg_intake_" # Adds a clear prefix to the new columns
+  ) %>%
+  # This divides all the new intake columns by 100 for easier model interpretation.
+  mutate(across(starts_with("avg_intake_"), ~ .x / 100)) %>%
+  # Joins back the original stool sample info.
+  right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) 
+
+
+# View the final, model-ready table.
+# The columns are now based on the 2-digit FNDDS subgroups.
+print(final_model_data)
+
+```
+```{r}
+# --- Step 2: Define the food categories for the iterative analysis ---
+
+# Define the "sweets" subcategories that will be swapped in and out of the model
+sweets_subcategories_to_test <- c(
+  "avg_intake_Nonalcoholic_beverages",
+  "avg_intake_Sugars_and_sweets",
+  "avg_intake_Water",
+  "avg_intake_Formulated_beverages"
+)
+
+
+
+# Define the 8 main food groups that will be included as covariates in every model
+main_food_groups <- c(
+  "avg_intake_fg_milk", "avg_intake_fg_meat", "avg_intake_fg_egg", "avg_intake_fg_legume", "avg_intake_fg_grain",
+  "avg_intake_fg_fruit", "avg_intake_fg_veggie", "avg_intake_fg_oils"
+)
+
+
+# --- Step 3: Create a function that runs one iteration of the Bayesian model ---
+# This function takes one of the "sweets" subcategory names as input,
+# builds the full model formula, sets all priors, runs the model,
+# and returns the key results.
+run_iterative_model <- function(sweet_variable, data) {
+
+  # Combine the main food groups and the current sweet variable
+  all_food_vars <- c(main_food_groups, sweet_variable)
+
+  # Create the interaction terms for all food variables in this iteration
+  interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+  # Build the full formula string dynamically
+  formula_string <- paste(
+    "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
+    paste(interaction_terms, collapse = " + "),
+    "+ (1 | pid) + (1 | timebin)"
+  )
+
+  # Convert the string to a formula object
+  formula <- brms::bf(as.formula(formula_string))
+
+  # Build the priors by adding them together.
+  # This single prior() call applies to all coefficients listed in `all_food_coefs`.
+  priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+  # Fit the model (using fewer iterations for this example to run quickly)
+  model_fit <- brm(
+    formula = formula,
+    data = data,
+    prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 2, cores = 10, # Adjust cores as needed
+    seed = 123,
+    silent = 2
+  )
+
+  # Tidy the output and return only the interaction term for the sweet subcategory
+  tidy(model_fit, conf.int = TRUE) %>%
+    filter(term == paste0("empiricalTRUE:", sweet_variable))
+}
+
+
+# --- Step 4: Run the iterative analysis using purrr::map ---
+# This will apply the function to each "sweets" subcategory.
+# This step will take a significant amount of time to run.
+all_results <- map(
+  sweets_subcategories_to_test,
+  ~run_iterative_model(sweet_variable = .x, data = final_model_data)
+)
+```
+
+```{r}
+# Combine the list of results into a single, clean data frame
+comparison_df <- bind_rows(all_results) %>%
+  # Clean up the term name to be used as a label
+  mutate(food_category = str_remove(term, "empiricalTRUE:")) %>%
+  mutate(food_category = str_remove(food_category, "avg_intake_"))
+```
+
+
+
+```{r}
+# ---  Calculate Summary Statistics for Plotting ---
+
+# Calculate N (number of consumption events) and sugar proportion for each category
+summary_stats <- dtb %>%
+  # Ensures Food_code is a character for string matching
+  mutate(Food_code = as.character(Food_code)) %>%
+  # Create a new 'food_category' column based on the FNDDS code prefix.
+  # This logic now uses the first two digits for the 9x categories.
+  mutate(
+    food_category = case_when(
+      # --- Rules for the "Sugars, Sweets, and Beverages" major group ---
+      str_starts(Food_code, "91") ~ "Sugars_and_sweets",
+      str_starts(Food_code, "92") ~ "Nonalcoholic_beverages",
+      str_starts(Food_code, "93") ~ "Alcoholic_beverages",
+      str_starts(Food_code, "94") ~ "Water",
+      str_starts(Food_code, "95") ~ "Formulated_beverages",
+
+      # --- Rules for the other main food groups (using the first digit) ---
+      str_starts(Food_code, "1") ~ "fg_milk",
+      str_starts(Food_code, "2") ~ "fg_meat",
+      str_starts(Food_code, "3") ~ "fg_egg",
+      str_starts(Food_code, "4") ~ "fg_legume",
+      str_starts(Food_code, "5") ~ "fg_grain",
+      str_starts(Food_code, "6") ~ "fg_fruit",
+      str_starts(Food_code, "7") ~ "fg_veggie",
+      str_starts(Food_code, "8") ~ "fg_oils",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # Removes any rows that were not assigned to a category
+  filter(!is.na(food_category)) %>%
+  # We only need the food category and the weights for this summary
+  select(food_category, dehydrated_weight, Sugars_g) %>%
+  # Group by the food category to summarize
+  group_by(food_category) %>%
+  summarise(
+    # Count the number of times this category was consumed (N)
+    n_events = n(),
+    # Calculate the total weight and total sugar consumed for the category
+    total_intake = sum(dehydrated_weight, na.rm = TRUE),
+    total_sugar = sum(Sugars_g, na.rm = TRUE)
+  ) %>%
+  # Calculate the overall sugar proportion
+  mutate(
+    sugar_proportion = total_sugar / total_intake
+  ) %>%
+  # Join these stats back to the model results
+  right_join(comparison_df, by = "food_category") %>%
+  # Clean up the name for plotting
+  mutate(
+    label = str_remove(food_category, "avg_intake_fg_") %>% str_replace_all("_", " ")
+  )
+
+```
+
+
+```{r}
+# Plot A: Forest plot of model results, annotated with N as a proxy for power
+forest_plot <- ggplot(summary_stats, aes(x = estimate, y = fct_reorder(label, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(size = 4, color = "#118AB2") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1, color = "#118AB2") +
+  # Add the number of events (N) as a text label to each bar
+  geom_text(aes(label = paste0("N = ", n_events)), x = 1, hjust = 1, size = 5, color = "gray40") +
+  labs(
+    title = "A) Model Effect Size & Precision",
+    subtitle = "Interaction effect on diversity during antibiotic use",
+    x = "Interaction Coefficient",
+    y = "Food Subcategory"
+  ) +
+  theme_bw(base_size = 12)
+
+forest_plot
+```
+
+## Full bayesian results
+
+```{r}
+# generate the baysean forest plot for the 4 two-digit 9x codes and show me not just the interaction term for each of the 4 but the full model for each of the 4?
+# annotate N samples from N patients exposed for each of the four groups
+```
+
+
+
+
+```{r}
+# Plot B: Bar chart of sugar proportion
+sugar_plot <- ggplot(summary_stats, aes(x = sugar_proportion, y = fct_reorder(label, estimate))) +
+  geom_col(aes(fill = sugar_proportion), show.legend = FALSE) +
+  # Add text labels showing the exact percentage
+  geom_text(aes(label = scales::percent(sugar_proportion, accuracy = 1)), hjust = -0.2, size = 3.5) +
+  scale_x_continuous(labels = scales::percent, limits = c(0, 1), expand = expansion(mult = c(0, 0.15))) +
+  scale_fill_gradient(low = "#FFD166", high = "#FF6B6B") +
+  labs(
+    title = "B) Sugar Content",
+    subtitle = "% of dry weight from sugar",
+    x = "Sugar Proportion",
+    y = "" # No y-axis label needed as it aligns with Plot A
+  ) +
+  theme_bw(base_size = 12) +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+
+sugar_plot
+```
+```{r}
+library(patchwork)
+# Use patchwork to arrange the plots side-by-side
+combined_plot <- forest_plot + sugar_plot
+
+print(combined_plot)
+
+```
+# make a tree showing the first three digit level of the sweets group that showed up in this dataset 
+
+```{r}
+# manually create the 953 that has the Sports_drinks/Fluid_replacements
+level3 <-  read_tsv('../data/NodeLabelsMCT_modified953.txt', col_types = 'cc')  %>%  
+  filter(str_detect(Level.code, '^9')) %>% 
+  filter(str_length(Level.code) == 3) %>% 
+  rename(f3_code = Level.code, f3_desc = Main.food.description)
+
+
+level2 <-  read_tsv('../data/NodeLabelsMCT_modified953.txt', col_types = 'cc')  %>%  
+  filter(str_detect(Level.code, '^9')) %>% 
+  filter(str_length(Level.code) == 2) %>% 
+  rename(f2_code = Level.code, f2_desc = Main.food.description)
+
+
+# what are the food codes that exist in this data set 
+fndds_structure_table <- dtb_ %>%  
+  mutate(Food_code = as.character(Food_code)) %>%
+  filter(str_detect(Food_code, '^9')) %>% 
+  distinct(Food_code) %>% 
+  mutate(f2_code = str_sub(Food_code, start = , end = 2),
+         f3_code = str_sub(Food_code, start = , end = 3),
+         f4_code = str_sub(Food_code, start = , end = 4)) %>% 
+  distinct(f3_code, .keep_all = T) %>% 
+  left_join(level2) %>% 
+  left_join(level3) %>% 
+  select(-f4_code)
+```
+```{r}
+library(ape)      # For creating phylogenetic objects
+library(ggtree)   # For visualizing trees
+
+# --- Step 2: Convert the Table into a Tree Structure (Newick Format) ---
+# This section programmatically builds the text representation of the tree
+# that the 'ape' package can understand.
+
+# Create a mapping of code to description for labels
+code_to_desc <- bind_rows(
+  fndds_structure_table %>% distinct(code = f2_code, desc = f2_desc),
+  fndds_structure_table %>% distinct(code = f3_code, desc = f3_desc),
+  tibble(code = '9', desc = "Sugars, Sweets, and Beverages")
+) %>%
+  distinct() %>%
+  mutate(label = paste(code, desc, sep = ": "))
+
+# Function to recursively build the Newick string
+build_newick <- function(parent_code, data, all_data) {
+  children <- data %>% filter(f2_code == parent_code)
+  if (nrow(children) == 0) {
+    return(as.character(parent_code))
+  }
+  
+  child_strings <- children$f3_code %>%
+    map_chr(~ as.character(.x))
+  
+  paste0("(", paste(child_strings, collapse = ","), ")", parent_code)
+}
+
+# Build the tree structure for each level 2 group
+level2_groups <- fndds_structure_table %>% distinct(f2_code) %>% pull()
+level2_newick <- map_chr(level2_groups, ~build_newick(.x, fndds_structure_table))
+
+# Combine into the final Newick string with the root node "9"
+final_newick_string <- paste0("(", paste(level2_newick, collapse = ","), ")9;")
+
+# --- Step 3: Create a 'phylo' Object and Plot with ggtree ---
+# The 'read.tree' function from the 'ape' package parses the Newick string.
+tree <- read.tree(text = final_newick_string)
+
+# --- Step 4: Create an Annotation Data Frame ---
+# This data frame will map the node/tip labels (which are just numbers/codes)
+# to the full descriptive labels we want to plot.
+annotation_df <- as_tibble(tree) %>% # Convert the tree structure to a table to get node numbers
+  select(node, label) %>% # We only need the node number and its original label (the code)
+  left_join(code_to_desc, by = c("label" = "code")) %>% # Join with our descriptions
+  # The final label is in the 'label.y' column from the join.
+  # We also handle the root node which might not have a label from the join.
+  mutate(full_label = coalesce(label.y, label)) %>%
+  select(node, full_label) # Keep the node number and the final descriptive label
+
+
+# --- Step 5: Create the Tree Visualization ---
+# The '%<+%' operator joins our annotation data to the tree plot data.
+ggtree(tree, layout = 'rectangular') %<+% annotation_df +
+  # Add labels to the tips and internal nodes of the tree.
+  # 'label=full_label' now works because 'full_label' is in the joined data.
+  # geom_label2 is a ggtree function that is often more flexible for tree labels.
+  geom_label2(aes(label = full_label, subset = !is.na(full_label)), 
+              hjust = -0.05, 
+              label.size = 0, 
+              alpha = 0.6, 
+              fill = "skyblue") +
+  # Add some space on the x-axis for the labels
+  xlim(0, 4) +
+  # Add a title
+  labs(title = "FNDDS Hierarchy for Sugars, Sweets, and Beverages") +
+  theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"))
+
+
 ```
 
