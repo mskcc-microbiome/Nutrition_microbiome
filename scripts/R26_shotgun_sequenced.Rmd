@@ -10,11 +10,15 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(vdbR)
+library(phyloseq)
 library(tidyverse)
 connect_database()
 get_table_from_database('shotgun_lookup_ad')
 df_ad <-   shotgun_lookup_ad %>% distinct(sampleid, .keep_all = T) # 5679 samples
+```
 
+
+```{r}
 g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
   spread('genus','relab', fill = 0) %>% 
   select(sampleid, Enterococcus_relab = Enterococcus)
@@ -22,18 +26,256 @@ g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>%
 meta <- read_csv('../data/153_combined_META.csv') %>% 
   mutate(in_shotgun_lookup = if_else(sampleid %in% df_ad$sampleid, T, F)) %>% 
   full_join(g_relab) %>% 
-  mutate(Entero_log10 = log10(Enterococcus_relab + 1e-05))
+  mutate(Entero_log10 = log10(Enterococcus_relab + 1e-05)) %>% 
+  select(sampleid, in_shotgun_lookup) %>% 
+  mutate(in_isbl = if_else(sampleid %in% isabl_samples$sampleid, T, F))
 
-# library(vdbR)
-# vdb_make_phylo_mgx(metadata = meta, sampleid_col = 'sampleid') 
+meta %>% count(in_isbl == in_shotgun_lookup)
 
-meta %>% 
-  count(in_shotgun_lookup)
+not <- meta %>% 
+  filter(in_isbl != in_shotgun_lookup)
+
+# how many I alredy have the results from isabl
+already <- meta %>% 
+  filter(in_isbl == TRUE & in_shotgun_lookup == TRUE)
+```
+
+
+```{r}
+# ret <- vdb_make_phylo_mgx(metadata = meta, sampleid_col = 'sampleid', choose_max_experiment = TRUE)
+# 
+# meta %>% 
+#   count(in_shotgun_lookup)
 ```
 
 ```{r}
+# library(vdbR)
+# connect_database()
+# library(tidyverse)
+# library(phyloseq)
+# get_table_from_database("asv_counts_ag")
+# get_table_from_database("samples_mmf")
+# get_table_from_database("frozen_set_ag")
+# get_table_from_database("isabl_api_sample")
+# get_table_from_database("isabl_api_experiment")
+# get_table_from_database("isabl_api_analysis_targets")
+# get_table_from_database("mgx_metaphlan")
+# get_table_from_database("isabl_api_analysis")
+# isabl_samples <- mgx_metaphlan %>% 
+#   select(ia_id) %>% distinct() %>% 
+#   left_join(isabl_api_analysis_targets, by=c("ia_id" = "analysis_id"))%>% 
+#   left_join(isabl_api_analysis %>% select(id, application_id), by=c("ia_id" = "id")) %>%
+#   filter(application_id == 66) %>% 
+#   left_join(isabl_api_experiment, by=c("experiment_id" = "id")) %>% 
+#   left_join(isabl_api_sample, by=c("sample_id" = "id")) %>% 
+#   group_by(sample_id) %>% 
+#   filter(n_distinct(ia_id) == 1) %>% 
+#   ungroup() %>% 
+#   select(sampleid = identifier.y) %>% distinct() %>% 
+#   filter(sampleid %in% asv_counts_ag$sampleid)
+# bad_samples <- mgx_metaphlan %>% 
+#   select(ia_id) %>% distinct() %>% 
+#   left_join(isabl_api_analysis_targets, by=c("ia_id" = "analysis_id"))%>% 
+#   left_join(isabl_api_analysis %>% select(id, application_id), by=c("ia_id" = "id")) %>%
+#   filter(application_id == 66) %>% 
+#   left_join(isabl_api_experiment, by=c("experiment_id" = "id")) %>% 
+#   left_join(isabl_api_sample, by=c("sample_id" = "id")) %>% 
+#   group_by(sample_id) %>% 
+#   filter(n_distinct(ia_id) != 1) %>% 
+#   select(analysis_id = ia_id, experiment_id, identifier = identifier.x, sampleid = identifier.y) %>% 
+#   group_by(sampleid) %>% 
+#   summarize(id_diff = max(analysis_id) - min(analysis_id),
+#             analyses = paste0(sort(analysis_id), sep="", collapse=","),
+#             experiments = paste0(experiment_id, sep="", collapse=",")
+#   ) %>% select(-id_diff) 
+# bad_samples %>% write.table("bad_biobaked_samples.tsv", sep = "\t", quote = F, row.names = F)
+# samps <- samples_mmf %>% 
+#   filter(sampleid %in% isabl_samples$sampleid)
+```
+
+# isabl shotgun res already
+
+```{r}
+already <- read_rds('../data/phyloseq_for_angel_7.3.25_nutrition_human.rds')
+otu_table(already)# shotgun sequencing so the numbers are percentages    
+```
 
 
+```{r}
+# Access the taxonomy table from your phyloseq object
+tax_df <- as.data.frame(tax_table(already))
+
+# Filter this table to find all rows where the Genus is "Enterococcus"
+enterococcus_species <- tax_df %>%
+  # The 'filter' function keeps only the rows that meet this condition
+  filter(Genus == "Enterococcus") %>%
+  # Pull out the "Species" column for these rows
+  pull(Species) %>%
+  # Find the unique species names and remove any NA values
+  unique() %>%
+  na.omit()
+
+# Print the list of unique Enterococcus species found in your dataset
+print(enterococcus_species)
+
+```
+```{r}
+# ---  to Rank Enterococcus Species --- 
+
+# First, it's good practice to transform your counts to relative abundance.         
+physeq_relab <- transform_sample_counts(already, function(x) x / sum(x))    
+
+# The psmelt() function is the easiest way to convert a phyloseq object
+# into a single, tidy "long" dataframe for analysis with dplyr.
+physeq_long_df <- psmelt(physeq_relab)
+```
+
+
+```{r}
+# Now, filter, group, and summarize the data to get the metrics you want.
+enterococcus_summary <- physeq_long_df %>%
+  # Keep only the rows corresponding to the Enterococcus genus
+  filter(Genus == "Enterococcus") %>%
+  # Also remove any rows where the species is not assigned (NA)
+  filter(!is.na(Species)) %>%
+  # Group the data by species name to calculate stats for each one
+  group_by(Species) %>%
+  # Calculate the two key metrics
+  summarise(
+    # Mean relative abundance across all samples where the species was detected
+    mean_abundance = mean(Abundance[Abundance > 0]),
+    
+    # Prevalence: the proportion of samples where the species is present
+    # It counts how many samples have an abundance > 0 and divides by the total number of unique samples
+    prevalence = sum(Abundance > 0) / n_distinct(Sample)
+  ) %>%
+  # Arrange the final table to rank the species
+  # It sorts first by prevalence (descending), then by mean abundance (descending)
+  arrange(desc(prevalence), desc(mean_abundance))
+
+# Print the final ranked table
+print(enterococcus_summary)
+```
+
+```{r}
+# --- Visualize the Summary Table ---
+
+# First, create a small lookup table to add the clinical relevance information
+# This is based on the "Biological Attributes" document.
+relevance_lookup <- tibble(
+  Species = c("Enterococcus_faecalis", "Enterococcus_faecium", "Enterococcus_gallinarum", "Enterococcus_casseliflavus", "Enterococcus_avium", "Enterococcus_durans"),
+  Relevance = c("High Concern", "High Concern", "Medium Concern", "Medium Concern", "Lower Concern", "Lower Concern")
+)
+
+# Join this information to our summary table
+summary_to_plot <- enterococcus_summary %>%
+  left_join(relevance_lookup, by = "Species") %>%
+  # If a species isn't in our lookup, assign it a default relevance
+  mutate(Relevance = replace_na(Relevance, "Not Defined")) %>% 
+  mutate(label = str_replace(Species, "Enterococcus_", "E. "))
+
+# Create the bubble plot
+ggplot(summary_to_plot, aes(x = prevalence, y = mean_abundance)) +
+  # The geom_point creates the bubbles.
+  # Size is mapped to abundance, and color is mapped to clinical relevance.
+  geom_point(aes(size = mean_abundance, color = Relevance), alpha = 0.7) +
+  # Add text labels to identify each bubble
+  geom_text(aes(label = label), vjust = -1.5, size = 3, check_overlap = TRUE) +
+  
+  # Use a log scale for abundance, as it can span orders of magnitude
+  scale_y_log10(labels = scales::percent_format(accuracy = 1)) +
+  # Format prevalence as a percentage
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  # Manually define colors for clarity
+  scale_color_manual(values = c("High Concern" = "#d7191c", "Medium Concern" = "#fdae61", "Lower Concern" = "#abd9e9", "Not Defined" = "grey")) +
+  # Make the size range of the bubbles reasonable
+  scale_size(range = c(3, 15)) +
+  
+  # Add informative labels and a clean theme
+  labs(
+    title = "Prevalence vs. Abundance of Enterococcus Species",
+    subtitle = "Bubble size corresponds to mean abundance",
+    x = "Prevalence (in % of Samples)",
+    y = "Mean Relative Abundance (in Samples where Present)",
+    color = "Clinical Relevance",
+    size = "Mean Abundance"
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+ggsave('../data/R26_enterococcus_spp.jpg', width = 11, height = 8)
+```
+
+```{r}
+#  making prevalence as a bar plot 
+prevalence_bar_plot <- ggplot(summary_to_plot, aes(x = prevalence, y = fct_reorder(label, prevalence), fill = Relevance)) +
+  geom_col() +
+  scale_fill_manual(values = c("High Concern" = "#d7191c", "Medium Concern" = "#fdae61", "Lower Concern" = "#abd9e9", "Not Defined" = "grey")) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Prevalence of Enterococcus Species",
+    subtitle = "Species ranked by the percentage of samples they were detected in",
+    x = "Prevalence (% of Samples)",
+    y = "Enterococcus Species",
+    fill = "Clinical Relevance"
+  ) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+print(prevalence_bar_plot)
+```
+
+```{r}
+# make a serires of boxpot sorted in the same order as above, with jitter of the points shown each represent the abundance of that spp for one sample, make sure all zero abundance samples are shown 
+# This plot shows the distribution of abundance for each species across all samples.
+
+# First, prepare the full dataset for this plot by joining the relevance and label info
+abundance_plot_data <- physeq_long_df %>%
+  filter(Genus == "Enterococcus", !is.na(Species)) %>%
+  left_join(select(summary_to_plot, Species, Relevance, label, prevalence), by = "Species")
+
+# Calculate a small constant to add for the log transformation (a "pseudocount")
+# This is usually half of the smallest non-zero abundance value in the data.
+pseudocount <- min(abundance_plot_data$Abundance[abundance_plot_data$Abundance > 0]) / 2
+
+# Create the plot
+abundance_boxplot <- ggplot(abundance_plot_data, aes(x = fct_reorder(label, prevalence, .desc = TRUE), y = Abundance + pseudocount, fill = Relevance)) +
+  # Use geom_jitter to show all individual data points, including zeros.
+  # The points are slightly transparent to show density.
+  geom_jitter(width = 0.2, alpha = 0.4, shape = 21, color = "black") +
+  # Overlay a boxplot to show the distribution summary (median, quartiles).
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  # Use the same color scheme for consistency
+  scale_fill_manual(values = c("High Concern" = "#d7191c", "Medium Concern" = "#fdae61", "Lower Concern" = "#abd9e9", "Not Defined" = "grey")) +
+  # Use a log10 scale on the y-axis to visualize the wide range of abundances.
+  
+  #scale_y_log10(labels = scales::percent_format(accuracy = 0.1)) +
+  # Add minor tick marks for the log scale
+  annotation_logticks(sides = "l") +
+  # Add informative labels
+  labs(
+    title = "Abundance Distribution of Enterococcus Species",
+    subtitle = "Each point represents one sample. Species are sorted by prevalence.",
+    x = "Enterococcus Species",
+    y = "Relative Abundance",
+    fill = "Clinical Relevance"
+  ) +
+  # Rotate x-axis labels for better readability
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "right")
+
+print(abundance_boxplot)
+
+```
+```{r}
+# recalculate the relative abundande of each species relative to the total enterococcus species in that sample and re plot the above plot 
+
+```
+
+
+# all shotgun samples 
+
+```{r}
 ggplot(meta, aes(x = sdrt, y = Entero_log10, group = pid)) +
 
   # Draw the lines connecting the points for each patient
@@ -47,8 +289,6 @@ ggplot(meta, aes(x = sdrt, y = Entero_log10, group = pid)) +
   scale_shape_manual(values = c("TRUE" = 21, "FALSE" = 21)) +
   # We fill the circle with black if TRUE, and white (making it look empty) if FALSE
   scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "white")) +
-
-
 
   # Create a separate panel for each patient, with 3 panels per row
   facet_wrap(~ pid, ncol = 10) +
