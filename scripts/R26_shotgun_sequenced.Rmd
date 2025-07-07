@@ -239,7 +239,7 @@ abundance_plot_data <- physeq_long_df %>%
 pseudocount <- min(abundance_plot_data$Abundance[abundance_plot_data$Abundance > 0]) / 2
 
 # Create the plot
-abundance_boxplot <- ggplot(abundance_plot_data, aes(x = fct_reorder(label, prevalence, .desc = TRUE), y = Abundance + pseudocount, fill = Relevance)) +
+abundance_boxplot <- ggplot(abundance_plot_data, aes(x = fct_reorder(label, prevalence, .desc = TRUE), y = Abundance , fill = Relevance)) +
   # Use geom_jitter to show all individual data points, including zeros.
   # The points are slightly transparent to show density.
   geom_jitter(width = 0.2, alpha = 0.4, shape = 21, color = "black") +
@@ -248,7 +248,6 @@ abundance_boxplot <- ggplot(abundance_plot_data, aes(x = fct_reorder(label, prev
   # Use the same color scheme for consistency
   scale_fill_manual(values = c("High Concern" = "#d7191c", "Medium Concern" = "#fdae61", "Lower Concern" = "#abd9e9", "Not Defined" = "grey")) +
   # Use a log10 scale on the y-axis to visualize the wide range of abundances.
-  
   #scale_y_log10(labels = scales::percent_format(accuracy = 0.1)) +
   # Add minor tick marks for the log scale
   annotation_logticks(sides = "l") +
@@ -263,12 +262,57 @@ abundance_boxplot <- ggplot(abundance_plot_data, aes(x = fct_reorder(label, prev
   # Rotate x-axis labels for better readability
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "right")
-
+ 
 print(abundance_boxplot)
 
 ```
 ```{r}
 # recalculate the relative abundande of each species relative to the total enterococcus species in that sample and re plot the above plot 
+# This plot now shows the distribution of each species' abundance relative
+# to the total Enterococcus population within each sample.
+
+# First, prepare the full dataset for this plot
+abundance_plot_data <- physeq_long_df %>%
+  filter(Genus == "Enterococcus", !is.na(Species)) %>%
+  # For each sample, calculate the total abundance of all Enterococcus species
+  group_by(Sample) %>%
+  mutate(total_entero_abund = sum(Abundance)) %>%
+  ungroup() %>%
+  # Calculate the new relative abundance within the Enterococcus genus
+  mutate(entero_rel_abund = if_else(total_entero_abund > 0, Abundance / total_entero_abund, 0)) %>%
+  # Join the relevance and label info for plotting
+  left_join(select(summary_to_plot, Species, Relevance, label, prevalence), by = "Species") %>% 
+  filter(total_entero_abund > 0)
+
+# Calculate a small constant to add for the log transformation (a "pseudocount")
+pseudocount <- 1e-6 # A small, fixed pseudocount for proportion data
+
+# Create the plot using the new 'entero_rel_abund' column
+abundance_boxplot <- ggplot(abundance_plot_data, aes(x = fct_reorder(label, prevalence, .desc = TRUE), y = entero_rel_abund , fill = Relevance)) +
+  # Use geom_jitter to show all individual data points, including zeros.
+  geom_jitter(width = 0.2, alpha = 0.4, shape = 21, color = "black") +
+  # Overlay a boxplot to show the distribution summary (median, quartiles).
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  # Use the same color scheme for consistency
+  scale_fill_manual(values = c("High Concern" = "#d7191c", "Medium Concern" = "#fdae61", "Lower Concern" = "#abd9e9", "Not Defined" = "grey")) +
+  # Use a log10 scale on the y-axis to visualize the wide range of proportions.
+  # The labels are formatted as percentages.
+ # scale_y_log10(labels = scales::percent_format(accuracy = 1)) +
+  # Add minor tick marks for the log scale
+  annotation_logticks(sides = "l") +
+  # Add informative labels
+  labs(
+    title = "Composition of the Enterococcus Population",
+    subtitle = "Each point represents one sample that has any Enterococcus. Species are sorted by overall prevalence.",
+    x = "Enterococcus Species",
+    y = "Abundance (% of Total Enterococcus)",
+    fill = "Clinical Relevance"
+  ) +
+  # Rotate x-axis labels for better readability
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "right")
+
+print(abundance_boxplot)
 
 ```
 
