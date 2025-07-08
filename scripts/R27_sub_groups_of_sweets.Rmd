@@ -809,24 +809,24 @@ code_to_desc <- bind_rows(
 nodes_l3 <- fndds_structure_table %>%
   distinct(code = f3_code, parent = f2_code) %>%
   arrange(parent, code) %>%
-  mutate(y = row_number(), x = 3)
+  mutate(y = row_number(), x = 2.0) # Level 3 nodes are at x=2.0
 
 # Calculate positions for level 2 nodes by centering them over their children
 nodes_l2 <- nodes_l3 %>%
   group_by(parent) %>%
   summarise(y = mean(y)) %>%
   rename(code = parent) %>%
-  mutate(x = 2, parent = '9') %>% select(colnames(nodes_l3))
+  mutate(x = 1.5, parent = '9') # Level 2 nodes are at x=1.5
 
 # Calculate position for the root node (level 1) by centering it over its children
 nodes_l1 <- nodes_l2 %>%
   summarise(y = mean(y)) %>%
-  mutate(x = 1, code = '9', parent = NA)%>% select(colnames(nodes_l3))
+  mutate(x = 1.0, code = '9', parent = NA) # Root node is at x=1.0
 
 # Combine all nodes into one dataframe
 all_nodes <- bind_rows(nodes_l1, nodes_l2, nodes_l3) %>%
   mutate(across(c(code, parent), as.character)) %>%
-  left_join(select(code_to_desc, code, label), by = c("code" = "code"))
+  left_join(code_to_desc, by = c("code" = "code"))
 
 # --- Step 3: Create the Edge Dataframe for Drawing Lines ---
 # This creates the vertical and horizontal lines for the tree structure.
@@ -838,30 +838,28 @@ edges <- all_nodes %>%
 # --- Step 4: Create the Final Tree Diagram with ggplot2 ---
 ggplot() +
   # Draw the horizontal segments of the tree
-  geom_segment(data = edges, aes(x = x, y = y, xend = xend + 0.05, yend = y), color = "gray50") +
+  geom_segment(data = edges, aes(x = x, y = y, xend = xend + 0.02, yend = y), color = "gray50") +
   # Draw the vertical segments of the tree
-  geom_segment(data = edges, aes(x = xend + 0.05, y = y, xend = xend + 0.05, yend = yend), color = "gray50") +
+  geom_segment(data = edges, aes(x = xend + 0.02, y = y, xend = xend + 0.02, yend = yend), color = "gray50") +
 
   # Draw the points for each node
-  geom_point(data = all_nodes, aes(x = x, y = y, color = factor(x)), size = 4) +
+  geom_point(data = all_nodes, aes(x = x, y = y, color = factor(x)), size = 2) +
   
-  # Draw the text labels, now rotated vertically
+  # Draw the text labels, now left-aligned
   geom_text(
     data = all_nodes,
-    aes(x = x, y = y, label = label),
-    angle = 0, # Rotate labels 90 degrees
-    vjust = -0.7, # Adjust vertical justification to move text above the point
-    hjust = 0.5,  # Center text horizontally
-    size = 3,
-    fontface = "bold"
+    aes(x = x + 0.05, y = y, label = paste(code, desc, sep = ": ")), # Add a small offset from the point
+    hjust = 0,  # Left-align the text
+    size = 3.5,
+    fontface = "plain"
   ) +
   
   # Define custom colors for each level of the hierarchy
-  scale_color_manual(values = c("1" = "#073B4C", "2" = "#118AB2", "3" = "#06D6A0"), guide = "none") +
+  scale_color_manual(values = c("1" = "#073B4C", "1.5" = "#118AB2", "2" = "#06D6A0"), guide = "none") +
   
-  # Reverse the y-axis to have the root at the top and expand x-axis for labels
+  # Reverse the y-axis to have the root at the top and set x-axis limits for a compact view
   scale_y_reverse() +
-  scale_x_continuous(limits = c(0.8, 3.5)) +
+  scale_x_continuous(limits = c(0.9, 3.5)) +
   
   # Use a minimal theme to remove axes and grids
   theme_void() +
@@ -871,7 +869,6 @@ ggplot() +
   theme(
     plot.title = element_text(hjust = 0.5, size = 16, face = "bold", margin = margin(b = 20))
   )
-
 
 ggsave('../data/R27_g9_tree.pdf', width = 12)
 ```
