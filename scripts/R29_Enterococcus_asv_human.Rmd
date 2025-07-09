@@ -24,7 +24,36 @@ library(compositions)
 meta <- read_csv('../data/153_combined_META.csv')
 e_asv <- read_csv('../data/R25_all_enterococcus_asv_in_sample.csv') 
 # asv_1 is feacium
+```
 
+```{r}
+asv_summary <- e_asv %>%
+  # First, filter for only the Enterococcus ASVs if your table contains others
+  filter(genus == "Enterococcus") %>%
+  
+  # Group the data by the unique ASV key
+  group_by(asv_key) %>%
+  
+  # Summarise to calculate the two counts for each group
+  summarise(
+    # Count the number of samples where the relative abundance is greater than 0
+    # The sum(condition) trick works because TRUE evaluates to 1 and FALSE to 0
+    present_in_samples = sum(count_relative > 0, na.rm = TRUE),
+    
+    # Count the number of samples where the relative abundance is greater than 0.3 (30%)
+    dominant_in_samples_0.3 = sum(count_relative > 0.3, na.rm = TRUE)
+  ) %>%
+  
+  # Arrange the final table to show the most prevalent ASVs at the top
+  arrange(desc(present_in_samples))
+
+# Print the resulting summary table
+print(asv_summary)
+```
+
+
+
+```{r}
 # clr transform the asv counts of asv_1
 
   
@@ -36,18 +65,19 @@ cts_all <- e_asv %>%
   column_to_rownames('asv_key')
 
 clr_res <- clr(cts_all + 0.5) %>% 
+  t() %>% 
   as.data.frame()  %>% 
-  rownames_to_column('asv_key') %>% 
-  gather('sampleid','clr', names(.)[2]:names(.)[ncol(.)])
+  rownames_to_column('sampleid')
 
 meta_entero <- meta %>% 
-  inner_join(clr_res %>% filter(asv_key == 'asv_1')) %>% 
-  rename(asv_1_clr = clr)
+  inner_join( clr_res %>% select(sampleid, asv_1, asv_33)) 
 
 all_food_vars <- meta_entero %>% select(starts_with('fg')) %>% colnames()
 ```
 
 # the model with enterococcus outcome
+
+## asv_1
 
 ```{r}
 data <- meta_entero
@@ -56,7 +86,7 @@ interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
 
 # Build the full formula string dynamically
 formula_string <- paste(
-  "asv_1_clr ~ 0 + intensity + empirical + TPN + EN +",
+  "asv_1 ~ 0 + intensity + empirical + TPN + EN +",
   paste(interaction_terms, collapse = " + "),
   "+ (1 | pid) + (1 | timebin)"
 )
@@ -109,12 +139,64 @@ plot_interactions <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(cl
     geom_pointrange(aes(xmin = conf.low, xmax = conf.high, color = is_significant), linewidth = 1, size = 0.7) +
     scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
     labs(
-      title = "Food Group Interaction Effects to Enterococcus (CLR)",
+      title = "Food Group Interaction Effects to ASV_1 (CLR)",
       x = "Coefficient Estimate",
       y = "Food Group x Antibiotic Exposure"
     ) +
     theme_bw(base_size = 12) +
     theme(legend.position = "none")
 plot_interactions
+```
+
+## asv_33
+
+```{r}
+model_fit_asv_33 <- brm(
+  formula = brms::bf(as.formula(paste(
+  "asv_33 ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+))),
+  data = data,
+  prior = priors,
+  warmup = 1000, iter = 3000,
+  chains = 2, cores = 10, # Adjust cores as needed
+  seed = 123,
+  silent = 2
+)
+
+results_df_33 <- tidy(model_fit_asv_33, conf.int = TRUE)
+```
+
+```{r}
+interaction_df <- results_df_33 %>%
+    # Keep only the fixed effects
+    filter(effect == "fixed") %>%
+    # Create a new column to distinguish main effects from interactions
+    mutate(
+      effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+      # Create clean labels for plotting
+      clean_term = term %>%
+        str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+        str_replace("empiricalTRUE:", "abx * ") %>%
+        str_replace_all("_", " ")
+    ) %>% 
+  filter(effect_type == "Interaction") %>%
+    # Create a new column to identify significant results
+    # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+    mutate(is_significant = (conf.low * conf.high) > 0)
+
+plot_interactions_33 <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_pointrange(aes(xmin = conf.low, xmax = conf.high, color = is_significant), linewidth = 1, size = 0.7) +
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
+    labs(
+      title = "Food Group Interaction Effects to ASV_33 (CLR)",
+      x = "Coefficient Estimate",
+      y = "Food Group x Antibiotic Exposure"
+    ) +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+plot_interactions_33
 ```
 
