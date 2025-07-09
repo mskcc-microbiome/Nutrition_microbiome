@@ -1,0 +1,120 @@
+---
+title: "Enterococcus asv in human"
+output: html_document
+date: "2025-07-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(brms)   
+library(broom.mixed)
+library(tidybayes)
+library(cowplot)
+library(brmstools)
+library(vdbR)
+
+```
+
+```{r}
+library(compositions)
+meta <- read_csv('../data/153_combined_META.csv')
+e_asv <- read_csv('../data/R25_all_enterococcus_asv_in_sample.csv') 
+# asv_1 is feacium
+
+# clr transform the asv counts of asv_1
+
+  
+cts_all <- e_asv %>% 
+  select(asv_key,sampleid, count ) %>% 
+  right_join(meta %>% distinct(sampleid) ) %>% 
+  spread('sampleid', 'count', fill = 0) %>% 
+  filter(!is.na(asv_key)) %>% 
+  column_to_rownames('asv_key')
+
+clr_res <- clr(cts_all + 0.5) %>% 
+  as.data.frame()  %>% 
+  rownames_to_column('asv_key') %>% 
+  gather('sampleid','clr', names(.)[2]:names(.)[ncol(.)])
+
+meta_entero <- meta %>% 
+  inner_join(clr_res %>% filter(asv_key == 'asv_1')) %>% 
+  rename(asv_1_clr = clr)
+
+all_food_vars <- meta_entero %>% select(starts_with('fg')) %>% colnames()
+```
+
+# the model with enterococcus outcome
+
+```{r}
+data <- meta_entero
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "asv_1_clr ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+  prior(normal(0, 1), class = 'b') + # General prior for all food effects
+  # Specific priors that override the general one for non-food covariates
+  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = data,
+  prior = priors,
+  warmup = 1000, iter = 3000,
+  chains = 2, cores = 10, # Adjust cores as needed
+  seed = 123,
+  silent = 2
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE)
+```
+```{r}
+interaction_df <- results_df %>%
+    # Keep only the fixed effects
+    filter(effect == "fixed") %>%
+    # Create a new column to distinguish main effects from interactions
+    mutate(
+      effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+      # Create clean labels for plotting
+      clean_term = term %>%
+        str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+        str_replace("empiricalTRUE:", "abx * ") %>%
+        str_replace_all("_", " ")
+    ) %>% 
+  filter(effect_type == "Interaction") %>%
+    # Create a new column to identify significant results
+    # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+    mutate(is_significant = (conf.low * conf.high) > 0)
+
+plot_interactions <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_pointrange(aes(xmin = conf.low, xmax = conf.high, color = is_significant), linewidth = 1, size = 0.7) +
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
+    labs(
+      title = "Food Group Interaction Effects to Enterococcus (CLR)",
+      x = "Coefficient Estimate",
+      y = "Food Group x Antibiotic Exposure"
+    ) +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+plot_interactions
+```
+
