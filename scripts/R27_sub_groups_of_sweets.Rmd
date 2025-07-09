@@ -50,285 +50,288 @@ sweets2 <- read_tsv('../data/NodeLabelsMCT.txt', col_types = 'cc')  %>%
 sweets4 <- read_tsv('../data/NodeLabelsMCT.txt', col_types = 'cc')  %>% 
   filter(str_detect(Level.code, '^9')) %>% 
   filter(str_length(Level.code) == 4)      
-```
 
-```{r}
+# manually create the 953 that has the Sports_drinks/Fluid_replacements
+level3 <-  read_tsv('../data/NodeLabelsMCT_modified953.txt', col_types = 'cc')  %>%  
+  filter(str_detect(Level.code, '^9')) %>% 
+  filter(str_length(Level.code) == 3) %>% 
+  rename(f3_code = Level.code, f3_desc = Main.food.description)
+
+
+level2 <-  read_tsv('../data/NodeLabelsMCT_modified953.txt', col_types = 'cc')  %>%  
+  filter(str_detect(Level.code, '^9')) %>% 
+  filter(str_length(Level.code) == 2) %>% 
+  rename(f2_code = Level.code, f2_desc = Main.food.description)
+
 dtb  <- read_csv('../data/152_combined_DTB.csv')
 
 # testing the solid and liquid sugar foods association with abx !     
 dtb_ <- dtb %>% 
   select(pid, fdrt, Food_NSC, Food_code, dehydrated_weight, Sugars_g) 
 ```
-```{r}
-daily_intake_summary <- dtb_ %>%
-
-  # Create a new 'food_category' column based on FNDDS codes.
-  # The case_when() function checks conditions in order.
-  # This is why we put the more specific 3-digit rules before the general 1-digit rules.
-  mutate(
-    food_category = case_when(
-      
-      # Rule for high-sugar sports drinks, grouping them with other liquid sweets
-      Food_code == "95320200" ~ "fg_Liquid_Sweets",
-      # Rule for low-sugar/electrolyte drinks, creating a new category
-      Food_code %in% c("95322200", "95330100") ~ "fg_Functional_Beverages",
-      
-      # --- Define Oral Nutritional Supplements (ONS) ---
-      str_starts(Food_code, "951") | str_starts(Food_code, "952") ~ "fg_ONS",
-      
-      # Solid Sweets & Sugars
-      str_starts(Food_code, "911") | str_starts(Food_code, "913") |
-      str_starts(Food_code, "914") | str_starts(Food_code, "915") |
-      str_starts(Food_code, "917") | str_starts(Food_code, "918") ~ "fg_Solid_Sweets",
-
-      # Liquid Sugar (Sugar-Sweetened Beverages)
-      str_starts(Food_code, "924") | str_starts(Food_code, "925") |
-      str_starts(Food_code, "926") ~ "fg_Liquid_Sweets",
-      
-       # Define Coffee & Tea
-      str_starts(Food_code, "921") | str_starts(Food_code, "922") |
-      str_starts(Food_code, "923") ~ "fg_Coffee_Tea",
-
-      # --- Define the 8 main food categories using the first digit ---
-      str_starts(Food_code, "1") ~ "fg_milk",
-      str_starts(Food_code, "2") ~ "fg_meat",
-      str_starts(Food_code, "3") ~ "fg_egg",
-      str_starts(Food_code, "4") ~ "fg_legume",
-      str_starts(Food_code, "5") ~ "fg_grain",
-      str_starts(Food_code, "6") ~ "fg_fruit",
-      str_starts(Food_code, "7") ~ "fg_veggie",
-      str_starts(Food_code, "8") ~ "fg_oils",
-
-      # Any food code that doesn't match the rules above will be assigned NA
-      TRUE ~ NA_character_
-    )
-  ) %>%
-
-  # Remove any rows that were not assigned to a category (e.g., ONS, water, etc.)
-  filter(!is.na(food_category)) %>%
-
-  # Group the data by patient, day, and our new food category
-  group_by(pid, fdrt, food_category) %>%
-
-  # Calculate the total dehydrated weight for each group
-  # The na.rm = TRUE argument handles any missing weight values gracefully
-  summarise(
-    total_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
-    total_sugars = sum(Sugars_g, na.rm = TRUE),
-    .groups = 'drop' # Ungroup the data after summarizing
-  )
-
-# --- View the final summary table ---
-# This table is now in a "tidy" format, ready for analysis or plotting.
-# Each row shows the total grams of a food category consumed by a patient on a specific day.
-
-# You can also use pivot_wider() to create a "wide" table where each food category
-# has its own column. This format is often required for statistical models.
-daily_intake_wide <- daily_intake_summary %>%
-  pivot_wider(
-    names_from = food_category,
-    values_from = total_dehydrated_weight,
-    values_fill = 0 # Fill in 0 for categories a patient didn't eat on a given day
-  )
-
-
-# finding the prior two day average of the above groups
-stool_samples_df <- read_csv('../data/153_combined_META.csv') %>% 
-  select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
-```
-
-
-```{r}
-# ---  Calculate the 2-Day Prior Average Intake ---
-
-# This single pipe performs the entire calculation.
-# It joins the two tables, filters for the correct time window,
-# calculates the average, and reshapes the data into the final format.
-
-stool_samples_with_window <- stool_samples_df %>%
-  mutate(
-    # The 2-day window starts 2 days before the stool sample...
-    window_start = sdrt - 2,
-    # ...and ends 1 day before the stool sample.
-    window_end = sdrt - 1
-  )
-
-# Now, perform the join using these new, pre-calculated columns
-final_model_data <- stool_samples_with_window %>%
-  left_join(
-    daily_intake_summary,
-    # The join is performed using direct column comparisons
-    by = join_by(
-      pid,
-      window_start <= fdrt,
-      window_end >= fdrt
-    )
-  ) %>%
-  # This step reshapes the data into the final wide format needed for modeling.
-  # It calculates the average over the 2-day window.
-  pivot_wider(
-    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
-    names_from = food_category,
-    values_from = total_dehydrated_weight,
-    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
-    values_fill = 0, # If a category wasn't eaten, its value is 0
-    names_prefix = "avg_intake_" # Adds a clear prefix to the new columns
-  ) %>%
-    # This divides all the new intake columns by 100.
-  # The across() function efficiently applies the same operation to many columns.
-  mutate(across(starts_with("avg_intake_"), ~ .x / 100)) %>%
-  
-  # Joins back the original stool sample info
-  right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
-  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
-  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
-  mutate(pid = factor(pid)) 
-
-# repeat the above process but only calculate the prior two day of sugar in those food categories
-final_model_sugar <- stool_samples_with_window %>%
-  left_join(
-    daily_intake_summary,
-    # The join is performed using direct column comparisons
-    by = join_by(
-      pid,
-      window_start <= fdrt,
-      window_end >= fdrt
-    )
-  ) %>%
-  # This step reshapes the data into the final wide format needed for modeling.
-  # It calculates the average over the 2-day window.
-  pivot_wider(
-    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
-    names_from = food_category,
-    values_from = total_sugars,
-    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
-    values_fill = 0, # If a category wasn't eaten, its value is 0
-    names_prefix = "avg_sugar_intake_" # Adds a clear prefix to the new columns
-  ) %>%
-    # This divides all the new intake columns by 100.
-  # The across() function efficiently applies the same operation to many columns.
-  mutate(across(starts_with("avg_sugar_intake_"), ~ .x / 100)) %>%
-  
-  # Joins back the original stool sample info
-  right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
-  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
-  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
-  mutate(pid = factor(pid)) 
-
-
-```
-
-# iterative modeling 
-
+# manually created the broad categories
+ 
 ```{r}
 
-# --- Step 2: Define the food categories for the iterative analysis ---
-
-# Define the "sweets" subcategories that will be swapped in and out of the model
-sweets_subcategories_to_test <- c(
-  "avg_intake_fg_Solid_Sweets",
-  "avg_intake_fg_Liquid_Sweets",
-  "avg_intake_fg_ONS",
-  "avg_intake_fg_Coffee_Tea",
-  "avg_intake_fg_Functional_Beverages"
-)
-
-# Define the 8 main food groups that will be included as covariates in every model
-main_food_groups <- c(
-  "avg_intake_fg_milk", "avg_intake_fg_meat", "avg_intake_fg_egg", "avg_intake_fg_legume", "avg_intake_fg_grain",
-  "avg_intake_fg_fruit", "avg_intake_fg_veggie", "avg_intake_fg_oils"
-)
-
-
-# --- Step 3: Create a function that runs one iteration of the Bayesian model ---
-# This function takes one of the "sweets" subcategory names as input,
-# builds the full model formula, sets all priors, runs the model,
-# and returns the key results.
-run_iterative_model <- function(sweet_variable, data) {
-
-  # Combine the main food groups and the current sweet variable
-  all_food_vars <- c(main_food_groups, sweet_variable)
-
-  # Create the interaction terms for all food variables in this iteration
-  interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
-
-  # Build the full formula string dynamically
-  formula_string <- paste(
-    "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
-    paste(interaction_terms, collapse = " + "),
-    "+ (1 | pid) + (1 | timebin)"
-  )
-
-  # Convert the string to a formula object
-  formula <- brms::bf(as.formula(formula_string))
-
-  # Build the priors by adding them together.
-  # This single prior() call applies to all coefficients listed in `all_food_coefs`.
-  priors <-
-    prior(normal(0, 1), class = 'b') + # General prior for all food effects
-    # Specific priors that override the general one for non-food covariates
-    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
-    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
-    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
-    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
-    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
-    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
-
-  # Fit the model (using fewer iterations for this example to run quickly)
-  model_fit <- brm(
-    formula = formula,
-    data = data,
-    prior = priors,
-    warmup = 1000, iter = 3000,
-    chains = 2, cores = 10, # Adjust cores as needed
-    seed = 123,
-    silent = 2
-  )
-
-  # Tidy the output and return only the interaction term for the sweet subcategory
-  tidy(model_fit, conf.int = TRUE) %>%
-    filter(term == paste0("empiricalTRUE:", sweet_variable))
-}
-
-
-# --- Step 4: Run the iterative analysis using purrr::map ---
-# This will apply the function to each "sweets" subcategory.
-# This step will take a significant amount of time to run.
-all_results <- map(
-  sweets_subcategories_to_test,
-  ~run_iterative_model(sweet_variable = .x, data = final_model_data)
-)
+# daily_intake_summary <- dtb_ %>%
+# 
+#   # Create a new 'food_category' column based on FNDDS codes.
+#   # The case_when() function checks conditions in order.
+#   # This is why we put the more specific 3-digit rules before the general 1-digit rules.
+#   mutate(
+#     food_category = case_when(
+#       
+#       # Rule for high-sugar sports drinks, grouping them with other liquid sweets
+#       Food_code == "95320200" ~ "fg_Liquid_Sweets",
+#       # Rule for low-sugar/electrolyte drinks, creating a new category
+#       Food_code %in% c("95322200", "95330100") ~ "fg_Functional_Beverages",
+#       
+#       # --- Define Oral Nutritional Supplements (ONS) ---
+#       str_starts(Food_code, "951") | str_starts(Food_code, "952") ~ "fg_ONS",
+#       
+#       # Solid Sweets & Sugars
+#       str_starts(Food_code, "911") | str_starts(Food_code, "913") |
+#       str_starts(Food_code, "914") | str_starts(Food_code, "915") |
+#       str_starts(Food_code, "917") | str_starts(Food_code, "918") ~ "fg_Solid_Sweets",
+# 
+#       # Liquid Sugar (Sugar-Sweetened Beverages)
+#       str_starts(Food_code, "924") | str_starts(Food_code, "925") |
+#       str_starts(Food_code, "926") ~ "fg_Liquid_Sweets",
+#       
+#        # Define Coffee & Tea
+#       str_starts(Food_code, "921") | str_starts(Food_code, "922") |
+#       str_starts(Food_code, "923") ~ "fg_Coffee_Tea",
+# 
+#       # --- Define the 8 main food categories using the first digit ---
+#       str_starts(Food_code, "1") ~ "fg_milk",
+#       str_starts(Food_code, "2") ~ "fg_meat",
+#       str_starts(Food_code, "3") ~ "fg_egg",
+#       str_starts(Food_code, "4") ~ "fg_legume",
+#       str_starts(Food_code, "5") ~ "fg_grain",
+#       str_starts(Food_code, "6") ~ "fg_fruit",
+#       str_starts(Food_code, "7") ~ "fg_veggie",
+#       str_starts(Food_code, "8") ~ "fg_oils",
+# 
+#       # Any food code that doesn't match the rules above will be assigned NA
+#       TRUE ~ NA_character_
+#     )
+#   ) %>%
+# 
+#   # Remove any rows that were not assigned to a category (e.g., ONS, water, etc.)
+#   filter(!is.na(food_category)) %>%
+# 
+#   # Group the data by patient, day, and our new food category
+#   group_by(pid, fdrt, food_category) %>%
+# 
+#   # Calculate the total dehydrated weight for each group
+#   # The na.rm = TRUE argument handles any missing weight values gracefully
+#   summarise(
+#     total_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+#     total_sugars = sum(Sugars_g, na.rm = TRUE),
+#     .groups = 'drop' # Ungroup the data after summarizing
+#   )
+# 
+# # --- View the final summary table ---
+# # This table is now in a "tidy" format, ready for analysis or plotting.
+# # Each row shows the total grams of a food category consumed by a patient on a specific day.
+# 
+# # You can also use pivot_wider() to create a "wide" table where each food category
+# # has its own column. This format is often required for statistical models.
+# daily_intake_wide <- daily_intake_summary %>%
+#   pivot_wider(
+#     names_from = food_category,
+#     values_from = total_dehydrated_weight,
+#     values_fill = 0 # Fill in 0 for categories a patient didn't eat on a given day
+#   )
+# 
+# 
+# # finding the prior two day average of the above groups
+# stool_samples_df <- read_csv('../data/153_combined_META.csv') %>% 
+#   select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
+# 
+# # ---  Calculate the 2-Day Prior Average Intake ---
+# 
+# # This single pipe performs the entire calculation.
+# # It joins the two tables, filters for the correct time window,
+# # calculates the average, and reshapes the data into the final format.
+# 
+# stool_samples_with_window <- stool_samples_df %>%
+#   mutate(
+#     # The 2-day window starts 2 days before the stool sample...
+#     window_start = sdrt - 2,
+#     # ...and ends 1 day before the stool sample.
+#     window_end = sdrt - 1
+#   )
+# 
+# # Now, perform the join using these new, pre-calculated columns
+# final_model_data <- stool_samples_with_window %>%
+#   left_join(
+#     daily_intake_summary,
+#     # The join is performed using direct column comparisons
+#     by = join_by(
+#       pid,
+#       window_start <= fdrt,
+#       window_end >= fdrt
+#     )
+#   ) %>%
+#   # This step reshapes the data into the final wide format needed for modeling.
+#   # It calculates the average over the 2-day window.
+#   pivot_wider(
+#     id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+#     names_from = food_category,
+#     values_from = total_dehydrated_weight,
+#     values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+#     values_fill = 0, # If a category wasn't eaten, its value is 0
+#     names_prefix = "avg_intake_" # Adds a clear prefix to the new columns
+#   ) %>%
+#     # This divides all the new intake columns by 100.
+#   # The across() function efficiently applies the same operation to many columns.
+#   mutate(across(starts_with("avg_intake_"), ~ .x / 100)) %>%
+#   
+#   # Joins back the original stool sample info
+#   right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
+#   mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+#   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+#   mutate(pid = factor(pid)) 
+# 
+# # repeat the above process but only calculate the prior two day of sugar in those food categories
+# final_model_sugar <- stool_samples_with_window %>%
+#   left_join(
+#     daily_intake_summary,
+#     # The join is performed using direct column comparisons
+#     by = join_by(
+#       pid,
+#       window_start <= fdrt,
+#       window_end >= fdrt
+#     )
+#   ) %>%
+#   # This step reshapes the data into the final wide format needed for modeling.
+#   # It calculates the average over the 2-day window.
+#   pivot_wider(
+#     id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+#     names_from = food_category,
+#     values_from = total_sugars,
+#     values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+#     values_fill = 0, # If a category wasn't eaten, its value is 0
+#     names_prefix = "avg_sugar_intake_" # Adds a clear prefix to the new columns
+#   ) %>%
+#     # This divides all the new intake columns by 100.
+#   # The across() function efficiently applies the same operation to many columns.
+#   mutate(across(starts_with("avg_sugar_intake_"), ~ .x / 100)) %>%
+#   
+#   # Joins back the original stool sample info
+#   right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
+#   mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+#   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+#   mutate(pid = factor(pid)) 
+# 
+# 
+# # iterative modeling 
+# # --- Step 2: Define the food categories for the iterative analysis ---
+# 
+# # Define the "sweets" subcategories that will be swapped in and out of the model
+# sweets_subcategories_to_test <- c(
+#   "avg_intake_fg_Solid_Sweets",
+#   "avg_intake_fg_Liquid_Sweets",
+#   "avg_intake_fg_ONS",
+#   "avg_intake_fg_Coffee_Tea",
+#   "avg_intake_fg_Functional_Beverages"
+# )
+# 
+# # Define the 8 main food groups that will be included as covariates in every model
+# main_food_groups <- c(
+#   "avg_intake_fg_milk", "avg_intake_fg_meat", "avg_intake_fg_egg", "avg_intake_fg_legume", "avg_intake_fg_grain",
+#   "avg_intake_fg_fruit", "avg_intake_fg_veggie", "avg_intake_fg_oils"
+# )
+# 
+# 
+# # --- Step 3: Create a function that runs one iteration of the Bayesian model ---
+# # This function takes one of the "sweets" subcategory names as input,
+# # builds the full model formula, sets all priors, runs the model,
+# # and returns the key results.
+# run_iterative_model <- function(sweet_variable, data) {
+# 
+#   # Combine the main food groups and the current sweet variable
+#   all_food_vars <- c(main_food_groups, sweet_variable)
+# 
+#   # Create the interaction terms for all food variables in this iteration
+#   interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+# 
+#   # Build the full formula string dynamically
+#   formula_string <- paste(
+#     "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
+#     paste(interaction_terms, collapse = " + "),
+#     "+ (1 | pid) + (1 | timebin)"
+#   )
+# 
+#   # Convert the string to a formula object
+#   formula <- brms::bf(as.formula(formula_string))
+# 
+#   # Build the priors by adding them together.
+#   # This single prior() call applies to all coefficients listed in `all_food_coefs`.
+#   priors <-
+#     prior(normal(0, 1), class = 'b') + # General prior for all food effects
+#     # Specific priors that override the general one for non-food covariates
+#     prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+#     prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+#     prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+#     prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+#     prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+#     prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+# 
+#   # Fit the model (using fewer iterations for this example to run quickly)
+#   model_fit <- brm(
+#     formula = formula,
+#     data = data,
+#     prior = priors,
+#     warmup = 1000, iter = 3000,
+#     chains = 2, cores = 10, # Adjust cores as needed
+#     seed = 123,
+#     silent = 2
+#   )
+# 
+#   # Tidy the output and return only the interaction term for the sweet subcategory
+#   tidy(model_fit, conf.int = TRUE) %>%
+#     filter(term == paste0("empiricalTRUE:", sweet_variable))
+# }
+# 
+# 
+# # --- Step 4: Run the iterative analysis using purrr::map ---
+# # This will apply the function to each "sweets" subcategory.
+# # This step will take a significant amount of time to run.
+# all_results <- map(
+#   sweets_subcategories_to_test,
+#   ~run_iterative_model(sweet_variable = .x, data = final_model_data)
+# )
 ```
 
 ```{r}
 # Combine the list of results into a single, clean data frame
-comparison_df <- bind_rows(all_results) %>%
-  # Clean up the term name to be used as a label
-  mutate(food_category = str_remove(term, "empiricalTRUE:"))
-
-# Create a forest plot to visualize and compare the effects
-ggplot(comparison_df, aes(x = estimate, y = fct_reorder(food_category, estimate))) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-  geom_point(size = 4, color = "dodgerblue") +
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1, color = "dodgerblue") +
-  labs(
-    title = "Interaction Effect of Sweet Subcategories with Antibiotics on Diversity",
-    subtitle = "Each estimate is from a separate model controlling for other main food groups",
-    x = "Interaction Coefficient (Effect per 100g intake during antibiotic exposure)",
-    y = "Sweet Subcategory"
-  ) +
-  theme_bw(base_size = 14)
+# comparison_df <- bind_rows(all_results) %>%
+#   # Clean up the term name to be used as a label
+#   mutate(food_category = str_remove(term, "empiricalTRUE:"))
+# 
+# # Create a forest plot to visualize and compare the effects
+# ggplot(comparison_df, aes(x = estimate, y = fct_reorder(food_category, estimate))) +
+#   geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+#   geom_point(size = 4, color = "dodgerblue") +
+#   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1, color = "dodgerblue") +
+#   labs(
+#     title = "Interaction Effect of Sweet Subcategories with Antibiotics on Diversity",
+#     subtitle = "Each estimate is from a separate model controlling for other main food groups",
+#     x = "Interaction Coefficient (Effect per 100g intake during antibiotic exposure)",
+#     y = "Sweet Subcategory"
+#   ) +
+#   theme_bw(base_size = 14)
 ```
 
-# coffee and tea sugar proportion 
+
 
 ```{r}
+# coffee and tea sugar proportion 
 merged_sugar <- final_model_data %>% 
   full_join(final_model_sugar %>% select(pid : avg_sugar_intake_fg_Functional_Beverages))
 
-```
-
-```{r}
 plot_data <- merged_sugar %>%
   # Select only the columns we need for this plot
   select(pid,sdrt,  starts_with("avg_intake_"), starts_with("avg_sugar_intake_")) %>%
@@ -443,10 +446,7 @@ coffee_tea_plot_data <- dtb_ %>%
   mutate(
     component = if_else(component == "total_sugar", "Sugar", "Non-Sugar Mass")
   )
-```
 
-
-```{r}
 # --- Step 3: Create the Stacked Bar Chart ---
 
 ggplot(coffee_tea_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fun = sum), fill = component)) +
@@ -471,6 +471,11 @@ ggplot(coffee_tea_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fu
 # the first 2 digit sub-group  
 
 ```{r}
+
+stool_samples_df <- read_csv('../data/153_combined_META.csv') %>%
+  select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
+
+
 # This pipe creates a tidy summary of daily intake per category.
 daily_intake_summary <- dtb %>%
   # Ensures Food_code is a character for string matching
@@ -795,10 +800,10 @@ ggsave(
 )
 ```
 
+ 
+# tallying exposure to the food codes at different levels 
 
-## tallying exposure to the food codes at different levels 
-
-### exposure , first 2 digits
+## first 2 digits
 
 ```{r}
 exposure_number2 <- final_model_data %>% 
@@ -831,7 +836,7 @@ exposure_number2 <- final_model_data %>%
 print(exposure_number2)
 ```
 
-### exposure , first 3 digits  
+## first 3 digits  
 
 ```{r}
 # This pipe creates a tidy summary of daily intake per category.
@@ -929,13 +934,8 @@ print(exposure_number3)
 ```
 
 
-```{r}
-# annotate N samples from N patients exposed for each of the four groups
-# when you tally up the N exposed samples from N pateints for each of the two-digit codes, would you also please tally up the same exposure numbers for 3-digit and 4-digit codes within the 9xxxxxxx category? I want to get a sense of how statistical power will diminish as we get further and further refined, and if there is a steep drop off, we might be able to use that to justify only analyzing to the second digit and not, say, the 3rd or 4th digit
 
-```
-
-### exposure , first 4 digits  
+## first 4 digits  
 
 ```{r}
 # This pipe creates a tidy summary of daily intake per category.
@@ -1028,7 +1028,7 @@ print(exposure_number4)
 
 ```
 
-### visualize   
+## visualize   
 
 ```{r}
 # Combine all three dataframes into a single one
@@ -1044,11 +1044,7 @@ plot_data <- combined_data %>%
   mutate(
     description = str_replace_all(food_category, "_", " "),
     plot_label = paste(food_code, description, sep = ": ")
-  ) %>%
-  # Use reorder_within to create a factor that can be sorted independently within each facet
-  mutate(
-    category_sorted = reorder_within(plot_label, num_stool_exposed_to_any_intake, level)
-  )
+  ) 
 ```
 
 
@@ -1063,9 +1059,6 @@ ggplot(plot_data, aes(x = num_stool_exposed_to_any_intake, y = plot_label)) +
   ) +
   # geom_point creates the "candy" of the lollipop
   geom_point(aes(color = level), size = 4) +
-  
-  # This is the key to making the reordering work across facets
-  #scale_y_reordered() +
   
   # Use facet_wrap to create a separate plot for each level of granularity
   # ncol = 1 arranges them vertically. scales = "free_y" allows each facet to have its own y-axis.
@@ -1092,39 +1085,37 @@ ggplot(plot_data, aes(x = num_stool_exposed_to_any_intake, y = plot_label)) +
 
 
 ```{r}
-library(treemapify) # For creating treemaps with ggplot
-
-
-
-# --- Step 3: Create the Treemap Visualization ---
-
-ggplot(combined_data, aes(area = num_stool_exposed_to_any_intake, fill = food_code, label = plot_label)) +
-  # geom_treemap creates the rectangles, where the area is proportional to the sample size
-  geom_treemap() +
-  # geom_treemap_text adds the labels inside the rectangles
-  geom_treemap_text(
-    color = "white",
-    place = "centre", # Center the text
-    grow = TRUE,      # Allow text to grow to fill the box
-    min.size = 8      # Don't show text in very small boxes
-  ) +
-  # Use facet_wrap to create a separate plot for each level of granularity
-  facet_wrap(~ factor(level, levels = c("2-Digit Subcategories", "3-Digit Subcategories", "4-Digit Subcategories"))) +
-  # Add informative labels and a title
-  labs(
-    title = "Decrease in Statistical Power with Increasing Food Code Granularity",
-    subtitle = "Area of each box is proportional to the number of exposed stool samples (N)"
-  ) +
-  # Use a clean theme and remove the legend as the labels are on the plot
-  theme_minimal() +
-  theme(
-    legend.position = "none",
-    plot.title = element_text(size = 16, face = "bold"),
-    plot.subtitle = element_text(size = 12),
-    strip.text = element_text(size = 14, face = "bold") # Style the facet titles
-  )
-
-ggsave('../data/R27_decreasing_power.pdf', width = 28)
+# library(treemapify) # For creating treemaps with ggplot
+# 
+# # --- Step 3: Create the Treemap Visualization ---
+# 
+# ggplot(combined_data, aes(area = num_stool_exposed_to_any_intake, fill = food_code, label = plot_label)) +
+#   # geom_treemap creates the rectangles, where the area is proportional to the sample size
+#   geom_treemap() +
+#   # geom_treemap_text adds the labels inside the rectangles
+#   geom_treemap_text(
+#     color = "white",
+#     place = "centre", # Center the text
+#     grow = TRUE,      # Allow text to grow to fill the box
+#     min.size = 8      # Don't show text in very small boxes
+#   ) +
+#   # Use facet_wrap to create a separate plot for each level of granularity
+#   facet_wrap(~ factor(level, levels = c("2-Digit Subcategories", "3-Digit Subcategories", "4-Digit Subcategories"))) +
+#   # Add informative labels and a title
+#   labs(
+#     title = "Decrease in Statistical Power with Increasing Food Code Granularity",
+#     subtitle = "Area of each box is proportional to the number of exposed stool samples (N)"
+#   ) +
+#   # Use a clean theme and remove the legend as the labels are on the plot
+#   theme_minimal() +
+#   theme(
+#     legend.position = "none",
+#     plot.title = element_text(size = 16, face = "bold"),
+#     plot.subtitle = element_text(size = 12),
+#     strip.text = element_text(size = 14, face = "bold") # Style the facet titles
+#   )
+# 
+# ggsave('../data/R27_decreasing_power.pdf', width = 28)
 
 ```
 
@@ -1159,17 +1150,7 @@ print(combined_plot)
 # make a tree showing the first three digit level of the sweets group that showed up in this dataset 
 
 ```{r}
-# manually create the 953 that has the Sports_drinks/Fluid_replacements
-level3 <-  read_tsv('../data/NodeLabelsMCT_modified953.txt', col_types = 'cc')  %>%  
-  filter(str_detect(Level.code, '^9')) %>% 
-  filter(str_length(Level.code) == 3) %>% 
-  rename(f3_code = Level.code, f3_desc = Main.food.description)
 
-
-level2 <-  read_tsv('../data/NodeLabelsMCT_modified953.txt', col_types = 'cc')  %>%  
-  filter(str_detect(Level.code, '^9')) %>% 
-  filter(str_length(Level.code) == 2) %>% 
-  rename(f2_code = Level.code, f2_desc = Main.food.description)
 
 
 # what are the food codes that exist in this data set 
