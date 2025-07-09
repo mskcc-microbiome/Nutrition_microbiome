@@ -24,7 +24,7 @@ theme_set(theme_tidybayes() + panel_border())
 ncores <- parallel::detectCores()
 ```
 
-# Major Critiques and Challenges
+- Major Critiques and Challenges
 
 Lack of Interpretability (The "Black Box" Problem): This is the biggest critique. The model's output can be incredibly difficult to understand. What does the coefficient for "apples" mean after being adjusted for 499 other foods, many of which are highly correlated? The complexity often obscures, rather than clarifies, the biological story.
 
@@ -46,8 +46,11 @@ sweets3 <- read_tsv('../data/NodeLabelsMCT.txt', col_types = 'cc')  %>%
 sweets2 <- read_tsv('../data/NodeLabelsMCT.txt', col_types = 'cc')  %>% 
   filter(str_detect(Level.code, '^9')) %>% 
   filter(str_length(Level.code) == 2)      
-```
 
+sweets4 <- read_tsv('../data/NodeLabelsMCT.txt', col_types = 'cc')  %>% 
+  filter(str_detect(Level.code, '^9')) %>% 
+  filter(str_length(Level.code) == 4)      
+```
 
 ```{r}
 dtb  <- read_csv('../data/152_combined_DTB.csv')
@@ -793,11 +796,281 @@ ggsave(
 ```
 
 
+## tallying exposure to the food codes at different levels 
+
+### exposure , first 2 digits
+
 ```{r}
-# annotate N samples from N patients exposed for each of the four groups
+exposure_number2 <- final_model_data %>% 
+  # Use summarise() with across() to apply a function to multiple columns
+  summarise(
+    # The across() function targets all columns that start with "avg_intake_"
+    across(
+      starts_with("avg_intake_"),
+      # For each column, count the number of rows where the value is greater than 0
+      # The sum(condition) trick works because TRUE evaluates to 1 and FALSE to 0
+      ~ sum(.x > 0, na.rm = TRUE),
+      # Create new column names like "n_Nonalcoholic_beverages"
+      .names = "n_{.col}"
+    )
+  ) %>%
+  # Optional: Pivot the data into a long format for easier viewing
+  pivot_longer(
+      cols = everything(),
+      names_to = "food_category",
+      values_to = "num_stool_exposed_to_any_intake"
+  ) %>%
+  # Clean up the names for the final table
+  mutate(food_category = str_remove(food_category, "n_avg_intake_")) %>% 
+  inner_join(level2,  by = c(  "food_category" = "f2_desc")) %>% 
+  rename(food_code = f2_code) %>% 
+  mutate(level = "2-Digit Subcategories")
+
+
+# Print the resulting summary table
+print(exposure_number2)
+```
+
+### exposure , first 3 digits  
+
+```{r}
+# This pipe creates a tidy summary of daily intake per category.
+daily_intake_summary <- dtb %>%
+  # Ensures Food_code is a character for string matching
+  mutate(Food_code = as.character(Food_code)) %>%
+  # Create a temporary key column with the first 3 digits of the Food_code
+  mutate(f3_code_prefix = str_sub(Food_code, 1, 3)) %>%
+  
+  # Join our lookup table to the main data to get the f3_desc for each food item
+  left_join(level3, by = c("f3_code_prefix" = "f3_code")) %>%
+  
+  # Now, create the final food category based on the other main groups,
+  # using the f3_desc as the category name for the sweets and beverages.
+  mutate(
+    food_category = case_when(
+      # If f3_desc is not NA, use it as the category.
+      # This handles all your 9xx codes automatically.
+      !is.na(f3_desc) ~ f3_desc,
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # Removes any rows that were not assigned to a category
+  filter(!is.na(food_category)) %>%
+  # Groups the data to sum up weights for each category within a patient-day
+  group_by(pid, fdrt, food_category) %>%
+  # Calculates the total dehydrated weight for each group
+  summarise(
+    total_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# --- Part 2: Calculate 2-Day Prior Average Intake for Each Stool Sample ---
+
+# Create helper columns for the time window.
+stool_samples_with_window <- stool_samples_df %>%
+  mutate(
+    window_start = sdrt - 2,
+    window_end = sdrt - 1
+  )
+
+# Perform the join and calculate the averages.
+final_model_data_first3 <- stool_samples_with_window %>%
+  left_join(
+    daily_intake_summary,
+    by = join_by(
+      pid,
+      window_start <= fdrt,
+      window_end >= fdrt
+    )
+  ) %>%
+  # Reshape the data into the final wide format needed for modeling.
+  pivot_wider(
+    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+    names_from = food_category,
+    values_from = total_dehydrated_weight,
+    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+    values_fill = 0, # If a category wasn't eaten, its value is 0
+    names_prefix = "avg_intake_" # Adds a clear prefix to the new columns
+  ) %>%
+  # This divides all the new intake columns by 100 for easier model interpretation.
+  mutate(across(starts_with("avg_intake_"), ~ .x / 100)) 
+
+
+# tally
+exposure_number3 <- final_model_data_first3 %>% 
+  # Use summarise() with across() to apply a function to multiple columns
+  summarise(
+    # The across() function targets all columns that start with "avg_intake_"
+    across(
+      starts_with("avg_intake_"),
+      # For each column, count the number of rows where the value is greater than 0
+      # The sum(condition) trick works because TRUE evaluates to 1 and FALSE to 0
+      ~ sum(.x > 0, na.rm = TRUE),
+      # Create new column names like "n_Nonalcoholic_beverages"
+      .names = "n_{.col}"
+    )
+  ) %>%
+  pivot_longer(
+      cols = everything(),
+      names_to = "food_category",
+      values_to = "num_stool_exposed_to_any_intake"
+  ) %>%
+  # Clean up the names for the final table
+  mutate(food_category = str_remove(food_category, "n_avg_intake_")) %>% 
+  filter(food_category != 'NA') %>% 
+  inner_join(level3,  by = c(  "food_category" = "f3_desc")) %>% 
+  rename(food_code = f3_code) %>% 
+  mutate(level = "3-Digit Subcategories")
+
+
+# Print the resulting summary table
+print(exposure_number3)
+
 ```
 
 
+```{r}
+# annotate N samples from N patients exposed for each of the four groups
+# when you tally up the N exposed samples from N pateints for each of the two-digit codes, would you also please tally up the same exposure numbers for 3-digit and 4-digit codes within the 9xxxxxxx category? I want to get a sense of how statistical power will diminish as we get further and further refined, and if there is a steep drop off, we might be able to use that to justify only analyzing to the second digit and not, say, the 3rd or 4th digit
+
+```
+
+### exposure , first 4 digits  
+
+```{r}
+# This pipe creates a tidy summary of daily intake per category.
+daily_intake_summary <- dtb %>%
+  # Ensures Food_code is a character for string matching
+  mutate(Food_code = as.character(Food_code)) %>%
+  mutate(f4_code_prefix = str_sub(Food_code, 1, 4)) %>%
+  
+  left_join(sweets4, by = c("f4_code_prefix" = "Level.code")) %>%
+  
+  # Now, create the final food category based on the other main groups,
+  mutate(
+    food_category = case_when(
+
+      !is.na(Main.food.description) ~ Main.food.description,
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # Removes any rows that were not assigned to a category
+  filter(!is.na(food_category)) %>%
+  # Groups the data to sum up weights for each category within a patient-day
+  group_by(pid, fdrt, food_category) %>%
+  # Calculates the total dehydrated weight for each group
+  summarise(
+    total_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# --- Part 2: Calculate 2-Day Prior Average Intake for Each Stool Sample ---
+
+# Create helper columns for the time window.
+stool_samples_with_window <- stool_samples_df %>%
+  mutate(
+    window_start = sdrt - 2,
+    window_end = sdrt - 1
+  )
+
+# Perform the join and calculate the averages.
+final_model_data_first4 <- stool_samples_with_window %>%
+  left_join(
+    daily_intake_summary,
+    by = join_by(
+      pid,
+      window_start <= fdrt,
+      window_end >= fdrt
+    )
+  ) %>%
+  # Reshape the data into the final wide format needed for modeling.
+  pivot_wider(
+    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+    names_from = food_category,
+    values_from = total_dehydrated_weight,
+    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+    values_fill = 0, # If a category wasn't eaten, its value is 0
+    names_prefix = "avg_intake_" # Adds a clear prefix to the new columns
+  ) %>%
+  # This divides all the new intake columns by 100 for easier model interpretation.
+  mutate(across(starts_with("avg_intake_"), ~ .x / 100)) 
+
+
+# tally
+exposure_number4 <- final_model_data_first4 %>% 
+  # Use summarise() with across() to apply a function to multiple columns
+  summarise(
+    # The across() function targets all columns that start with "avg_intake_"
+    across(
+      starts_with("avg_intake_"),
+      # For each column, count the number of rows where the value is greater than 0
+      # The sum(condition) trick works because TRUE evaluates to 1 and FALSE to 0
+      ~ sum(.x > 0, na.rm = TRUE),
+      # Create new column names like "n_Nonalcoholic_beverages"
+      .names = "n_{.col}"
+    )
+  ) %>%
+  pivot_longer(
+      cols = everything(),
+      names_to = "food_category",
+      values_to = "num_stool_exposed_to_any_intake"
+  ) %>%
+  # Clean up the names for the final table
+  mutate(food_category = str_remove(food_category, "n_avg_intake_")) %>% 
+  filter(food_category != 'NA') %>% 
+  inner_join(sweets4,  by = c(  "food_category" = "Main.food.description")) %>% 
+  rename(food_code = Level.code) %>% 
+  mutate(level = "4-Digit Subcategories")
+
+
+# Print the resulting summary table
+print(exposure_number4)
+
+```
+
+### visualize   
+
+```{r}
+library(treemapify) # For creating treemaps with ggplot
+
+# Combine all three dataframes into a single one
+combined_data <- bind_rows(exposure_number2, exposure_number3, exposure_number4) %>%
+  # Create a label for the plot that includes the code, description, and sample size (N)
+  mutate(
+    plot_label = paste0(food_code, "\n", food_category, "\n(N = ", num_stool_exposed_to_any_intake, ")")
+  )
+
+# --- Step 3: Create the Treemap Visualization ---
+
+ggplot(combined_data, aes(area = num_stool_exposed_to_any_intake, fill = food_code, label = plot_label)) +
+  # geom_treemap creates the rectangles, where the area is proportional to the sample size
+  geom_treemap() +
+  # geom_treemap_text adds the labels inside the rectangles
+  geom_treemap_text(
+    color = "white",
+    place = "centre", # Center the text
+    grow = TRUE,      # Allow text to grow to fill the box
+    min.size = 8      # Don't show text in very small boxes
+  ) +
+  # Use facet_wrap to create a separate plot for each level of granularity
+  facet_wrap(~ factor(level, levels = c("2-Digit Subcategories", "3-Digit Subcategories", "4-Digit Subcategories"))) +
+  # Add informative labels and a title
+  labs(
+    title = "Decrease in Statistical Power with Increasing Food Code Granularity",
+    subtitle = "Area of each box is proportional to the number of exposed stool samples (N)"
+  ) +
+  # Use a clean theme and remove the legend as the labels are on the plot
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    strip.text = element_text(size = 14, face = "bold") # Style the facet titles
+  )
+
+ggsave('../data/R27_decreasing_power.pdf', width = 28)
+
+```
 
 
 ```{r}
