@@ -471,11 +471,10 @@ ggplot(coffee_tea_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fu
 # the first 2 digit sub-group  
 
 ```{r}
-
 stool_samples_df <- read_csv('../data/153_combined_META.csv') %>%
   select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
 
-
+ 
 # This pipe creates a tidy summary of daily intake per category.
 daily_intake_summary <- dtb %>%
   # Ensures Food_code is a character for string matching
@@ -806,6 +805,11 @@ ggsave(
 ## first 2 digits
 
 ```{r}
+level2 <- final_model_data %>% select(starts_with("avg_intake_")) %>% select(!contains('fg')) %>% 
+  gather() %>% distinct(key) %>% 
+  mutate(food_category = str_remove(key, "avg_intake_")) %>% 
+  mutate(food_code = c('92','91','94','95'))
+
 exposure_number2 <- final_model_data %>% 
   # Use summarise() with across() to apply a function to multiple columns
   summarise(
@@ -827,8 +831,7 @@ exposure_number2 <- final_model_data %>%
   ) %>%
   # Clean up the names for the final table
   mutate(food_category = str_remove(food_category, "n_avg_intake_")) %>% 
-  inner_join(level2,  by = c(  "food_category" = "f2_desc")) %>% 
-  rename(food_code = f2_code) %>% 
+  inner_join(level2,  by = "food_category") %>% 
   mutate(level = "2-Digit Subcategories")
 
 
@@ -1028,7 +1031,7 @@ print(exposure_number4)
 
 ```
 
-## visualize   
+## visualize    
 
 ```{r}
 # Combine all three dataframes into a single one
@@ -1037,50 +1040,76 @@ combined_data <- bind_rows(exposure_number2, exposure_number3, exposure_number4)
   mutate(
     plot_label = paste0(food_code, "\n", food_category, "\n(N = ", num_stool_exposed_to_any_intake, ")")
   )
-
-
-plot_data <- combined_data %>%
-  # Clean up the food category descriptions for better labels
-  mutate(
-    description = str_replace_all(food_category, "_", " "),
-    plot_label = paste(food_code, description, sep = ": ")
-  ) 
 ```
 
 
 ```{r}
-# --- Step 3: Create the Lollipop Plot Visualization ---
+library(tidytext)
+# --- Step 2: Process the Data for Plotting ---
 
-ggplot(plot_data, aes(x = num_stool_exposed_to_any_intake, y = plot_label)) +
+# This pipe adds a 'parent' category to each subcategory for faceting.
+plot_data <- combined_data %>%
+  # Clean up the food category descriptions
+  mutate(
+    description = str_replace_all(food_category, "_", " "),
+    plot_label = paste(food_code, description, sep = ": ")
+  ) %>%
+  # Create a parent code column by taking the first two digits
+  mutate(
+    parent_code = str_sub(food_code, 1, 2)
+  ) %>%
+  # Create a lookup table for the parent descriptions
+  left_join(
+    distinct(filter(., level == "2-Digit Subcategories"), parent_code = food_code, parent_desc = description),
+    by = "parent_code"
+  ) %>%
+ # Use reorder_within to sort categories independently within each facet by sample size (descending)
+  mutate(
+    category_sorted = reorder_within(plot_label, desc(plot_label), list(level, parent_desc))
+  )
+
+
+# --- Step 3: Create the Faceted Lollipop Plot Visualization ---
+
+ggplot(plot_data, aes(x = num_stool_exposed_to_any_intake, y = category_sorted)) +
   # geom_segment creates the "stick" of the lollipop
   geom_segment(
-    aes(x = 0, xend = num_stool_exposed_to_any_intake, y = plot_label, yend = plot_label),
+    aes(x = 0, xend = num_stool_exposed_to_any_intake, y = category_sorted, yend = category_sorted),
     color = "gray"
   ) +
   # geom_point creates the "candy" of the lollipop
-  geom_point(aes(color = level), size = 4) +
+  geom_point(aes(color = parent_code), size = 4) +
   
-  # Use facet_wrap to create a separate plot for each level of granularity
-  # ncol = 1 arranges them vertically. scales = "free_y" allows each facet to have its own y-axis.
-  facet_wrap(~ factor(level, levels = c("2-Digit Subcategories", "3-Digit Subcategories", "4-Digit Subcategories")), ncol = 1, scales = "free_y") +
+  # This is the key to making the reordering work correctly across facets
+  scale_y_reordered() +
+  
+  # Use facet_grid to create a grid of plots.
+  # Rows are faceted by granularity level (3-digit, 4-digit).
+  # Columns are faceted by the parent 2-digit category.
+  facet_grid(
+    factor(level, levels = c('2-Digit Subcategories', "3-Digit Subcategories", "4-Digit Subcategories")) ~ parent_desc,
+    scales = "free_y", # Allows each facet to have its own y-axis scale
+    space = "free_y"   # Allows each row's height to be proportional to its number of items
+  ) +
   
   # Add informative labels and a title
   labs(
-    title = "Decrease in Statistical Power with Increasing Food Code Granularity",
-    subtitle = "Number of exposed stool samples (N) for each food category",
+    subtitle = "Number of exposed stool samples (N), grouped by parent category",
     x = "Number of Exposed Stool Samples",
-    y = "Food Category"
+    y = "Food Subcategory"
   ) +
   
-  # Use a clean theme and adjust styling
+
   theme_bw() +
   theme(
     legend.position = "none",
     plot.title = element_text(size = 16, face = "bold"),
     plot.subtitle = element_text(size = 12),
-    strip.text = element_text(size = 14, face = "bold") # Style the facet titles
+    strip.text = element_text(size = 10, face = "bold"), # Style the facet titles
+    axis.text.y = element_text(size = 8) # Adjust y-axis text size if needed
   )
 
+ggsave('../data/R27_faceted_exposure.jpg', width = 12, height = 9)
 ```
 
 
