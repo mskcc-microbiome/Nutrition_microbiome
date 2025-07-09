@@ -559,8 +559,6 @@ sweets_subcategories_to_test <- c(
   "avg_intake_Formulated_beverages"
 )
 
-
-
 # Define the 8 main food groups that will be included as covariates in every model
 main_food_groups <- c(
   "avg_intake_fg_milk", "avg_intake_fg_meat", "avg_intake_fg_egg", "avg_intake_fg_legume", "avg_intake_fg_grain",
@@ -614,8 +612,7 @@ run_iterative_model <- function(sweet_variable, data) {
   )
 
   # Tidy the output and return only the interaction term for the sweet subcategory
-  tidy(model_fit, conf.int = TRUE) %>%
-    filter(term == paste0("empiricalTRUE:", sweet_variable))
+  tidy(model_fit, conf.int = TRUE)  # it is the 95% CI by default
 }
 
 
@@ -626,6 +623,8 @@ all_results <- map(
   sweets_subcategories_to_test,
   ~run_iterative_model(sweet_variable = .x, data = final_model_data)
 )
+
+names(all_results) <- sweets_subcategories_to_test
 ```
 
 ```{r}
@@ -701,8 +700,6 @@ forest_plot <- ggplot(summary_stats, aes(x = estimate, y = fct_reorder(label, es
   geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
   geom_point(size = 4, color = "#118AB2") +
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1, color = "#118AB2") +
-  # Add the number of events (N) as a text label to each bar
-  geom_text(aes(label = paste0("N = ", n_events)), x = 1, hjust = 1, size = 5, color = "gray40") +
   labs(
     title = "A) Model Effect Size & Precision",
     subtitle = "Interaction effect on diversity during antibiotic use",
@@ -716,8 +713,87 @@ forest_plot
 
 ## Full bayesian results
 
+
 ```{r}
-# generate the baysean forest plot for the 4 two-digit 9x codes and show me not just the interaction term for each of the 4 but the full model for each of the 4?
+# --- Step 2: Create a Function to Generate the Plots ---
+# This function encapsulates all the cleaning and plotting logic.
+# It takes a dataframe of model results and a title string as input.
+create_effects_plot <- function(results_df, plot_title) {
+
+  # This pipe filters for the fixed effects and creates clean, human-readable labels.
+  cleaned_effects <- results_df %>%
+    # Keep only the fixed effects
+    filter(effect == "fixed") %>%
+    # Create a new column to distinguish main effects from interactions
+    mutate(
+      effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+      # Create clean labels for plotting
+      clean_term = term %>%
+        str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+        str_replace("empiricalTRUE:", "abx * ") %>%
+        str_replace_all("_", " ")
+    )
+
+  # Separate into two dataframes for two separate plots
+  main_effects_df <- cleaned_effects %>% filter(effect_type == "Main Effect")
+  interaction_df <- cleaned_effects %>% filter(effect_type == "Interaction") %>%
+    # Create a new column to identify significant results
+    # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+    mutate(is_significant = (conf.low * conf.high) > 0)
+
+  # Plot A: Main Clinical Covariates
+  plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_pointrange(aes(xmin = conf.low, xmax = conf.high), color = "gray50", linewidth = 1, size = 0.7) +
+    labs(
+      title = str_replace(plot_title, 'avg_intake_','Sweets subgroup: '), # Use the name of the list element as the title
+      subtitle = "Main Clinical Effects",
+      x = "Coefficient Estimate",
+      y = "Covariate"
+    ) +
+    theme_bw(base_size = 12)
+
+  # Plot B: Food Group Interaction Effects
+  plot_interactions <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_pointrange(aes(xmin = conf.low, xmax = conf.high, color = is_significant), linewidth = 1, size = 0.7) +
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
+    labs(
+      title = "Food Group Interaction Effects",
+      x = "Coefficient Estimate",
+      y = "Food Group x Antibiotic Exposure"
+    ) +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+
+  # Combine the plots and add the overall title for this model's results
+  plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
+}
+
+
+# --- Step 3: Use purrr::imap to Create a List of Plots ---
+# imap iterates through a named list, providing both the data (.x) and the name (.y)
+# to the function. This is perfect for creating titled plots.
+list_of_ggplots <- imap(all_results, ~create_effects_plot(.x, .y))
+
+
+# Use patchwork::wrap_plots() to combine all the plots in the list into one image.
+# You can specify the number of columns for the layout.
+final_composite_plot <- wrap_plots(list_of_ggplots, ncol = 2)
+
+# Use ggsave() to save the combined plot object to a high-resolution file.
+ggsave(
+  filename = "../data/R27_all_model_effects_comparison.png",
+  plot = final_composite_plot,
+  width = 12, # Increase width to accommodate multiple plots side-by-side
+  height = 13, # Adjust height as needed
+  units = "in",
+  dpi = 300 # Good resolution for publications
+)
+```
+
+
+```{r}
 # annotate N samples from N patients exposed for each of the four groups
 ```
 
