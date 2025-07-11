@@ -161,6 +161,8 @@ stool_filtered_df <- df_pair_stool %>%
 joined <- stool_filtered_df %>% 
   rename(stool_dist = distance) %>% 
   full_join(diet_filtered_df %>% rename(diet_dist = distance))
+
+joined %>% write_csv('../data/R06_joined_diet_stool_distance_to_earliest.csv')
  
 ```
 

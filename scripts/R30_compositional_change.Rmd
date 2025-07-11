@@ -24,8 +24,15 @@ joined <- read_csv('../data/R06_joined_diet_stool_distance_to_earliest.csv')
 meta <- read_csv('../data/153_combined_META.csv')
 
 # find the meta data of the following stool samples (not the earliest one)
+
+n <- nrow(joined)
+
 data <- joined %>% 
-  inner_join(meta %>% rename(sampleid2 = sampleid), by = join_by(sampleid2, pid))
+  inner_join(meta %>% rename(sampleid2 = sampleid), by = join_by(sampleid2, pid)) 
+
+# how many samples from how many patients
+n_samples <- data %>% distinct(sampleid2) %>% nrow
+n_patients <- data %>% distinct(pid) %>% nrow
 ```
 
 ```{r}
@@ -47,7 +54,7 @@ formula <- brms::bf(as.formula(formula_string))
 # Build the priors by adding them together.
 # This single prior() call applies to all coefficients listed in `all_food_coefs`.
 priors <-
-  prior(normal(0, 1), class = 'b') + # General prior for all food effects
+  prior(normal(0, 0.5), class = 'b') + # General prior for all food effects
   # Specific priors that override the general one for non-food covariates
   prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
   prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
@@ -57,8 +64,10 @@ priors <-
 model_fit <- brm(
   formula = formula,
   data = data,
-  prior = priors,
-  warmup = 1000, iter = 3000,
+  #prior = priors,
+  #family = Beta(link = "logit"), # Use the Beta family
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  iter = 4000, warmup = 1000,
   chains = 2, cores = 10, # Adjust cores as needed
   seed = 123,
   silent = 2
@@ -67,53 +76,102 @@ model_fit <- brm(
 results_df <- tidy(model_fit, conf.int = TRUE)
 ```
 ```{r}
-  # This pipe filters for the fixed effects and creates clean, human-readable labels.
-  cleaned_effects <- results_df %>%
-    # Keep only the fixed effects
-    filter(effect == "fixed") %>%
-    # Create a new column to distinguish main effects from interactions
-    mutate(
-      effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
-      # Create clean labels for plotting
-      clean_term = term %>%
-        str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
-        str_replace("empiricalTRUE:", "abx * ") %>%
-        str_replace_all("_", " ")
+# This pipe filters for the fixed effects and creates clean, human-readable labels.
+cleaned_effects <- results_df %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")
+  )
+
+# Separate into two dataframes for two separate plots
+main_effects_df <- cleaned_effects %>% filter(effect_type == "Main Effect")
+interaction_df <- cleaned_effects %>% filter(effect_type == "Interaction") %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) > 0)
+
+# Plot A: Main Clinical Covariates
+plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high), color = "gray50", linewidth = 1, size = 0.7) +
+  labs(
+    title = '', # Use the name of the list element as the title
+    subtitle = "Main Clinical Effects",
+    x = "Coefficient Estimate",
+    y = "Covariate"
+  ) +
+  theme_bw(base_size = 12)
+```
+
+```{r}
+# This pipe creates clean labels and adds a special 'highlight' column
+interaction_df_processed <- interaction_df %>%
+  # Create a column to flag the specific term you want to highlight
+  mutate(
+    highlight_status = case_when(
+      clean_term == "abx * fg sweets" ~ "Of Interest",
+      is_significant == TRUE    ~ "Significant",
+      TRUE                      ~ "Not Significant"
     )
+  )
 
-  # Separate into two dataframes for two separate plots
-  main_effects_df <- cleaned_effects %>% filter(effect_type == "Main Effect")
-  interaction_df <- cleaned_effects %>% filter(effect_type == "Interaction") %>%
-    # Create a new column to identify significant results
-    # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
-    mutate(is_significant = (conf.low * conf.high) > 0)
+# --- Step 3: Create the Visualization ---
 
-  # Plot A: Main Clinical Covariates
-  plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-    geom_pointrange(aes(xmin = conf.low, xmax = conf.high), color = "gray50", linewidth = 1, size = 0.7) +
-    labs(
-      title = '', # Use the name of the list element as the title
-      subtitle = "Main Clinical Effects",
-      x = "Coefficient Estimate",
-      y = "Covariate"
-    ) +
-    theme_bw(base_size = 12)
+plot_interactions <- ggplot(interaction_df_processed, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+  # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  
+  # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+  # The color and alpha (transparency) are now mapped to our new 'highlight_status' column
+  geom_pointrange(
+    aes(xmin = conf.low, xmax = conf.high, color = highlight_status, alpha = highlight_status),
+    linewidth = 1, size = 0.7
+  ) +
+  
+  # Manually define the colors and alpha levels for each status
+  scale_color_manual(
+    values = c(
+      "Significant" = "red",
+      "Of Interest" = "blue",
+      "Not Significant" = "gray50"
+    ),
+    name = "Effect Status" # Legend title
+  ) +
+  scale_alpha_manual(
+    values = c(
+      "Significant" = 1.0, # Fully opaque
+      "Of Interest" = 1.0, # Fully opaque
+      "Not Significant" = 0.5  # More transparent
+    ),
+    guide = "none" # Hide the separate alpha legend
+  ) +
+  
+  # Add labels and a clean theme
+  labs(
+    title = "Food Group Interaction Effects on Compositional Disruption",
+    subtitle = "Highlighting key trends and significant effects",
+    x = "Coefficient Estimate (Change in Bray-Curtis Distance)",
+    y = "Food Group x Antibiotic Exposure"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "bottom")
 
-  # Plot B: Food Group Interaction Effects
-  plot_interactions <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-    geom_pointrange(aes(xmin = conf.low, xmax = conf.high, color = is_significant), linewidth = 1, size = 0.7) +
-    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
-    labs(
-      title = "Food Group Interaction Effects",
-      x = "Coefficient Estimate",
-      y = "Food Group x Antibiotic Exposure"
-    ) +
-    theme_bw(base_size = 12) +
-    theme(legend.position = "none")
 
-  # Combine the plots and add the overall title for this model's results
-  plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
+# Combine the plots and add the overall title for this model's results
+plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
+
+
+# quantify the pd of abx * sweets
+posterior_draws <- as_draws_df(model_fit)
+
+# Calculate the probability that the coefficient for 'abx * fg sweets' is positive
+pd <- mean(posterior_draws$`b_empiricalTRUE:fg_sweets` > 0)
 ```
 
