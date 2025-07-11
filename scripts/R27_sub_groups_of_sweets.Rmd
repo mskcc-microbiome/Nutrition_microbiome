@@ -416,39 +416,46 @@ plot_data_all <- merged_sugar %>%
 ```{r}
 # This plot will show the relationship between total intake and sugar intake
 # for each food category in a separate panel.
+plot_data_long <- plot_data_all %>%
+  pivot_longer(
+    cols = c(total, sugar),
+    names_to = "intake_type",
+    values_to = "grams"
+  )
 
 # Calculate a small constant (pseudocount) to add before log transformation
 # This prevents errors from taking the log of zero.
 pseudocount <- 1e-4
 
-ggplot(plot_data_all, aes(x = total + pseudocount, y = sugar + pseudocount)) +
-  # Add the points for each observation. `alpha` adds transparency.
-  geom_point(alpha = 0.5, aes(color = food_category)) +
-  # Add a regression line to show the general trend.
-  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") +
-  # Add a 1-to-1 line. Points above this line are impossible (more sugar than total).
-  # Points on this line are pure sugar. Points below show the proportion.
-  geom_abline(intercept = 0, slope = 1, color = "red", linewidth = 1) +
+ggplot(plot_data_long, aes(x = sdrt, y = grams + pseudocount, color = intake_type, fill = intake_type)) +
+  # Use geom_smooth to show the average trend line and its 95% confidence interval
+  # This is the best way to visualize the overall distribution over time.
+  geom_smooth(method = "loess", alpha = 0.2) +
   
-  # Use a log scale for both axes to better visualize the data,
-  # which is often skewed towards zero.
-  scale_x_log10(labels = scales::label_number(accuracy = 0.1)) +
+  # Use a log scale for the y-axis to better visualize the data
   scale_y_log10(labels = scales::label_number(accuracy = 0.1)) +
-  annotation_logticks() +
+  annotation_logticks(sides = "l") +
+  
+  # Manually define colors for clarity
+  scale_color_manual(values = c("total" = "black", "sugar" = "red")) +
+  scale_fill_manual(values = c("total" = "black", "sugar" = "red")) +
   
   # Create a separate panel for each food category
-  facet_wrap(~ food_category, scales = "free") +
+  facet_wrap(~ food_category) +
   
   # Add informative labels
   labs(
-    title = "Relationship Between Total Intake and Sugar Content",
-    subtitle = "Each point is a patient-day. The red line indicates 100% sugar content.",
-    x = "Total Dehydrated Weight (grams, log scale)",
-    y = "Sugar Weight (grams, log scale)"
+    title = "Distribution of Total vs. Sugar Intake Over Time",
+    subtitle = "Lines show the average trend (LOESS smooth) across all patients",
+    x = "Days Relative to Transplant (sdrt)",
+    y = "Dehydrated Weight (grams, log scale)",
+    color = "Intake Type",
+    fill = "Intake Type"
   ) +
   # Use a clean theme
   theme_bw() +
-  theme(legend.position = "none") # Hide legend as facets are clear
+  theme(legend.position = "bottom")
+
 ```
 
 
