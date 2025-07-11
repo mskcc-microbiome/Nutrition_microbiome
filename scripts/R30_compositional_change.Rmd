@@ -1,0 +1,119 @@
+---
+title: "abx * sugar and compositonal change"
+output: html_document
+date: "2025-07-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(brms)   
+library(broom.mixed)
+library(tidybayes)
+library(patchwork)
+```
+
+Model the magnitude of compositional disruption itself. This is done by using a beta-diversity metric (like Bray-Curtis distance) from each patient's baseline sample as a continuous outcome variable. 
+
+```{r}
+joined <- read_csv('../data/R06_joined_diet_stool_distance_to_earliest.csv')
+
+meta <- read_csv('../data/153_combined_META.csv')
+
+# find the meta data of the following stool samples (not the earliest one)
+data <- joined %>% 
+  inner_join(meta %>% rename(sampleid2 = sampleid), by = join_by(sampleid2, pid))
+```
+
+```{r}
+all_food_vars <- meta %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "stool_dist ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+  prior(normal(0, 1), class = 'b') + # General prior for all food effects
+  # Specific priors that override the general one for non-food covariates
+  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = data,
+  prior = priors,
+  warmup = 1000, iter = 3000,
+  chains = 2, cores = 10, # Adjust cores as needed
+  seed = 123,
+  silent = 2
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE)
+```
+```{r}
+  # This pipe filters for the fixed effects and creates clean, human-readable labels.
+  cleaned_effects <- results_df %>%
+    # Keep only the fixed effects
+    filter(effect == "fixed") %>%
+    # Create a new column to distinguish main effects from interactions
+    mutate(
+      effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+      # Create clean labels for plotting
+      clean_term = term %>%
+        str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+        str_replace("empiricalTRUE:", "abx * ") %>%
+        str_replace_all("_", " ")
+    )
+
+  # Separate into two dataframes for two separate plots
+  main_effects_df <- cleaned_effects %>% filter(effect_type == "Main Effect")
+  interaction_df <- cleaned_effects %>% filter(effect_type == "Interaction") %>%
+    # Create a new column to identify significant results
+    # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+    mutate(is_significant = (conf.low * conf.high) > 0)
+
+  # Plot A: Main Clinical Covariates
+  plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_pointrange(aes(xmin = conf.low, xmax = conf.high), color = "gray50", linewidth = 1, size = 0.7) +
+    labs(
+      title = '', # Use the name of the list element as the title
+      subtitle = "Main Clinical Effects",
+      x = "Coefficient Estimate",
+      y = "Covariate"
+    ) +
+    theme_bw(base_size = 12)
+
+  # Plot B: Food Group Interaction Effects
+  plot_interactions <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_pointrange(aes(xmin = conf.low, xmax = conf.high, color = is_significant), linewidth = 1, size = 0.7) +
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
+    labs(
+      title = "Food Group Interaction Effects",
+      x = "Coefficient Estimate",
+      y = "Food Group x Antibiotic Exposure"
+    ) +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+
+  # Combine the plots and add the overall title for this model's results
+  plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
+```
+
