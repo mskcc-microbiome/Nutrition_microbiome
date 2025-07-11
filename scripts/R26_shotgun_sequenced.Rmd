@@ -96,7 +96,7 @@ already <- meta %>%
 # isabl shotgun res already
 
 ```{r}
-already <- read_rds('../data/phyloseq_for_angel_7.7.25_nutrition_human.rds')
+already <- read_rds('../data/phyloseq_for_angel_7.9.25_nutrition_human.rds')
 otu_table(already)# shotgun sequencing so the numbers are percentages    
 ```
 
@@ -128,6 +128,8 @@ physeq_relab <- transform_sample_counts(already, function(x) x / sum(x))
 # The psmelt() function is the easiest way to convert a phyloseq object
 # into a single, tidy "long" dataframe for analysis with dplyr.
 physeq_long_df <- psmelt(physeq_relab)
+
+physeq_long_df %>% write_csv('../data/R26_human_shotgun_res.csv')
 ```
 
 
@@ -313,6 +315,12 @@ abundance_boxplot <- ggplot(abundance_plot_data, aes(x = fct_reorder(label, prev
   theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "right")
 
 print(abundance_boxplot)
+
+```
+
+# tallying all shotgun res I have 
+
+```{r}
 
 ```
 

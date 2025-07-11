@@ -21,7 +21,7 @@ library(vdbR)
 ```{r}
 library(compositions)
 meta <- read_csv('../data/153_combined_META.csv')
-e_asv <- read_csv('../data/R25_all_enterococcus_asv_in_sample.csv') 
+e_asv <- read_csv('../data/R25_all_enterococcus_asv_in_sample.csv') %>% inner_join(meta %>% select(pid, sampleid))
 # asv_1 is feacium
 ```
 
@@ -303,5 +303,116 @@ full <- read_csv('../data/R25_Enterococcus_asv_blast_res_full_sorted.csv') %>%
     # We are asking for words from position 1 to 2, separated by a space.
     taxa_desc = word(taxa_desc, 1, 2, sep = " ")
   )
+
+plot_data <- full %>%
+  # Abbreviate "Enterococcus" to "E." for cleaner labels
+  mutate(
+    short_taxa = str_replace(taxa_desc, "Enterococcus", "E.")
+  )
+
+# --- Create the Visualization ---
+ggplot(plot_data, aes(x = fct_reorder(short_taxa, pident), y = pident)) +
+  # geom_col() creates the bars. We'll color them by ASV key for clarity.
+  geom_col(aes(fill = asv_key), show.legend = FALSE) +
+  
+  # Add the horizontal threshold line at 97% identity
+  geom_hline(yintercept = 97, linetype = "dashed", color = "red", linewidth = 1) +
+  
+  # Add text on top of the threshold line to label it
+  annotate("text", x = 0.5, y = 97.2, label = "97% Species Threshold", color = "red", hjust = 0, size = 3) +
+  
+  # Facet the plot by asv_key to create a separate panel for each ASV
+  facet_wrap(~ asv_key, scales = "free_x") +
+  
+  # Set the y-axis limits to focus on the high-identity region
+  coord_cartesian(ylim = c(92, 100)) +
+  
+  # Add informative labels
+  labs(
+    title = "BLAST Hit Identity for Each ASV",
+    subtitle = "Each panel shows the top hits for a single Amplicon Sequence Variant (ASV)",
+    x = "Matching Taxa from blast",
+    y = "Percent Identity (%)"
+  ) +
+  
+  # Use a clean theme and rotate x-axis labels for readability
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+# summary of the asv 1
+
+```{r}
+# Define the total number of samples in your full dataset
+total_samples <- nrow(meta)
+
+# --- Step 2: Calculate the Detailed Summary Statistics ---
+
+# This command calculates all the requested metrics for each ASV.
+asv_detailed_summary <- e_asv %>%
+  # Filter for only the Enterococcus ASVs if your table contains others
+  filter(genus == "Enterococcus") %>%
+  
+  # Group the data by the unique ASV key
+  group_by(asv_key) %>%
+  
+  # Summarise to calculate all the metrics for each group
+  summarise(
+    # --- Prevalence Metrics ---
+    # Count of samples where the ASV is present
+    n_present_samples = n(),
+    # Percentage of total samples where the ASV is present
+    pct_present_samples = n() / total_samples,
+    
+    # --- Dominance Metrics (using 0.3 threshold) ---
+    # Count of samples where the ASV is dominant
+    n_dominant_samples = sum(count_relative > 0.3, na.rm = TRUE),
+    # Percentage of total samples where the ASV is dominant
+    pct_dominant_samples = n_dominant_samples / total_samples,
+    
+    # --- Patient-Level Metrics ---
+    # Count of unique patients where the ASV is present
+    n_present_patients = n_distinct(pid),
+    # Count of unique patients where the ASV is dominant
+    n_dominant_patients = n_distinct(pid[count_relative > 0.3]),
+    
+    # --- Abundance Metrics ---
+    # Median abundance ONLY in samples where the ASV is present, now as a percentage
+    median_abundance_pct_when_present = median(count_relative, na.rm = TRUE) * 100,
+    
+    # To calculate the median across ALL samples, we need to account for the zeros.
+    # We create a vector with the observed abundances and the correct number of zeros.
+    median_abundance_pct_all_samples = median(c(count_relative, rep(0, total_samples - n())), na.rm = TRUE) * 100
+  )  %>%
+  
+  # Arrange the final table to show the most prevalent ASVs at the top
+  arrange(desc(n_present_samples))
+
+# Print the resulting summary table
+print(asv_detailed_summary)
+
+library(gt)
+asv_detailed_summary %>%
+  gt() %>%
+  fmt_percent(columns = starts_with("pct_"), decimals = 1) %>%
+  # Use fmt_number for the new percentage columns
+  fmt_number(columns = starts_with("median_abundance_pct"), decimals = 2, pattern = "{x}%") %>%
+  cols_label(
+    asv_key = "ASV Key",
+    n_present_samples = "Present (N Samples)",
+    pct_present_samples = "Present (%)",
+    n_dominant_samples = "Dominant (N Samples)",
+    pct_dominant_samples = "Dominant (%)",
+    n_present_patients = "N Patients (Present)",
+    n_dominant_patients = "N Patients (Dominant)",
+    median_abundance_pct_when_present = "Median Abund. % (Present)",
+    median_abundance_pct_all_samples = "Median Abund. % (All)"
+  )
+
+
 ```
 
