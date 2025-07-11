@@ -286,3 +286,22 @@ plot_interactions <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(cl
 plot_interactions
 ```
 
+# table for the spp
+
+```{r}
+# let's say we only focus on the asv that has been detected in at least 10% of the samples
+focus <- asv_summary %>% 
+  filter(present_in_samples > ceiling(nrow(meta) * 0.1)) %>% 
+  pull(asv_key)
+
+full <- read_csv('../data/R25_Enterococcus_asv_blast_res_full_sorted.csv') %>% 
+  distinct(asv_key, pident, evalue, bitscore, taxa_desc) %>% 
+  filter(asv_key %in% focus) %>% 
+  mutate(
+    # The word() function from stringr is perfect for this.
+    # It extracts words from a string based on their position.
+    # We are asking for words from position 1 to 2, separated by a space.
+    taxa_desc = word(taxa_desc, 1, 2, sep = " ")
+  )
+```
+

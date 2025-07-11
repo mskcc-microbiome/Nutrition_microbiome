@@ -96,7 +96,7 @@ already <- meta %>%
 # isabl shotgun res already
 
 ```{r}
-already <- read_rds('../data/phyloseq_for_angel_7.3.25_nutrition_human.rds')
+already <- read_rds('../data/phyloseq_for_angel_7.7.25_nutrition_human.rds')
 otu_table(already)# shotgun sequencing so the numbers are percentages    
 ```
 

@@ -1,0 +1,29 @@
+---
+title: "New clinical data - BSI CD4"
+output: html_document
+date: "2025-07-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+Date ranges:
+
+Blood Cx: Days 0 to 100
+
+ALC: Day -365 to 365
+
+CD4: Day -365 to 365
+
+ 
+
+Caveats –
+
+Blood Cx: working on a more robust tool to pull out cleaned names for species isolates from the culture reports. Right now, done with simple Regex. Result2 column contains additional bugs if identified.
+
+CD4: I am still trying to hunt down all the different assays we use to describe CD4+ cells, this one is just using the most popular assay I could identify for absolute CD4 quantification.
