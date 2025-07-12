@@ -129,7 +129,7 @@ physeq_relab <- transform_sample_counts(already, function(x) x / sum(x))
 # into a single, tidy "long" dataframe for analysis with dplyr.
 physeq_long_df <- psmelt(physeq_relab)
 
-physeq_long_df %>% write_csv('../data/R26_human_shotgun_res.csv')
+physeq_long_df %>% write_csv('../data/R26_human_shotgun_res.csv')   
 ```
 
 
@@ -321,6 +321,76 @@ print(abundance_boxplot)
 # tallying all shotgun res I have 
 
 ```{r}
+# Define the total number of samples in your full dataset
+total_samples <- physeq_long_df %>% distinct(Sample) %>% nrow()
+
+# --- Step 2: Calculate the Detailed Summary Statistics ---
+
+# This command calculates all the requested metrics for each ASV.
+E_spp_detailed_summary <- physeq_long_df %>%
+  
+ # Filter for only the Enterococcus species if your table contains others
+  filter(Genus == "Enterococcus", !is.na(Species)) %>%
+  
+  # Group the data by the unique Species name
+  group_by(Species) %>%
+  
+  # Summarise to calculate all the metrics for each group
+  summarise(
+    # --- Prevalence Metrics ---
+    # Count of samples where the species is present (abundance > 0)
+    n_present_samples = sum(Abundance > 0, na.rm = TRUE),
+    # Total number of unique samples checked for this species
+    total_samples_checked = n_distinct(Sample),
+    # Percentage of total samples where the species is present
+    pct_present_samples = n_present_samples / total_samples_checked,
+    
+    # --- Dominance Metrics (using 0.3 threshold) ---
+    # Count of samples where the species is dominant
+    n_dominant_samples = sum(Abundance > 0.3, na.rm = TRUE),
+    # Percentage of total samples where the species is dominant
+    pct_dominant_samples = n_dominant_samples / total_samples_checked,
+    
+    # --- Patient-Level Metrics ---
+    # Count of unique patients where the species is present
+    n_present_patients = n_distinct(pid[Abundance > 0]),
+    # Count of unique patients where the species is dominant
+    n_dominant_patients = n_distinct(pid[Abundance > 0.3]),
+    
+    # --- Abundance Metrics ---
+    # Median abundance ONLY in samples where the species is present (non-zero)
+    median_abundance_pct_when_present = median(Abundance[Abundance > 0], na.rm = TRUE) * 100,
+    
+    # Median abundance across ALL samples (including zeros)
+    median_abundance_pct_all_samples = median(Abundance, na.rm = TRUE) * 100
+  ) %>%
+  
+  # Arrange the final table to show the most prevalent species at the top
+  arrange(desc(n_present_samples))
+
+# Print the resulting summary table
+print(E_spp_detailed_summary)
+```
+
+
+```{r}
+library(gt)
+E_spp_detailed_summary %>%
+  gt() %>%
+  fmt_percent(columns = starts_with("pct_"), decimals = 1) %>%
+  # Use fmt_number for the new percentage columns
+  fmt_number(columns = starts_with("median_abundance_pct"), decimals = 2, pattern = "{x}%") %>%
+  cols_label(
+    Species = "Species",
+    n_present_samples = "Present (N Samples)",
+    pct_present_samples = "Present (%)",
+    n_dominant_samples = "Dominant (N Samples)",
+    pct_dominant_samples = "Dominant (%)",
+    n_present_patients = "N Patients (Present)",
+    n_dominant_patients = "N Patients (Dominant)",
+    median_abundance_pct_when_present = "Median Abund. % (Present)",
+    median_abundance_pct_all_samples = "Median Abund. % (All)"
+  )
 
 ```
 
