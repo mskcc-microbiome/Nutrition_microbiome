@@ -20,10 +20,181 @@ ALC: Day -365 to 365
 
 CD4: Day -365 to 365
 
- 
 
 Caveats –
 
 Blood Cx: working on a more robust tool to pull out cleaned names for species isolates from the culture reports. Right now, done with simple Regex. Result2 column contains additional bugs if identified.
 
 CD4: I am still trying to hunt down all the different assays we use to describe CD4+ cells, this one is just using the most popular assay I could identify for absolute CD4 quantification.
+
+# Immune reconstitution
+
+```{r}
+# For the ALC and CD4 data, the uln of 3.2 means that a result above 3.2 would be considered higher than normal. However, in the context of BMT patients who are recovering from zero, the primary focus is on seeing the result_value increase towards the normal range. The ULN is just there for completeness.
+load('../data/angel_chrt_bsi_cd4_alc.RData') 
+
+ptb <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/156_combined_PTB.csv')
+link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
+meta <- read_csv('../data/153_combined_META.csv')
+
+d_alc <- alc %>% 
+  mutate(mrn = as.numeric(mrn), dt_performed = ymd(dt_performed)) %>% 
+  left_join(ptb %>% select(mrn, hct)) %>% 
+  mutate(alc_day = as.numeric(dt_performed - hct)) %>% 
+  inner_join(link) %>% 
+  select(-mrn) %>% 
+  select(pid, alc_day, result_value, uln, lab)
+
+# deidentify the other two
+d_cd4 <- cd4 %>% 
+  mutate(mrn = as.numeric(mrn), dt_performed = ymd(dt_performed)) %>% 
+  left_join(ptb %>% select(mrn, hct)) %>% 
+  mutate(cd4_day = as.numeric(dt_performed - hct)) %>% 
+  inner_join(link) %>% 
+  select(-mrn) %>% 
+  select(pid, cd4_day, result_value, uln, lab) %>% 
+  mutate(lab = 'cd4')
+```
+
+
+
+```{r}
+# A standard and easily defensible choice would be to match each stool sample with the closest lab draw within a +/- 2 day window.
+
+# For a stool sample collected on sdrt = 5, you would look for any ALC/CD4 measurements taken on days 3, 4, 5, 6, or 7.
+# 
+# If there are multiple lab draws in that window, you would typically use the one that is closest in time to the stool sample.
+
+# --- Combine ALC and CD4 data into a single long-format lab table ---
+# This makes the matching process much more efficient.
+all_labs_df <- bind_rows(
+  rename(d_alc, day = alc_day),
+  rename(d_cd4, day = cd4_day)
+)
+```
+
+
+```{r}
+# ---  Create the Density Plot ---
+# This plot shows the distribution of collection days for each lab type.
+
+ggplot(all_labs_df, aes(x = day, fill = lab)) +
+  # geom_density creates a smooth curve representing the distribution.
+  # The 'alpha' argument adds transparency so you can see overlapping areas.
+  geom_density(alpha = 0.6) +
+  
+  # Add a vertical line at Day 0 (transplant day) for reference
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = -9, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 50, linetype = "dashed", color = "red") +
+  
+  # Manually define colors for clarity
+  scale_fill_manual(values = c("alc" = "#118AB2", "cd4" = "#FF6B6B")) +
+  
+  # Add informative labels
+  labs(
+    title = "Distribution of ALC and CD4 Collection Days",
+    subtitle = "Density plot shows when lab measurements were most frequently taken",
+    x = "Days Relative to Transplant",
+    y = "Density",
+    fill = "Lab Type"
+  ) +
+  
+  # Use a clean theme
+  theme_bw(base_size = 14) +
+  theme(legend.position = "bottom")
+
+```
+
+```{r}
+# This plot shows the immune reconstitution trajectory for each patient,
+# separated by lab type (ALC vs. CD4).
+pseudocount <- 1
+
+ggplot(all_labs_df, aes(x = day, y = result_value + pseudocount, color = lab, fill = lab)) +
+  # Use geom_smooth to show the average trend line and its 95% confidence interval.
+  # This replaces the individual patient lines for a much cleaner look.
+  geom_smooth(method = "loess", alpha = 0.2) +
+  
+  # Use facet_wrap to create separate plots for 'alc' and 'cd4'.
+  # 'scales = "free_y"' is crucial because ALC and CD4 are on different scales.
+  facet_wrap(~ lab, scales = "free_y", nrow = 2) +
+  
+  # Use a log10 scale on the y-axis to better visualize the wide range of counts
+  scale_y_log10() +
+  annotation_logticks(sides = "l") + # Adds minor tick marks for the log scale
+  
+  # Manually define colors for clarity
+  scale_color_manual(values = c("alc" = "#118AB2", "cd4" = "#FF6B6B")) +
+  scale_fill_manual(values = c("alc" = "#118AB2", "cd4" = "#FF6B6B")) +
+  
+  # Add a vertical line at Day 0 (transplant day) for reference
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  
+  # Add informative labels
+  labs(
+    title = "Average Immune Reconstitution Trajectories for ALC and CD4",
+    subtitle = "Line shows the average trend (LOESS smooth) across all patients",
+    x = "Days Relative to Transplant",
+    y = "Cell Count (log10 scale)",
+    color = "Lab Type",
+    fill = "Lab Type"
+  ) +
+  
+  # Use a clean theme
+  theme_bw(base_size = 14) +
+  theme(legend.position = "bottom")
+
+
+```
+
+```{r}
+# --- Match Stool Samples to Closest Lab Draw ---
+# stool_df_with_window <- meta %>%
+#   select(sampleid, sdrt, simpson_reciprocal, pid,intensity, empirical ) %>% 
+#   mutate(
+#     # The 2-day window starts 2 days before the stool sample...
+#     window_start = sdrt - 2,
+#     # ...and ends 2 days after the stool sample.
+#     window_end = sdrt + 2
+#   )
+# 
+# 
+# # This single command performs the entire matching process for all lab types.
+# matched_data <- stool_df_with_window %>%
+#   # Perform a non-equi join. This finds all lab draws for each patient
+#   # that fall within the +/- 2 day window of a stool sample.
+#   left_join(
+#     all_labs_df,
+#     by = join_by(
+#       pid,
+#       window_start <= day,
+#       window_end >= day
+#     )
+#   ) %>%
+#   # If a stool sample had multiple lab draws in its window, this section
+#   # will select only the one closest in time *for each lab type*.
+#   mutate(
+#     # Calculate the absolute time difference in days
+#     time_diff = abs(sdrt - day)
+#   ) %>%
+#   # Group by the original stool sample information AND the lab type
+#   group_by(sampleid, pid, sdrt, simpson_reciprocal, lab) %>%
+#   # For each group, keep only the row with the minimum time difference
+#   slice_min(order_by = time_diff, n = 1, with_ties = FALSE) %>%
+#   # Ungroup to finish the operation
+#   ungroup() %>%
+#   # Now, pivot the data to a "wide" format, so ALC and CD4 have their own columns
+#   select(-time_diff) %>% # Remove intermediate columns
+#   pivot_wider(
+#     names_from = lab,
+#     values_from = result_value
+#   )
+# 
+# 
+# # Print the final merged table
+# print(matched_data)
+
+
+```
+
