@@ -16,6 +16,7 @@ library(tidybayes)
 library(cowplot)
 library(brmstools)
 library(vdbR)
+connect_database()
 ```
 
 ```{r}
@@ -486,7 +487,67 @@ ggplot(joined, aes(x = asv1_abundance, y = shotgun_abundance)) +
   # Use a clean theme
   theme_bw(base_size = 14) +
   theme(legend.position = 'none')
+```
 
+```{r}
+# # are there other asv that is also faecium
+# get_table_from_database('asv_annotation_blast_ag')
+# 
+# 
+# # do the correlation using all asv that are faecium and see if the correlation is better
+# amplicon_faecium <- e_asv %>% 
+#   left_join(asv_annotation_blast_ag %>% select(asv_key, species)) %>% 
+#   filter(species == 'Enterococcus_faecium') %>% 
+#   group_by(sampleid) %>% 
+#   summarise(total_faecium = sum(count_relative))
+#   
+# 
+# correlation_df <- shotgun %>% 
+#   select(sampleid = Sample, shotgun_spp = Species, Abundance) %>% 
+#   filter(shotgun_spp == 'Enterococcus_faecium') %>% 
+#   left_join(amplicon_faecium) %>% 
+#   rename(shotgun_abundance = Abundance) %>% 
+#   rename(a16s_abundance = total_faecium) %>% 
+#   inner_join(meta %>% select(sampleid, pid, sdrt)) %>% 
+#   mutate(pid = factor(pid)) %>% 
+#   mutate(a16s_abundance = if_else(is.na(a16s_abundance), 0, a16s_abundance))
+```
 
+```{r}
+# gee_model <- geeglm(
+#   shotgun_abundance ~ a16s_abundance,
+#   id = pid,
+#   data = correlation_df,
+#   family = gaussian,
+#   corstr = "exchangeable"
+# )
+# 
+# # Use broom::tidy() to get a clean summary of the model results
+# gee_results <- tidy(gee_model)
+# 
+# # Extract the GEE coefficient and p-value for the plot title
+# # We are interested in the term for our predictor, 'asv1_abundance'
+# gee_term <- gee_results %>% filter(term == "a16s_abundance")
+# gee_coeff <- round(gee_term$estimate, 3)
+# gee_p_value <- format(gee_term$p.value, digits = 2, scientific = TRUE)
+# 
+# ggplot(correlation_df, aes(x = a16s_abundance, y = shotgun_abundance)) +
+#   # Add the points for each sample, colored by patient ID
+#   geom_point(aes(color = pid), alpha = 0.7, size = 3) +
+#   # Add a single regression line to show the overall trend from the GEE model
+#   geom_smooth(method = "lm", se = TRUE, color = "#073B4C") +
+#   
+#   # Add informative labels and a title that includes the GEE correlation results
+#   labs(
+#     title = "Correlation between a16s_abundance and E. faecium Abundance",
+#     subtitle = paste0("GEE Coefficient = ", gee_coeff, " (p = ", gee_p_value, ")"),
+#     x = "faecium Relative Abundance (16S)",
+#     y = "E. faecium Relative Abundance (Shotgun)"
+#   ) +
+#   # Use a clean theme
+#   theme_bw(base_size = 14) +
+#   theme(legend.position = 'none')
+
+# not much change and the cor actually gets worse    
 ```
 
