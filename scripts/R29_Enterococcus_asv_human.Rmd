@@ -344,7 +344,7 @@ ggplot(plot_data, aes(x = fct_reorder(short_taxa, pident), y = pident)) +
 
 ```
 
-# summary of the asv 1
+# summary of the asv 
 
 ```{r}
 # Define the total number of samples in your full dataset
@@ -412,6 +412,80 @@ asv_detailed_summary %>%
     median_abundance_pct_when_present = "Median Abund. % (Present)",
     median_abundance_pct_all_samples = "Median Abund. % (All)"
   )
+
+
+```
+
+# compare the same sample shotgun and 16s sequenced
+
+```{r}
+shotgun <- read_csv('../data/R26_human_shotgun_res.csv') 
+
+# spread the e_asv to wide format
+e_asv_wide <- e_asv %>%
+  select(asv_key, sampleid, count_relative) %>% 
+  spread('asv_key','count_relative', fill = 0)
+```
+
+
+```{r}
+library(geepack)
+# Load the broom library to tidy model output
+library(broom)
+# do the correlation between the asv_1 and the e_faecium       
+joined <- shotgun %>% 
+  select(sampleid = Sample, shotgun_spp = Species, Abundance) %>% 
+  filter(shotgun_spp == 'Enterococcus_faecium') %>% 
+  left_join(e_asv_wide %>% select(sampleid, asv_1)) %>% 
+  rename(shotgun_abundance = Abundance) %>% 
+  rename(asv1_abundance = asv_1) %>% 
+  inner_join(meta %>% select(sampleid, pid, sdrt)) %>% 
+  mutate(pid = factor(pid)) %>% 
+  mutate(asv1_abundance = if_else(is.na(asv1_abundance), 0, asv1_abundance))
+
+
+# Fit the GEE model.
+# The 'id = pid' argument tells the model that samples are clustered within each patient.
+# 'corstr = "exchangeable"' is a robust choice for the correlation structure.
+gee_model <- geeglm(
+  shotgun_abundance ~ asv1_abundance,
+  id = pid,
+  data = joined,
+  family = gaussian,
+  corstr = "exchangeable"
+)
+
+# Use broom::tidy() to get a clean summary of the model results
+gee_results <- tidy(gee_model)
+
+# Print the results table
+print(gee_results)
+```
+
+
+```{r}
+# Extract the GEE coefficient and p-value for the plot title
+# We are interested in the term for our predictor, 'asv1_abundance'
+gee_term <- gee_results %>% filter(term == "asv1_abundance")
+gee_coeff <- round(gee_term$estimate, 3)
+gee_p_value <- format(gee_term$p.value, digits = 2, scientific = TRUE)
+
+ggplot(joined, aes(x = asv1_abundance, y = shotgun_abundance)) +
+  # Add the points for each sample, colored by patient ID
+  geom_point(aes(color = pid), alpha = 0.7, size = 3) +
+  # Add a single regression line to show the overall trend from the GEE model
+  geom_smooth(method = "lm", se = TRUE, color = "#073B4C") +
+  
+  # Add informative labels and a title that includes the GEE correlation results
+  labs(
+    title = "Correlation between ASV_1 and E. faecium Abundance",
+    subtitle = paste0("GEE Coefficient = ", gee_coeff, " (p = ", gee_p_value, ")"),
+    x = "ASV_1 Relative Abundance (16S)",
+    y = "E. faecium Relative Abundance (Shotgun)"
+  ) +
+  # Use a clean theme
+  theme_bw(base_size = 14) +
+  theme(legend.position = 'none')
 
 
 ```
