@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(broom)
 ```
 
 Date ranges:
@@ -130,6 +131,8 @@ ggplot(all_labs_df, aes(x = day, y = result_value + pseudocount, color = lab, fi
   
   # Add a vertical line at Day 0 (transplant day) for reference
   geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+    geom_vline(xintercept = -9, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 50, linetype = "dashed", color = "red") +
   
   # Add informative labels
   labs(
@@ -144,7 +147,6 @@ ggplot(all_labs_df, aes(x = day, y = result_value + pseudocount, color = lab, fi
   # Use a clean theme
   theme_bw(base_size = 14) +
   theme(legend.position = "bottom")
-
 
 ```
 
@@ -195,6 +197,174 @@ ggplot(all_labs_df, aes(x = day, y = result_value + pseudocount, color = lab, fi
 # # Print the final merged table
 # print(matched_data)
 
+
+```
+
+# CD4
+
+peri engraftment diversity and the day 100/day 180 CD4
+
+```{r}
+#Day 100: Look for a measurement between Day +85 and Day +115.
+
+#Day 180: Look for a measurement between Day +150 and Day +210." 
+#and For any patient who has multiple CD4 measurements within your chosen window, you should select the one that is closest in time to the landmark day (i.e., closest to Day 100 or Day 180).
+cd4_day100 <- all_labs_df %>%
+  # Keep only the CD4 lab results
+  filter(lab == "cd4") %>%
+  # Filter for rows within the Day 100 window (+85 to +115)
+  filter(day >= 85 & day <= 115) %>%
+  # For each patient, calculate the time difference to the landmark day
+  mutate(time_diff = abs(day - 100)) %>%
+  # Group by patient ID to select the best measurement for each one
+  group_by(pid) %>%
+  # Keep only the row with the minimum time difference
+  # with_ties = FALSE ensures we only get one row if there's a tie
+  slice_min(order_by = time_diff, n = 1, with_ties = FALSE) %>%
+  # Ungroup to finish the operation
+  ungroup() %>%
+  # Add a column to identify which landmark this data belongs to
+  mutate(landmark = "Day_100") %>%
+  # Rename columns for clarity
+  rename(cd4_value = result_value, cd4_day = day) %>%
+  select(pid, landmark, cd4_day, cd4_value, time_diff)
+```
+
+
+```{r}
+# --- Step 3: Extract CD4 Count for Day 180 Landmark ---
+
+cd4_day180 <- all_labs_df %>%
+  # Keep only the CD4 lab results
+  filter(lab == "cd4") %>%
+  # Filter for rows within the Day 180 window (+150 to +210)
+  filter(day >= 150 & day <= 210) %>%
+  # For each patient, calculate the time difference to the landmark day
+  mutate(time_diff = abs(day - 180)) %>%
+  # Group by patient ID
+  group_by(pid) %>%
+  # Keep only the row with the minimum time difference
+  slice_min(order_by = time_diff, n = 1, with_ties = FALSE) %>%
+  # Ungroup to finish the operation
+  ungroup() %>%
+  # Add a column to identify which landmark this data belongs to
+  mutate(landmark = "Day_180") %>%
+  # Rename columns for clarity
+  rename(cd4_value = result_value, cd4_day = day) %>%
+  select(pid, landmark, cd4_day, cd4_value, time_diff)
+
+
+# --- Step 4: Combine and View the Results ---
+
+# Combine the results from both landmarks into a single, clean table
+final_landmark_cd4 <- bind_rows(cd4_day100, cd4_day180) %>%
+  arrange(pid, landmark)
+
+# Print the final table
+print(final_landmark_cd4)
+
+```
+
+```{r}
+stool_df_with_window <- meta %>%
+  select(sampleid, sdrt, simpson_reciprocal, pid,intensity, empirical ) %>%
+  mutate(
+    # The 2-day window starts 2 days before the stool sample...
+    window_start = sdrt - 2,
+    # ...and ends 2 days after the stool sample.
+    window_end = sdrt + 2
+  )
+
+peri_engraftment_diversity <- stool_df_with_window %>%
+  # Filter for rows within the peri-engraftment window
+  filter(sdrt >= 7 & sdrt <= 21) %>%
+  
+  # Group by patient ID to calculate the average for each one
+  group_by(pid) %>%
+  
+  # Calculate the mean of the diversity metric for all samples in the window
+  # na.rm = TRUE will handle any missing diversity values gracefully
+  summarise(
+    peri_engraftment_diversity = median(simpson_reciprocal, na.rm = TRUE),
+    # It's also useful to know how many samples were averaged
+    n_samples_in_window = n()
+  ) %>%
+  
+  # Ungroup to finish the operation
+  ungroup() 
+
+d100_df <- peri_engraftment_diversity %>% 
+  inner_join(cd4_day100)
+
+d180_df <- peri_engraftment_diversity %>% 
+  inner_join(cd4_day180)
+```
+```{r}
+correlation_model <- lm(log1p(cd4_value) ~ peri_engraftment_diversity, data = d100_df)
+
+# Get a summary of the model to extract statistics
+model_summary <- summary(correlation_model)
+
+# Extract the R-squared and p-value for annotating the plot
+r_squared <- round(model_summary$r.squared, 3)
+p_value <- format(glance(model_summary)$p.value, digits = 2, scientific = TRUE)
+```
+
+
+```{r}
+# --- Step 4: Create the Visualization ---
+# A scatter plot is the best way to visualize the correlation.
+
+ggplot(d100_df, aes(x = peri_engraftment_diversity, y = cd4_value)) +
+  # Add the points for each patient
+  geom_point(size = 3, color = "#118AB2", alpha = 0.8) +
+  # Add the regression line to show the trend
+  geom_smooth(method = "lm", se = TRUE, color = "#073B4C") +
+  
+  # Use a log scale for the y-axis for better visualization of CD4 counts
+  # scale_y_log10() +
+  # annotation_logticks(sides = "l") +
+  
+  # Add informative labels and a title that includes the correlation results
+  labs(
+    title = "Peri-Engraftment Diversity vs. Day 100 CD4 Count",
+    subtitle = paste0("Estimate = ", 0.02758, " (p = ", p_value, ")"),
+    x = "Median Peri-Engraftment Diversity (Simpson Reciprocal)",
+    y = "CD4 Count at Day 100"
+  ) +
+  # Use a clean theme
+  theme_bw(base_size = 14)
+
+```
+```{r}
+correlation_model <- lm(log1p(cd4_value) ~ peri_engraftment_diversity, data = d180_df)
+
+# Get a summary of the model to extract statistics
+model_summary <- summary(correlation_model)
+
+# Extract the R-squared and p-value for annotating the plot
+# Estimate <- round(model_summary$, 3)
+p_value <- format(glance(model_summary)$p.value, digits = 2, scientific = TRUE)
+
+ggplot(d180_df, aes(x = peri_engraftment_diversity, y = cd4_value)) +
+  # Add the points for each patient
+  geom_point(size = 3, color = "#118AB2", alpha = 0.8) +
+  # Add the regression line to show the trend
+  geom_smooth(method = "lm", se = TRUE, color = "#073B4C") +
+  
+  # Use a log scale for the y-axis for better visualization of CD4 counts
+  # scale_y_log10() +
+  # annotation_logticks(sides = "l") +
+  
+  # Add informative labels and a title that includes the correlation results
+  labs(
+    title = "Peri-Engraftment Diversity vs. Day 180 CD4 Count",
+    subtitle = paste0("Estimate = ", 0.02878, " (p = ", p_value, ")"),
+    x = "Median Peri-Engraftment Diversity (Simpson Reciprocal)",
+    y = "CD4 Count at Day 180"
+  ) +
+  # Use a clean theme
+  theme_bw(base_size = 14)
 
 ```
 
