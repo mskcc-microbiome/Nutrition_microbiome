@@ -417,6 +417,92 @@ asv_detailed_summary %>%
 
 ```
 
+
+```{r}
+# First, we need to find out how many unique samples are in the entire dataset.
+# This will be the denominator for our prevalence calculation.
+total_samples <- n_distinct(meta$sampleid)
+
+# Next, we calculate the prevalence for each ASV.
+# We do this by counting the number of unique samples each ASV appears in,
+# and then dividing by the total number of samples.
+prevalence_df <- e_asv %>%
+  group_by(asv_key) %>%
+  summarise(
+    n_present = n_distinct(sampleid),
+    .groups = 'drop'
+  ) %>%
+  mutate(prevalence = n_present / total_samples)
+```
+
+
+```{r}
+# Now, we filter this list to keep only the ASVs that are prevalent
+# in at least 5% of all samples. We also sort them from most to least prevalent.
+# This sorted list will determine the order of the ASVs on our plot's x-axis.
+prevalent_asv_keys <- prevalence_df %>%
+  filter(prevalence >= 0.05) %>%
+  arrange(desc(prevalence)) %>%
+  pull(asv_key) # pull() extracts the column as a vector
+
+# We filter the original data to include only these prevalent ASVs.
+# We also join the prevalence information, which we'll use to color the boxes.
+plot_data <- e_asv %>%
+  filter(asv_key %in% prevalent_asv_keys) %>%
+  left_join(prevalence_df, by = "asv_key") %>%
+  # This is a key step: we turn `asv_key` into a factor and set its levels
+  # to the sorted list we created. This ensures the x-axis is correctly ordered.
+  mutate(asv_key = factor(asv_key, levels = prevalent_asv_keys))
+
+# Finally, we create the plot using ggplot2.
+ggplot(plot_data, aes(x = asv_key, y = count_relative)) +
+  # Add the boxplots. The fill color is mapped to the prevalence value.
+  # We set outlier.shape = NA because the jittered points will show all data points anyway.
+  geom_boxplot(
+    aes(fill = prevalence),
+    outlier.shape = NA,
+    alpha = 0.8 # Make the boxes slightly transparent
+  ) +
+  # Add the jittered points to show the distribution of individual samples.
+  # We make them small and semi-transparent to avoid overplotting.
+  geom_jitter(
+    width = 0.2, # Controls the amount of horizontal spread
+    alpha = 0.1,
+    size = 1.5,
+    color = "gray30"
+  ) +
+  # Because relative abundance data often spans several orders of magnitude,
+  # a log scale on the y-axis is very helpful for visualization.
+  scale_y_log10(
+    name = "Relative Abundance",
+    # Format the y-axis labels as percentages for readability
+    labels = scales::percent_format(accuracy = 0.01)
+  ) +
+  # Define the color scale for the boxplot fill.
+  # viridis is a colorblind-friendly and visually appealing palette.
+  scale_fill_viridis_c(
+    name = "Prevalence",
+    # Format the legend labels as percentages.
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  # Add informative labels and a title.
+  labs(
+    title = "Relative Abundance of Prevalent Enterococcus ASVs",
+    subtitle = "Showing ASVs present in at least 5% of samples, sorted by prevalence",
+    x = "ASV Key"
+  ) +
+  # Use a clean, minimal theme for the plot.
+  theme_minimal(base_size = 12) +
+  # Make some final theme adjustments for better readability.
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11),
+    legend.position = "bottom"
+  )
+
+```
+
 # compare the same sample shotgun and 16s sequenced
 
 ```{r}
@@ -459,12 +545,6 @@ gee_model <- geeglm(
 # Use broom::tidy() to get a clean summary of the model results
 gee_results <- tidy(gee_model)
 
-# Print the results table
-print(gee_results)
-```
-
-
-```{r}
 # Extract the GEE coefficient and p-value for the plot title
 # We are interested in the term for our predictor, 'asv1_abundance'
 gee_term <- gee_results %>% filter(term == "asv1_abundance")
@@ -550,4 +630,65 @@ ggplot(joined, aes(x = asv1_abundance, y = shotgun_abundance)) +
 
 # not much change and the cor actually gets worse    
 ```
+
+```{r}
+# what if I just correlating the shotgun abundance of those other possible species with asv_1
+all_1 <- shotgun %>% 
+  select(Sample, Species, Abundance) %>% 
+  # these 4 are the ones that have 100% percent identity with asv_1 and exist in the shotgun data
+  filter(Species %in% c('Enterococcus_durans','Enterococcus_hirae','Enterococcus_faecium','Enterococcus_mundtii')) %>% 
+  rename(sampleid = Sample, shotgun_spp = Species, shotgun_relab = Abundance) %>% 
+  full_join(e_asv_wide %>% select(sampleid, asv_1)) %>% 
+  rename(asv1_abundance = asv_1) %>% 
+  inner_join(meta %>% select(sampleid, pid, sdrt)) %>% 
+  mutate(pid = factor(pid)) %>% 
+  split(.$shotgun_spp)
+
+gee_cor <- all_1 %>% 
+  imap(function(df_, name_){
+    joined = df_ %>% 
+      mutate(asv1_abundance = if_else(is.na(asv1_abundance), 0, asv1_abundance),
+            shotgun_relab = if_else(is.na(shotgun_relab), 0, shotgun_relab) )
+    
+    gee_model = geeglm(
+      shotgun_relab ~ asv1_abundance,
+      id = pid,
+      data = joined,
+      family = gaussian,
+      corstr = "exchangeable"
+    )
+    
+    # Use broom::tidy() to get a clean summary of the model results
+    gee_results <- tidy(gee_model)
+    
+    # Extract the GEE coefficient and p-value for the plot title
+    # We are interested in the term for our predictor, 'asv1_abundance'
+    gee_term <- gee_results %>% filter(term == "asv1_abundance")
+    gee_coeff <- round(gee_term$estimate, 3)
+    gee_p_value <- format(gee_term$p.value, digits = 2, scientific = F)
+    
+    ggplot(joined, aes(x = asv1_abundance, y = shotgun_relab)) +
+      # Add the points for each sample, colored by patient ID
+      geom_point(, alpha = 0.7, size = 3) +
+      # Add a single regression line to show the overall trend from the GEE model
+      geom_smooth(method = "lm", se = TRUE, color = "#073B4C") +
+      
+      # Add informative labels and a title that includes the GEE correlation results
+      labs(
+        title = str_glue("Correlation between ASV_1 and\n{name_}"),
+        subtitle = paste0("GEE Coefficient = ", gee_coeff, " (p = ", gee_p_value, ")"),
+        x = "ASV_1 Relative Abundance (16S)",
+        y = str_glue("{name_} Relative Abundance (Shotgun)")
+      ) +
+      # Use a clean theme
+      theme_bw(base_size = 14) +
+      theme(legend.position = 'none')
+  })
+
+library(cowplot)
+res_1 <- plot_grid(plotlist = gee_cor, nrow = 2 )
+ggsave('../data/R29_cor_asv_1.jpg', width = 10, height = 8)
+```
+
+
 
