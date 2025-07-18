@@ -1,0 +1,173 @@
+---
+title: "New mice"
+output: html_document
+date: "2025-07-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+dat <- read_csv('../data/7_9_25Biapenem Rebuttal Experiment.csv') %>% 
+  filter(!is.na(Total_weight_stool_and_tube_mg) ) %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
+  clean_names() %>%
+  mutate(logCFU = log10(cf_us_per_gram_stool)) %>% 
+  select(experiment:mouse_identifier, logCFU) %>% 
+  filter(str_detect(treatment, 'Biapenem'))
+
+
+plot_data <- dat %>%
+  mutate(
+    treatment = factor(treatment, levels = c("Biapenem_Only", "Biapenem_Sucrose"))
+  )
+
+# Create the plot using ggplot2
+ggplot(plot_data, aes(x = factor(day), y = logCFU)) +
+  # First, draw the lines for each individual mouse.
+  # The `group = mouse_identifier` is the key aesthetic that tells ggplot
+  # to connect the points belonging to each mouse.
+  geom_line(
+    aes(group = mouse_identifier),
+    color = "gray50", # A neutral color for the background lines
+    alpha = 0.9     # Make them slightly transparent
+  ) +
+  # Add individual points for each measurement
+  geom_point(
+    alpha = 0.9,
+    color = "gray50"
+  ) +
+  # Now, overlay the boxplots on top.
+  # The `fill` adds some color, and `alpha` makes them semi-transparent
+  # so the lines and points underneath remain visible.
+  geom_boxplot(
+    aes(fill = treatment),
+    outlier.shape = NA, # Hides the outlier points, as we are already plotting all points
+    alpha = 0.7
+  ) +
+  # Create separate plot panels for each treatment group.
+  facet_grid(group~treatment) +
+  # Use a nice color scheme and remove the fill legend since the
+  # panel titles already provide that information.
+  scale_fill_manual(values = c("Biapenem_Only" = "#82B3A8", "Biapenem_Sucrose" = "#E09C6C"), guide = "none") +
+  # Add informative labels and a title.
+  labs(
+    title = "Enterococcus Growth Over Time by Treatment",
+    subtitle = "Lines connect measurements from individual mice",
+    x = "Day",
+    y = "Enterococcus Abundance (log CFU/gram)"
+  ) +
+  # Use a clean, classic theme.
+  theme_bw(base_size = 12) +
+  # Make some final theme adjustments.
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    strip.text = element_text(face = "bold", size = 12), # Makes panel titles bold
+    legend.position = "none" # No legend needed
+  )
+
+ggsave('../data/R31_room_counts.pdf', width = 7, height = 12)
+```
+
+```{r}
+fc_data <- dat %>% 
+  mutate(day = str_glue('day{day}')) %>% 
+  spread('day','logCFU') %>% 
+  mutate(fc = day6/day0)
+
+max_finite_fc <- fc_data %>%
+  filter(is.finite(fc)) %>%
+  summarise(max_val = max(fc)) %>%
+  pull(max_val)
+
+plot_data <- fc_data %>%
+  mutate(
+    # Replace Inf with a value 10% higher than the max finite value
+    fc_plot = if_else(is.infinite(fc), max_finite_fc * 1.1, fc),
+    # Create a new column to indicate which points were originally infinite
+    is_inf = is.infinite(fc)
+  )
+
+# Create the plot using ggplot2
+ggplot(plot_data, aes(x = treatment, y = fc_plot, fill = treatment)) +
+  # Add boxplots to show the distribution of fold changes
+  geom_boxplot(
+    alpha = 0.6,
+    outlier.shape = NA # We will plot all points with geom_jitter
+  ) +
+  # Add jittered points to show each individual mouse.
+  # We can use a different shape for the points that were originally infinite.
+  geom_jitter(
+    aes(shape = is_inf),
+    width = 0.2,
+    size = 2.5,
+    alpha = 0.8
+  ) +
+  # Create separate plot panels for each experimental group
+  facet_wrap(~group) +
+  # Use a log10 scale for the y-axis, which is standard for fold-change data
+  scale_y_log10(
+    name = "Fold Change (log10 scale)",
+    # Add a horizontal line at y=1 for reference (no change)
+    breaks = c(0.1, 1, 10, 100),
+    labels = c("0.1", "1", "10", "100")
+  ) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray30") +
+  # Customize the shapes used for the points
+  scale_shape_manual(
+    name = "",
+    values = c(`FALSE` = 21, `TRUE` = 24), # Circle for finite, triangle for infinite
+    labels = c(`FALSE` = "Finite FC", `TRUE` = "Infinite FC (Capped)"),
+    guide = guide_legend(override.aes = list(fill = "gray50"))
+  ) +
+  stat_compare_means(
+    method = "wilcox.test",
+    comparisons = list(c("Biapenem_Only", "Biapenem_Sucrose")),
+    label = "p.format" # Display the p-value in a standard format
+  ) +
+  # Customize the fill colors for the boxplots
+  scale_fill_manual(
+    name = "Treatment",
+    values = c("Biapenem_Only" = "#82B3A8", "Biapenem_Sucrose" = "#E09C6C")
+  ) +
+  # Add informative labels and a title
+  labs(
+    title = "Enterococcus Fold Change from Day 0 to Day 6",
+    subtitle = "Faceted by Jax room",
+    x = ""
+  ) +
+  # Use a clean, classic theme
+  theme_bw(base_size = 12) +
+  # Make some final theme adjustments
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    strip.text = element_text(face = "bold", size = 11),
+    axis.text.x = element_text(angle = 25, hjust = 1),
+    legend.position = "bottom"
+  )
+
+ggsave('../data/R31_foldchange.jpg', width = 7, height = 9)
+```
+
+# old mice
+
+```{r}
+newest <- readxl::read_excel('../data/Sucrose_All Experiments Consolidated .xlsx') %>% 
+  mutate(Log_CFUs_per_GramStool = log10((((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1) ) %>%   
+  filter(Day != 1) %>%  
+  separate(Treatment, into = c('diet_treatment','abx_treatment'), sep = ', ', remove = T) %>% 
+  mutate(diet_treatment = if_else(diet_treatment == 'Vehicle','vehicle','sucrose'),
+         abx_treatment = if_else(str_detect(abx_treatment, 'Bia'),'biapenem',abx_treatment),
+         diet_treatment = factor(diet_treatment, levels = c('vehicle','sucrose')),
+         abx_treatment = factor(abx_treatment, levels = c('PBS','biapenem'))) %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1) %>% 
+  select(Experiment:Mouse_identifier, CFUs_per_GramStool, Log_CFUs_per_GramStool)
+
+newest %>% count(Experiment, Treatment)
+```
+

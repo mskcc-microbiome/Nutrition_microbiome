@@ -13,6 +13,7 @@ library(tidyverse)
 library(broom.mixed)
 library(brms)   
 library(ggpubr)
+library(patchwork)
 library(tidybayes)
 library(cowplot)
 library(ggridges)
@@ -278,32 +279,49 @@ run_iterative_model <- function(sweet_variable, data) {
 # --- Step 4: Run the iterative analysis using purrr::map ---
 # This will apply the function to each "sweets" subcategory.
 # This step will take a significant amount of time to run.
-all_results <- map(
-  sweets_subcategories_to_test,
-  ~run_iterative_model(sweet_variable = .x, data = final_model_data)
-)
+# all_results <- map(
+#   sweets_subcategories_to_test,
+#   ~run_iterative_model(sweet_variable = .x, data = final_model_data)
+# )
+
+
 ```
+
+## the coeff of abx*sugar 
 
 ```{r}
 #Combine the list of results into a single, clean data frame
 comparison_df <- bind_rows(all_results) %>%
   # Clean up the term name to be used as a label
-  mutate(food_category = str_remove(term, "empiricalTRUE:"))
+  mutate(food_category = str_remove(term, "empiricalTRUE:")) %>% 
+  mutate(is_significant = (conf.low * conf.high) > 0)
+
+comparison_df %>% write_csv('../data/R27_group3_abxsugar_comparison_df.csv')
 
 # Create a forest plot to visualize and compare the effects
-ggplot(comparison_df, aes(x = estimate, y = fct_reorder(food_category, estimate))) +
+forest_plot3 <- ggplot(comparison_df, aes(x = estimate, y = fct_reorder(food_category, -estimate))) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-  geom_point(size = 4, color = "dodgerblue") +
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1, color = "dodgerblue") +
+  geom_point(aes( color = is_significant), size = 4) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high,  color = is_significant), height = 0.2, linewidth = 1) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
   labs(
-    title = "Interaction Effect of Sweet Subcategories with Antibiotics on Diversity",
-    subtitle = "Each estimate is from a separate model controlling for other main food groups",
+    title = "Interaction Effect of Sweet Subcategories\nwith Antibiotics on Diversity",
+    subtitle = "Each estimate is from a separate model\ncontrolling for other main food groups",
     x = "Interaction Coefficient (Effect per 100g intake during antibiotic exposure)",
     y = "Sweet Subcategory"
   ) +
   theme_bw(base_size = 14)
+
+forest_plot3
+
+# defining the orders of the coeff that will be used to plot the total and sugar weight so they align
+sub_orders <- comparison_df %>% 
+  mutate(food_category = str_replace(food_category,'avg_intake_','')) %>% 
+  mutate(food_category = fct_reorder(food_category, -estimate))
+sub_orders$food_category
 ```
 
+## total and sugar dry weight
 
 ```{r}
 merged_sugar <- final_model_data %>% 
@@ -318,11 +336,14 @@ plot_data <- merged_sugar %>%
     names_to = "metric",
     values_to = "grams"
   ) %>%
+  #left_join(comparison_df %>% select(metric = food_category , estimate)) %>% 
   # Extract the food category name from the column name
   mutate(
     food_category = str_remove(metric, "avg_intake_|avg_sugar_intake_"),
     metric_type = if_else(str_starts(metric, "avg_sugar_intake_"), "sugar", "total")
   ) %>%
+  # only plot the three subcategroes of the sweets group
+  filter(food_category %in% c('Liquid_Sweets','Solid_Sweets','Water')) %>% 
   # Reshape again to have total intake and sugar intake in separate columns
   select(pid,sdrt, food_category, metric_type, grams) %>%
   # revert it back to original value by * 100
@@ -358,15 +379,12 @@ plot_data <- merged_sugar %>%
     food_category = str_remove(food_category, "fg_") %>% str_replace_all("_", " "),
     # Reorder the 'food_category' factor based on the sugar proportion
     # The '.desc = TRUE' ensures it's in descending order (highest % at the top)
-    food_category = fct_reorder(food_category, sugar_proportion, .desc = F)
-  )
-```
+    food_category = factor(food_category, levels = c('Water','Solid Sweets','Liquid Sweets'))
+  ) 
 
-
-```{r}
 # --- Step 3: Create the Sorted Stacked Bar Chart ---
 
-ggplot(plot_data, aes(x = grams, y = food_category, fill = intake_type)) +
+sugar_plot3 <- ggplot(plot_data, aes(x = grams, y = food_category, fill = intake_type)) +
   # Use geom_col which is an alias for geom_bar(stat="identity")
   geom_col() +
   # Use a color palette that clearly distinguishes sugar
@@ -374,7 +392,7 @@ ggplot(plot_data, aes(x = grams, y = food_category, fill = intake_type)) +
   # Add informative labels
   labs(
     title = "Average Sugar Content by Food Category",
-    subtitle = "Categories are sorted by the percentage of sugar content",
+    subtitle = "Categories are sorted by the total consumed mass",
     x = "Average Dehydrated Weight Consumed (grams)",
     y = "Food Category",
     fill = "Component"
@@ -382,6 +400,11 @@ ggplot(plot_data, aes(x = grams, y = food_category, fill = intake_type)) +
   # Use a clean theme
   theme_bw() +
   theme(legend.position = "bottom")
+
+
+combined_plot <- forest_plot3 + sugar_plot3
+
+print(combined_plot)
 
 ```
 
@@ -458,14 +481,14 @@ ggplot(plot_data_long, aes(x = sdrt, y = grams + pseudocount, color = intake_typ
 
 ```
 
+## find the top foods in the 3 subcategories
 
 ```{r}
-# find the top foods in the 3 subcategories
 #  Filter, Summarize, and Prepare Data for Plotting ---
 
 # This data wrangling pipe will isolate the coffee/tea items, find the top
 # contributors, and calculate their sugar content for visualization.
-sub3_plot_data <- dtb_ %>%
+sub3_plot_data <- dtb %>%
   # Ensure Food_code is a character for string matching
   mutate(Food_code = as.character(Food_code)) %>%
 
@@ -506,10 +529,7 @@ sub3_plot_data <- dtb_ %>%
   mutate(
     component = if_else(component == "total_sugar", "Sugar", "Non-Sugar Mass")
   )
-```
 
-
-```{r}
 # --- Step 3: Create the Stacked Bar Chart ---
 
 ggplot(sub3_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fun = sum), fill = component)) +
@@ -529,6 +549,8 @@ ggplot(sub3_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fun = su
   # Use a clean theme
   theme_bw() +
   theme(legend.position = "bottom")
+
+ggsave('../data/R27_group3_top10.jpg', height = 7)
 ```
 
 
@@ -573,6 +595,7 @@ daily_intake_summary <- dtb %>%
   # Calculates the total dehydrated weight for each group
   summarise(
     total_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+     total_sugars = sum(Sugars_g, na.rm = TRUE),
     .groups = 'drop'
   )
 
@@ -617,6 +640,38 @@ final_model_data <- stool_samples_with_window %>%
 # View the final, model-ready table.
 # The columns are now based on the 2-digit FNDDS subgroups.
 print(final_model_data)
+
+
+# repeat the above process but only calculate the prior two day of sugar in those food categories
+final_model_sugar <- stool_samples_with_window %>%
+  left_join(
+    daily_intake_summary,
+    # The join is performed using direct column comparisons
+    by = join_by(
+      pid,
+      window_start <= fdrt,
+      window_end >= fdrt
+    )
+  ) %>%
+  # This step reshapes the data into the final wide format needed for modeling.
+  # It calculates the average over the 2-day window.
+  pivot_wider(
+    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+    names_from = food_category,
+    values_from = total_sugars,
+    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+    values_fill = 0, # If a category wasn't eaten, its value is 0
+    names_prefix = "avg_sugar_intake_" # Adds a clear prefix to the new columns
+  ) %>%
+    # This divides all the new intake columns by 100.
+  # The across() function efficiently applies the same operation to many columns.
+  mutate(across(starts_with("avg_sugar_intake_"), ~ .x / 100)) %>%
+
+  # Joins back the original stool sample info
+  right_join(stool_samples_df, by = c("pid", "sdrt")) %>%
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>%
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid))
 
 ```
 ```{r}
@@ -700,87 +755,194 @@ names(all_results) <- sweets_subcategories_to_test
 
 ```{r}
 # Combine the list of results into a single, clean data frame
-comparison_df <- bind_rows(all_results) %>%
+all_results %>%
+  bind_rows(.id = 'sweets_subcategories_to_test')  %>% write_csv('../data/R27_group4_full_res.csv')
+
+comparison_df <- all_results %>%
+  bind_rows(.id = 'sweets_subcategories_to_test') %>% 
   # Clean up the term name to be used as a label
+  filter(str_detect(term, 'empiricalTRUE:') & !str_detect(term, 'fg')) %>% 
   mutate(food_category = str_remove(term, "empiricalTRUE:")) %>%
-  mutate(food_category = str_remove(food_category, "avg_intake_"))
+  mutate(food_category = str_remove(food_category, "avg_intake_"))%>% 
+  mutate(is_significant = (conf.low * conf.high) > 0)
 ```
 
-
-
-```{r}
-# ---  Calculate Summary Statistics for Plotting ---
-
-# Calculate N (number of consumption events) and sugar proportion for each category
-summary_stats <- dtb %>%
-  # Ensures Food_code is a character for string matching
-  mutate(Food_code = as.character(Food_code)) %>%
-  # Create a new 'food_category' column based on the FNDDS code prefix.
-  # This logic now uses the first two digits for the 9x categories.
-  mutate(
-    food_category = case_when(
-      # --- Rules for the "Sugars, Sweets, and Beverages" major group ---
-      str_starts(Food_code, "91") ~ "Sugars_and_sweets",
-      str_starts(Food_code, "92") ~ "Nonalcoholic_beverages",
-      str_starts(Food_code, "93") ~ "Alcoholic_beverages",
-      str_starts(Food_code, "94") ~ "Water",
-      str_starts(Food_code, "95") ~ "Formulated_beverages",
-
-      # --- Rules for the other main food groups (using the first digit) ---
-      str_starts(Food_code, "1") ~ "fg_milk",
-      str_starts(Food_code, "2") ~ "fg_meat",
-      str_starts(Food_code, "3") ~ "fg_egg",
-      str_starts(Food_code, "4") ~ "fg_legume",
-      str_starts(Food_code, "5") ~ "fg_grain",
-      str_starts(Food_code, "6") ~ "fg_fruit",
-      str_starts(Food_code, "7") ~ "fg_veggie",
-      str_starts(Food_code, "8") ~ "fg_oils",
-      TRUE ~ NA_character_
-    )
-  ) %>%
-  # Removes any rows that were not assigned to a category
-  filter(!is.na(food_category)) %>%
-  # We only need the food category and the weights for this summary
-  select(food_category, dehydrated_weight, Sugars_g) %>%
-  # Group by the food category to summarize
-  group_by(food_category) %>%
-  summarise(
-    # Count the number of times this category was consumed (N)
-    n_events = n(),
-    # Calculate the total weight and total sugar consumed for the category
-    total_intake = sum(dehydrated_weight, na.rm = TRUE),
-    total_sugar = sum(Sugars_g, na.rm = TRUE)
-  ) %>%
-  # Calculate the overall sugar proportion
-  mutate(
-    sugar_proportion = total_sugar / total_intake
-  ) %>%
-  # Join these stats back to the model results
-  right_join(comparison_df, by = "food_category") %>%
-  # Clean up the name for plotting
-  mutate(
-    label = str_remove(food_category, "avg_intake_fg_") %>% str_replace_all("_", " ")
-  )
-
-```
-
+## forest plot
 
 ```{r}
 # Plot A: Forest plot of model results, annotated with N as a proxy for power
-forest_plot <- ggplot(summary_stats, aes(x = estimate, y = fct_reorder(label, estimate))) +
+forest_plot4 <- ggplot(comparison_df, aes(x = estimate, y = fct_reorder(food_category, -estimate))) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-  geom_point(size = 4, color = "#118AB2") +
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 1, color = "#118AB2") +
+  geom_point(aes( color = is_significant), size = 4) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high,  color = is_significant), height = 0.2, linewidth = 1) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
   labs(
-    title = "A) Model Effect Size & Precision",
-    subtitle = "Interaction effect on diversity during antibiotic use",
+    title = "Interaction Effect of Sweet Subcategories\nwith Antibiotics on Diversity",
     x = "Interaction Coefficient",
     y = "Food Subcategory"
   ) +
   theme_bw(base_size = 12)
 
-forest_plot
+forest_plot4
 ```
+
+## total and sugar dry weight
+
+```{r}
+merged_sugar <- final_model_data %>% 
+  full_join(final_model_sugar %>% select(pid , sdrt, starts_with("avg_sugar_intake_")))
+
+plot_data <- merged_sugar %>%
+  # Select only the columns we need for this plot
+  select(pid,sdrt,  starts_with("avg_intake_"), starts_with("avg_sugar_intake_")) %>%
+  # Pivot the data from a wide format to a long format
+  pivot_longer(
+    cols = 3:26,
+    names_to = "metric",
+    values_to = "grams"
+  ) %>%
+  #left_join(comparison_df %>% select(metric = food_category , estimate)) %>% 
+  # Extract the food category name from the column name
+  mutate(
+    food_category = str_remove(metric, "avg_intake_|avg_sugar_intake_"),
+    metric_type = if_else(str_starts(metric, "avg_sugar_intake_"), "sugar", "total")
+  ) %>%
+  # only plot the three subcategroes of the sweets group
+  filter(food_category %in% c('Nonalcoholic_beverages','Sugars_and_sweets','Water', 'Formulated_beverages')) %>% 
+  # Reshape again to have total intake and sugar intake in separate columns
+  select(pid,sdrt, food_category, metric_type, grams) %>%
+  # revert it back to original value by * 100
+  mutate(grams = grams * 100) %>% 
+  pivot_wider(
+    names_from = metric_type,
+    values_from = grams
+  ) %>%
+  # Calculate the overall average intake across all samples for each category
+  group_by(food_category) %>%
+  summarise(
+    avg_total_intake = mean(total, na.rm = TRUE),
+    avg_sugar_intake = mean(sugar, na.rm = TRUE)
+  ) %>%
+  # Calculate the proportion of sugar for sorting purposes
+  mutate(
+    sugar_proportion = avg_sugar_intake / avg_total_intake
+  ) %>%
+  # Calculate the non-sugar portion for the stacked bar
+  mutate(
+    avg_nonsugar_intake = avg_total_intake - avg_sugar_intake
+  ) %>%
+  # Reshape one last time for easy plotting with ggplot
+  pivot_longer(
+    cols = c(avg_sugar_intake, avg_nonsugar_intake),
+    names_to = "intake_type",
+    values_to = "grams"
+  ) %>%
+  # Clean up names for the plot legend
+  mutate(
+    intake_type = if_else(intake_type == "avg_sugar_intake", "Sugar", "Non-Sugar Mass"),
+    # Clean up food category names for the axis labels
+    food_category = str_remove(food_category, "fg_") %>% str_replace_all("_", " "),
+    # Reorder the 'food_category' factor based on the sugar proportion
+    # The '.desc = TRUE' ensures it's in descending order (highest % at the top)
+    food_category = factor(food_category, levels = c('Water','Sugars and sweets','Formulated beverages', 'Nonalcoholic beverages'))
+  ) 
+
+# --- Step 3: Create the Sorted Stacked Bar Chart ---
+
+sugar_plot4 <- ggplot(plot_data, aes(x = grams, y = food_category, fill = intake_type)) +
+  # Use geom_col which is an alias for geom_bar(stat="identity")
+  geom_col() +
+  # Use a color palette that clearly distinguishes sugar
+  scale_fill_manual(values = c("Sugar" = "#FF6B6B", "Non-Sugar Mass" = "#BDBDBD")) +
+  # Add informative labels
+  labs(
+    title = "Average Sugar Content by Food Category",
+    subtitle = "Categories are sorted by the total consumed mass",
+    x = "Average Dehydrated Weight Consumed (grams)",
+    y = "Food Category",
+    fill = "Component"
+  ) +
+  # Use a clean theme
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+
+combined_plot <- forest_plot4 + sugar_plot4
+
+print(combined_plot)
+
+```
+
+## top foods 
+
+```{r}
+sub4_plot_data <- dtb %>%
+  # Ensure Food_code is a character for string matching
+  mutate(Food_code = as.character(Food_code)) %>%
+
+  filter(str_starts(Food_code, "91") | str_starts(Food_code, "92") | str_starts(Food_code, "94") | str_starts(Food_code, "95")) %>%
+  
+  mutate(
+    food_category = case_when(
+      str_starts(Food_code, "91") ~ "Sugars_and_sweets",
+      str_starts(Food_code, "92") ~ "Nonalcoholic_beverages",
+      str_starts(Food_code, "93") ~ "Alcoholic_beverages",
+      str_starts(Food_code, "94") ~ "Water",
+      str_starts(Food_code, "95") ~ "Formulated_beverages",
+       TRUE ~ NA_character_
+    )) %>% 
+
+  # Group by the specific food name to aggregate all consumption records
+  group_by(food_category, Food_NSC) %>%
+
+  # Calculate the total intake and total sugar for each specific food item
+  summarise(
+    total_intake = sum(dehydrated_weight, na.rm = TRUE),
+    total_sugar = sum(Sugars_g, na.rm = TRUE)
+  ) %>%
+  
+  # Keep only the top 10 most consumed items for a clean plot
+  slice_max(order_by = total_intake, n = 10) %>%
+
+  # Calculate the non-sugar portion for the stacked bar
+  mutate(
+    non_sugar_mass = total_intake - total_sugar
+  ) %>%
+
+  # Reshape the data into a "long" format for easy plotting with ggplot
+  pivot_longer(
+    cols = c(total_sugar, non_sugar_mass),
+    names_to = "component",
+    values_to = "grams"
+  ) %>%
+  # Clean up names for the plot legend
+  mutate(
+    component = if_else(component == "total_sugar", "Sugar", "Non-Sugar Mass")
+  )
+
+# --- Step 3: Create the Stacked Bar Chart ---
+
+ggplot(sub4_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fun = sum), fill = component)) +
+  # Use geom_col to create the bars
+  geom_col() +
+  # Use a color palette that clearly distinguishes sugar
+  scale_fill_manual(values = c("Sugar" = "#FF6B6B", "Non-Sugar Mass" = "#BDBDBD")) +
+  facet_grid(food_category ~ ., scales = 'free_y') +
+  # Add informative labels
+  labs(
+    title = "Top 10 Consumed Items ",
+    subtitle = "Showing total intake and the proportion from sugar",
+    x = "Total Dehydrated Weight Consumed (grams)",
+    y = "Food Item",
+    fill = "Component"
+  ) +
+  # Use a clean theme
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+ggsave('../data/R27_group4_top10.jpg', height = 8, width = 8)
+```
+
 
 ## Full bayesian results
 
@@ -1213,33 +1375,7 @@ ggsave('../data/R27_faceted_exposure.jpg', width = 12, height = 9)
 ```
 
 
-```{r}
-# Plot B: Bar chart of sugar proportion
-sugar_plot <- ggplot(summary_stats, aes(x = sugar_proportion, y = fct_reorder(label, estimate))) +
-  geom_col(aes(fill = sugar_proportion), show.legend = FALSE) +
-  # Add text labels showing the exact percentage
-  geom_text(aes(label = scales::percent(sugar_proportion, accuracy = 1)), hjust = -0.2, size = 3.5) +
-  scale_x_continuous(labels = scales::percent, limits = c(0, 1), expand = expansion(mult = c(0, 0.15))) +
-  scale_fill_gradient(low = "#FFD166", high = "#FF6B6B") +
-  labs(
-    title = "B) Sugar Content",
-    subtitle = "% of dry weight from sugar",
-    x = "Sugar Proportion",
-    y = "" # No y-axis label needed as it aligns with Plot A
-  ) +
-  theme_bw(base_size = 12) +
-  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
 
-sugar_plot
-```
-```{r}
-library(patchwork)
-# Use patchwork to arrange the plots side-by-side
-combined_plot <- forest_plot + sugar_plot
-
-print(combined_plot)
-
-```
 # make a tree showing the first three digit level of the sweets group that showed up in this dataset 
 
 ```{r}

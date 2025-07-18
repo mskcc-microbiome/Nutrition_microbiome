@@ -678,7 +678,7 @@ gee_cor <- all_1 %>%
         title = str_glue("Correlation between ASV_1 and\n{name_}"),
         subtitle = paste0("GEE Coefficient = ", gee_coeff, " (p = ", gee_p_value, ")"),
         x = "ASV_1 Relative Abundance (16S)",
-        y = str_glue("{name_} Relative Abundance (Shotgun)")
+        y = str_glue("{name_} Relab (Shotgun)")
       ) +
       # Use a clean theme
       theme_bw(base_size = 14) +
