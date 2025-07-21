@@ -33,7 +33,86 @@ data <- joined %>%
 # how many samples from how many patients
 n_samples <- data %>% distinct(sampleid2) %>% nrow
 n_patients <- data %>% distinct(pid) %>% nrow
+
 ```
+
+```{r}
+full_data <- data
+# Calculate counts for the full, unfiltered dataset
+unfiltered_counts <- full_data %>%
+  summarise(
+    num_patients = n_distinct(pid),
+    num_samples = n_distinct(sampleid2)
+  ) %>%
+  mutate(Condition = "Unfiltered")
+
+# Calculate counts for the sdrt1 <= 0 filter
+filter1_counts <- full_data %>%
+  filter(sdrt1 <= 0) %>%
+  summarise(
+    num_patients = n_distinct(pid),
+    num_samples = n_distinct(sampleid2)
+  ) %>%
+  mutate(Condition = "earliest sample day <= 0")
+
+# Calculate counts for the sdrt1 <= 3 filter
+filter2_counts <- full_data %>%
+  filter(sdrt1 <= 3) %>%
+  summarise(
+    num_patients = n_distinct(pid),
+    num_samples = n_distinct(sampleid2)
+  ) %>%
+  mutate(Condition = "earliest sample day <= 3")
+
+# Combine the three summaries into a single dataframe
+summary_df <- bind_rows(unfiltered_counts, filter1_counts, filter2_counts) %>%
+  # Pivot the data into a "long" format suitable for ggplot2's grouped bar charts
+  pivot_longer(
+    cols = c(num_patients, num_samples),
+    names_to = "Metric",
+    values_to = "Count"
+  ) %>%
+  # Clean up the metric names for better plot labels
+  mutate(
+    Metric = if_else(Metric == "num_patients", "Patients", "Samples"),
+    # Convert Condition to a factor to control the order on the plot
+    Condition = factor(Condition, levels = c("Unfiltered", "earliest sample day <= 0", "earliest sample day <= 3"))
+  )
+
+# Finally, create the plot using ggplot2
+ggplot(summary_df, aes(x = Metric, y = Count, fill = Condition)) +
+  # Use geom_bar with stat="identity" because we are providing the y-values directly.
+  # position="dodge" creates the side-by-side grouped bars.
+  geom_bar(stat = "identity", position = "dodge") +
+  # Add text labels on top of each bar for clarity.
+  # position_dodge ensures the labels are correctly placed above their respective bars.
+  geom_text(
+    aes(label = Count),
+    position = position_dodge(width = 0.9),
+    vjust = -0.5, # Adjust vertical position to be just above the bar
+    size = 3.5
+  ) +
+  # Use a nice color palette for the different conditions
+  scale_fill_brewer(palette = "Pastel1") +
+  # Add informative labels and a title
+  labs(
+    title = "Patient and Sample Counts After Filtering",
+    subtitle = "Comparison of counts for different earliest sample day value thresholds",
+    x = "",
+    y = "Total Count",
+    fill = "Filter Condition"
+  ) +
+  # Use a clean, minimal theme
+  theme_minimal(base_size = 12) +
+  # Make some final theme adjustments
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    legend.position = "top"
+  )
+
+```
+
+# focus on the subset that has the earlist sample <= 0
 
 ```{r}
 all_food_vars <- meta %>% select(starts_with('fg')) %>% colnames()
@@ -63,7 +142,7 @@ priors <-
 # Fit the model (using fewer iterations for this example to run quickly)
 model_fit <- brm(
   formula = formula,
-  data = data,
+  data = data %>% filter(sdrt1 <= 0) ,
   #prior = priors,
   #family = Beta(link = "logit"), # Use the Beta family
   control = list(adapt_delta = 0.99, max_treedepth = 15),
@@ -173,5 +252,72 @@ posterior_draws <- as_draws_df(model_fit)
 
 # Calculate the probability that the coefficient for 'abx * fg sweets' is positive
 pd <- mean(posterior_draws$`b_empiricalTRUE:fg_sweets` > 0)
+
+# how to understand the empirical crossing zero
+# In a model with interaction terms (like yours), the "main effect" for a variable like empiric no longer represents its overall average effect. Instead, it represents the effect of antibiotics for a hypothetical patient who consumed zero grams of all food groups in your model (zero sweets, zero grains, zero milk, etc.).
+
+#Since it's highly unlikely any patient ate absolutely nothing, this "main effect" is an estimate for an unrealistic scenario, which is why it's not very meaningful on its own and can appear non-significant.
+
+# abx effects while having all those different types of foods......
+
+# this compositional change, This is a measure of turnover or directional change, not just collapse. Imagine the microbiome as a point on a map. Antibiotics will definitely cause it to move, but the distance it moves might not be the same for everyone.
+# This is where your interaction terms become critical. Your model is showing that the distance of the shift caused by antibiotics depends heavily on what the patient is eating. For example, antibiotics might push the microbiome 5 "units" away. But antibiotics + sweets might push it 10 "units" away.
+#Because the effect of antibiotics is sliced up and distributed among all the interaction terms, the "main effect" of empiric (which represents the shift for a patient eating nothing) becomes non-significant.
 ```
 
+# stool_dist
+
+```{r}
+library(gghalves) # For creating the raincloud plot effect
+
+ggplot(full_data, aes(x = empirical, y = stool_dist, fill = empirical)) +
+  # Add the 'rain' - the individual data points (jittered)
+  geom_half_point(
+    side = "l", # Show points on the left
+    aes(color = empirical),
+    shape = 16,
+    size = 1.5,
+    alpha = 0.4
+  ) +
+  # Add the 'cloud' - the density distribution
+  geom_half_violin(
+    side = "r", # Show the density plot on the right
+    nudge = 0.05,
+    trim = FALSE,
+    alpha = 0.7
+  ) +
+  # Add the boxplot in the middle
+  geom_boxplot(
+    width = 0.15,
+    outlier.shape = NA, # Hide outliers since we are plotting all points
+    alpha = 0.7
+  ) +
+  # Flip the coordinates for better readability
+  coord_flip() +
+  # Add a statistical comparison of the means (Wilcoxon test)
+  ggpubr::stat_compare_means(
+    method = "wilcox.test",
+    label = "p.signif",
+    label.x = 1.5,
+    label.y = 1.4
+  ) +
+  # Customize colors and remove legends that are not needed
+  scale_color_manual(values = c("Exposed" = "#D55E00", "Not Exposed" = "#0072B2"), guide = "none") +
+  scale_fill_manual(values = c("Exposed" = "#D55E00", "Not Exposed" = "#0072B2"), guide = "none") +
+  # Add informative labels and a title
+  labs(
+    title = "Variability in Microbiome Disruption by Antibiotic Exposure",
+    subtitle = "The spread of distances from baseline is larger in antibiotic-exposed samples",
+    x = "",
+    y = "Bray-Curtis Distance from Baseline"
+  ) +
+  # Use a clean theme
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.major.y = element_blank(), # Clean up the background
+    panel.grid.minor.y = element_blank()
+  )
+
+```
+The above plot shows that, overall, antibiotics are associated with a greater shift from baseline. The magnitude of that shift is highly variable and is significantly influenced by diet, which is why the model assigns significance to the diet-antibiotic interactions rather than to the antibiotic term alone.
