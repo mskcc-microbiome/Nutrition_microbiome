@@ -285,6 +285,78 @@ ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool, fill = diet
 # weight data 
 
 ```{r}
-weights <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xlsx')
+weight_data <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xlsx') %>% 
+  clean_names() %>% 
+  mutate(group = if_else(str_detect(treatment, 'PBS'), 'RB08', group)) %>% 
+  rename(room = group)
+
+processed_weights <- weight_data %>%
+  # Determine the number of unique treatments within each room.
+  group_by(room) %>%
+  mutate(n_treatments = n_distinct(treatment)) %>%
+  ungroup() %>%
+  # Create a numeric ordering column based on the user's conditional logic.
+  mutate(
+    treatment_order = case_when(
+      # For rooms with 4 treatments (CFU plot order)
+      n_treatments == 4 & treatment == "PBS_vehicle" ~ 1,
+      n_treatments == 4 & treatment == "PBS_sucrose" ~ 2,
+      n_treatments == 4 & treatment == "Biapenem_Only" ~ 3,
+      n_treatments == 4 & treatment == "Biapenem_Sucrose" ~ 4,
+      # For rooms with 2 treatments
+      n_treatments == 2 & treatment == "Biapenem_Only" ~ 1,
+      n_treatments == 2 & treatment == "Biapenem_Sucrose" ~ 2,
+      TRUE ~ 99 # Default case
+    ),
+    # Create a unique group for each mouse's trajectory.
+    trajectory_group = paste(room, treatment,  mouse_identifier, sep = "_"),
+    # Create the group for the x-axis, then reorder it based on our custom logic.
+    plot_group = paste(treatment, day, sep = "_"),
+    plot_group = fct_reorder(plot_group, treatment_order)
+  )
+```
+
+
+```{r}
+# --- Plotting ---
+# Generate the plot using ggplot2
+ggplot(processed_weights, aes(x = plot_group, y = weight)) +
+  
+  # Add boxplots to show the distribution of weights.
+  geom_boxplot(aes(fill = treatment), outlier.shape = NA, alpha = 0.6) +
+  
+  # Add thin lines to track the trajectory of each individual mouse.
+  geom_line(aes(group = trajectory_group), color = "gray20", linewidth = 0.5, alpha = 0.7) +
+  
+  # Add individual data points.
+  geom_jitter(aes(color = treatment), width = 0.1, size = 2, alpha = 0.8) +
+  
+  # Create separate panels for each room, allowing the x-axis to adjust.
+  facet_wrap(~ room, scales = "free_x", nrow = 1) +
+  
+  # Manually set colors to distinguish treatments.
+  scale_fill_brewer(palette = "Pastel1") +
+  scale_color_brewer(palette = "Set1") +
+  
+  # Add labels for the axes and title.
+  labs(
+    title = "Mouse Weight Trajectories Across Rooms and Treatments",
+    x = "Day of Experiment",
+    y = "Weight (grams)"
+  ) +
+  
+  # Apply a clean, minimal theme.
+  theme_bw() +
+  
+  # Further theme adjustments for a polished look.
+  theme(
+    strip.text = element_text(size = 10, face = "bold"), # Facet labels
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), # Rotate labels for readability
+    legend.position = "none"
+  )
+
+
 ```
 
