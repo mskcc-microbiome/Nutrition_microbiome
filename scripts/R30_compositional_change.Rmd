@@ -265,12 +265,12 @@ pd <- mean(posterior_draws$`b_empiricalTRUE:fg_sweets` > 0)
 #Because the effect of antibiotics is sliced up and distributed among all the interaction terms, the "main effect" of empiric (which represents the shift for a patient eating nothing) becomes non-significant.
 ```
 
-# stool_dist
+# stool_dist viz
 
 ```{r}
 library(gghalves) # For creating the raincloud plot effect
 
-ggplot(full_data, aes(x = empirical, y = stool_dist, fill = empirical)) +
+ggplot(full_data %>% filter(sdrt1 <= 0), aes(x = empirical, y = stool_dist, fill = empirical)) +
   # Add the 'rain' - the individual data points (jittered)
   geom_half_point(
     side = "l", # Show points on the left
@@ -318,6 +318,17 @@ ggplot(full_data, aes(x = empirical, y = stool_dist, fill = empirical)) +
     panel.grid.major.y = element_blank(), # Clean up the background
     panel.grid.minor.y = element_blank()
   )
-
 ```
 The above plot shows that, overall, antibiotics are associated with a greater shift from baseline. The magnitude of that shift is highly variable and is significantly influenced by diet, which is why the model assigns significance to the diet-antibiotic interactions rather than to the antibiotic term alone.
+
+# using the diet dist
+
+```{r}
+library(lme4)
+library(lmerTest)
+# Your new linear mixed-effects model formula
+dist2 <- lmer(stool_dist ~ diet_dist * empirical + intensity + TPN + EN + (1 | pid), data = full_data)
+summary(dist2)
+#The significant negative interaction term (-0.19) means that the relationship between diet change and microbiome disruption is weaker in patients on antibiotics (slope of +0.40) compared to those not on antibiotics (slope of +0.59). This suggests antibiotics create a "ceiling effect" on microbiome disruption.
+```
+
