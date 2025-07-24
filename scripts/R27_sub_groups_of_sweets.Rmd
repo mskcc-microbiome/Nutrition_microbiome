@@ -9,7 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-library(tidyverse)
+library(tidyverse) 
 library(broom.mixed)
 library(brms)   
 library(ggpubr)
@@ -553,8 +553,7 @@ ggplot(sub3_plot_data, aes(x = grams, y = fct_reorder(Food_NSC, grams, .fun = su
 ggsave('../data/R27_group3_top10.jpg', height = 7)
 ```
 
-
-# the first 2 digit sub-group  
+# the 4 sub-groups     
 
 ```{r}
 stool_samples_df <- read_csv('../data/153_combined_META.csv') %>%
@@ -1486,5 +1485,86 @@ ggplot() +
   )
 
 ggsave('../data/R27_g9_tree.pdf', width = 12)
+```
+
+# the pairwise correlation between the 4 subgroups 
+
+```{r}
+library(rmcorr)
+library(GGally) # Used for its ggpairs-like functionality and themes
+library(cowplot) # Used to arrange the final plots
+
+# Replace `your_data` with the name of your actual data frame from this point on.
+your_data <- final_model_data
+
+# Step 3: Define the pairs of variables to correlate
+food_groups <- c("avg_intake_Nonalcoholic_beverages", "avg_intake_Sugars_and_sweets", "avg_intake_Water", "avg_intake_Formulated_beverages")
+pairs_to_calculate <- combn(food_groups, 2, simplify = FALSE)
+
+# Step 4: Create a function to calculate and print the correlation results
+# This function will run rmcorr and print a clean summary.
+calculate_rmcorr <- function(data, var1, var2) {
+  cat("--------------------------------------------------\n")
+  cat("Repeated Measures Correlation for:", var1, "and", var2, "\n")
+  cat("--------------------------------------------------\n")
+  
+  # Create the function call by substituting placeholders (v1, v2)
+  # with the actual variable names from our strings (var1, var2).
+  the_call <- substitute(
+    rmcorr(participant = pid, measure1 = v1, measure2 = v2, dataset = data),
+    list(v1 = as.name(var1), v2 = as.name(var2))
+  )
+  
+  # Evaluate the fully formed call.
+  rmcorr_result <- eval(the_call)
+
+  # Return a tidy tibble with the results
+  tibble(
+    var1 = var1,
+    var2 = var2,
+    r = rmcorr_result$r,
+    p.value = rmcorr_result$p
+  )
+}
+
+# so there is actually no correlation, which is not surprising. 
+
+# Step 5: Run the calculation for each pair and combine into a single data frame
+# Get all combinations of the food groups
+all_pairs <- combn(food_groups, 2, simplify = FALSE)
+
+# Calculate correlations for all pairs
+corr_results <- map_dfr(all_pairs, ~calculate_rmcorr(your_data, .x[1], .x[2]))
+```
+
+
+```{r}
+# Step 7: Visualize the correlation matrix as a heatmap
+correlation_heatmap <- ggplot(corr_results %>% mutate(r = round(r, digits = 2)), aes(x = var1, y = var2, fill = r)) +
+  geom_tile(color = "black", linewidth = 0.2) +
+  # Add the correlation coefficient text to the tiles
+  geom_text(aes(label = r), color = "black", size = 2) +
+  # Use a diverging color scale for the correlation values
+  scale_fill_gradient2(low = "#075AFF", high = "#FF0000", mid = "yellow",
+                       midpoint = 0, limit = c(-1,1), space = "Lab",
+                       name="Repeated Measures\nCorrelation (r)") +
+  theme_minimal(base_size = 12) +
+  # Clean up the theme for a publication-ready look
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, size = 10, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid.major = element_blank(),
+    legend.position = "top",
+    legend.justification = "center"
+  ) +
+  guides(fill = guide_colorbar(barwidth = 10, barheight = 1.5,
+                               title.position = "top", title.hjust = 0.5)) +
+  coord_fixed() + # Ensure tiles are square
+  labs(
+    title = "Pairwise Repeated Measures Correlation Matrix"
+    )
+
+# Print the plot
+print(correlation_heatmap)
 ```
 
