@@ -1697,7 +1697,9 @@ model_fit <- brm(
     silent = 2
 )
 
-results_df <- tidy(model_fit, conf.int = TRUE)
+results_df <- tidy(model_fit, conf.int = TRUE) %>% 
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
 ```
 ```{r}
 cleaned_effects <- results_df %>%
@@ -1718,7 +1720,7 @@ main_effects_df <- cleaned_effects %>% filter(effect_type == "Main Effect")
 interaction_df <- cleaned_effects %>% filter(effect_type == "Interaction") %>%
   # Create a new column to identify significant results
   # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
-  mutate(is_significant = (conf.low * conf.high) > 0)
+  mutate(is_significant = (conf.low * conf.high) >= 0)
 
 # Plot A: Main Clinical Covariates
 plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
@@ -1776,9 +1778,8 @@ plot_interactions <- ggplot(interaction_df_processed, aes(x = estimate, y = fct_
   
   # Add labels and a clean theme
   labs(
-    title = "Food Group Interaction Effects on Compositional Disruption",
-    subtitle = "Highlighting key trends and significant effects",
-    x = "Coefficient Estimate (Change in Bray-Curtis Distance)",
+    title = "Interaction Effect of food groups\nwith Antibiotics on Diversity",
+    x = "Interaction Coefficient",
     y = "Food Group x Antibiotic Exposure"
   ) +
   theme_bw(base_size = 14) +
