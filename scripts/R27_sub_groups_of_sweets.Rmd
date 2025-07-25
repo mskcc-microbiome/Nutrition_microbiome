@@ -1536,7 +1536,95 @@ all_pairs <- combn(food_groups, 2, simplify = FALSE)
 # Calculate correlations for all pairs
 corr_results <- map_dfr(all_pairs, ~calculate_rmcorr(your_data, .x[1], .x[2]))
 ```
+```{r}
+# look at all of the pairwise correlation of the food groups 
+all_food_vars <- final_model_data %>% select(starts_with('avg')) %>% colnames()
 
+pairs_to_calculate_all <- combn(all_food_vars, 2, simplify = FALSE)
+
+# Calculate correlations for all pairs
+corr_results_all <- map_dfr(pairs_to_calculate_all, ~calculate_rmcorr(final_model_data, .x[1], .x[2]))
+
+plot_data <- corr_results_all %>%
+  mutate(
+    neg_log10_p = -log10(p.value)
+  ) %>%
+  # To make the plot symmetrical, we add the reverse pairs
+  bind_rows(
+    corr_results_all %>%
+      rename(var1_temp = var1) %>% 
+      rename(var1 = var2) %>%
+      rename(var2 = var1_temp) %>% 
+      mutate(neg_log10_p = -log10(p.value))
+  )
+
+# Step 7: Visualize the correlations as a scatter plot (bubble plot)
+correlation_bubble_plot <- ggplot(plot_data, aes(x = var1, y = var2)) +
+  # Use geom_point to create the scatter plot
+  geom_point(aes(color = r, size = neg_log10_p), alpha = 0.8) +
+  # Use a diverging color scale for the correlation values (r)
+  scale_color_gradient2(low = "#075AFF", high = "#FF0000", mid = "white",
+                        midpoint = 0, limit = c(-1,1), name = "Correlation (r)") +
+  # Control the size of the points based on significance
+  scale_size_continuous(name = "Significance (-log10 p-value)", range = c(2, 10)) +
+  # Use a minimal theme
+  theme_minimal(base_size = 12) +
+  # Clean up the theme for a publication-ready look
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid.major = element_line(color = "grey90"),
+    legend.position = "right"
+  ) +
+  labs(
+    title = "Pairwise Repeated Measures Correlations",
+    subtitle = "Point size represents statistical significance, color represents correlation strength"
+  )
+
+# Print the plot
+print(correlation_bubble_plot)
+
+```
+
+```{r}
+# the above plot but the plot each pair correlation as bars, and the bar height corresponding to the r, and the fill corresponding to the neg_log10_p, sorted by the r in the descending order 
+plot_data <- corr_results_all %>%
+  mutate(
+    neg_log10_p = -log10(p.value),
+    # Create a descriptive label for each pair
+    pair_label = paste(var1, "&", var2),
+    # Reorder the labels based on the correlation coefficient 'r' in descending order
+    pair_label_sorted = fct_reorder(pair_label, r, .desc = TRUE)
+  )
+
+# Step 7: Visualize the correlations as a sorted bar plot
+correlation_bar_plot <- ggplot(plot_data, aes(x = pair_label_sorted, y = r, fill = neg_log10_p)) +
+  geom_col(color = "black", linewidth = 0.5) + # Use geom_col for bar plot where height is specified
+  # Add text labels for the r-value on top of each bar
+  geom_text(aes(label = sprintf("%.2f", r)), hjust = -0.2, size = 3.5) +
+  # Flip coordinates to make bars horizontal for better readability of labels
+  coord_flip(ylim = c(min(plot_data$r) - 0.1, max(plot_data$r) + 0.1)) +
+  # Use a sequential color scale for the fill (significance)
+  scale_fill_viridis_c(name = "Significance\n(-log10 p-value)", option = "C") +
+  # Add a horizontal line at y=0 for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(
+    title = "Pairwise Repeated Measures Correlations",
+    subtitle = "Bar length represents correlation strength (r), color represents significance",
+    x = "Food Group Pair",
+    y = "Repeated Measures Correlation (r)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+      panel.grid.major.y = element_blank(), # Remove horizontal grid lines
+      panel.grid.minor.x = element_blank(), # Remove vertical minor grid lines
+      axis.title.x = element_text(margin = margin(t = 10)),
+      plot.title = element_text(face = "bold")
+  )
+
+# Print the plot
+print(correlation_bar_plot)
+```
 
 ```{r}
 # Step 7: Visualize the correlation matrix as a heatmap
@@ -1566,5 +1654,138 @@ correlation_heatmap <- ggplot(corr_results %>% mutate(r = round(r, digits = 2)),
 
 # Print the plot
 print(correlation_heatmap)
+```
+
+# 4 subgroups together
+
+```{r}
+all_food_vars <- final_model_data %>% select(starts_with('avg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = final_model_data,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 2, cores = 10,
+    seed = 123,
+    silent = 2
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE)
+```
+```{r}
+cleaned_effects <- results_df %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")
+  )
+
+# Separate into two dataframes for two separate plots
+main_effects_df <- cleaned_effects %>% filter(effect_type == "Main Effect")
+interaction_df <- cleaned_effects %>% filter(effect_type == "Interaction") %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) > 0)
+
+# Plot A: Main Clinical Covariates
+plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high), color = "gray50", linewidth = 1, size = 0.7) +
+  labs(
+    title = '', # Use the name of the list element as the title
+    subtitle = "Main Clinical Effects",
+    x = "Coefficient Estimate",
+    y = "Covariate"
+  ) +
+  theme_bw(base_size = 12)
+
+# This pipe creates clean labels and adds a special 'highlight' column
+interaction_df_processed <- interaction_df %>%
+  # Create a column to flag the specific term you want to highlight
+  mutate(
+    highlight_status = case_when(
+      #clean_term == "abx * fg sweets" ~ "Of Interest",
+      is_significant == TRUE    ~ "Significant",
+      TRUE                      ~ "Not Significant"
+    )
+  )
+
+# --- Step 3: Create the Visualization ---
+
+plot_interactions <- ggplot(interaction_df_processed, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+  # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  
+  # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+  # The color and alpha (transparency) are now mapped to our new 'highlight_status' column
+  geom_pointrange(
+    aes(xmin = conf.low, xmax = conf.high, color = highlight_status, alpha = highlight_status),
+    linewidth = 1, size = 0.7
+  ) +
+  
+  # Manually define the colors and alpha levels for each status
+  scale_color_manual(
+    values = c(
+      "Significant" = "red",
+     # "Of Interest" = "blue",
+      "Not Significant" = "gray50"
+    ),
+    name = "Effect Status" # Legend title
+  ) +
+  scale_alpha_manual(
+    values = c(
+      "Significant" = 1.0, # Fully opaque
+      "Of Interest" = 1.0, # Fully opaque
+      "Not Significant" = 1.0  # More transparent
+    ),
+    guide = "none" # Hide the separate alpha legend
+  ) +
+  
+  # Add labels and a clean theme
+  labs(
+    title = "Food Group Interaction Effects on Compositional Disruption",
+    subtitle = "Highlighting key trends and significant effects",
+    x = "Coefficient Estimate (Change in Bray-Curtis Distance)",
+    y = "Food Group x Antibiotic Exposure"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "bottom")
+
+
+# Combine the plots and add the overall title for this model's results
+plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
 ```
 
