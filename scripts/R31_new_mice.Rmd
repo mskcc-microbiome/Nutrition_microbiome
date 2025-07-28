@@ -571,4 +571,99 @@ ggplot(processed_data, aes(x = plot_group, y = logCFU, fill = diet_treatment)) +
   # Extend the plot margin to make room for the annotations.
   coord_cartesian( clip = "off")
 ```
+# EM07
+
+```{r}
+experiment_data <- readxl::read_excel('../data/7_25_25_biapenem_rebuttal_updatedwithDay3.xlsx') %>%  
+   filter(!is.na(Stool_weight_mg)) %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
+  clean_names() %>%
+  mutate(logCFU = log10(cf_us_per_gram_stool))
+```
+
+
+```{r}
+processed_data <- experiment_data %>%
+  # The value '0' can't be plotted on a log scale. We'll replace it with a small number (e.g., 1)
+  # to include it in the plot, as is common practice.
+  mutate(cf_us_per_gram_stool = if_else(cf_us_per_gram_stool == 0, 1, cf_us_per_gram_stool)) %>%
+  # Create separate columns for 'antibiotic_treatment' and 'diet_treatment' from the 'group' column.
+  mutate(
+    antibiotic_treatment = case_when(
+      str_detect(treatment, "Biapenem") ~ "biapenem",
+      str_detect(treatment, "PBS") ~ "PBS",
+      TRUE ~ "Unknown"
+    ),
+    diet_treatment = case_when(
+      str_detect(treatment, "Sucrose") ~ "sucrose",
+      str_detect(treatment, "Only") ~ "vehicle",
+      TRUE ~ "Unknown"
+    ),
+    # Ensure the treatments are ordered correctly for the plot layout.
+    antibiotic_treatment = factor(antibiotic_treatment, levels = c("PBS", "biapenem")),
+    diet_treatment = factor(diet_treatment, levels = c("vehicle", "sucrose"))
+  ) %>%
+  # Create a single grouping variable for the x-axis by combining the treatment and day information.
+  mutate(
+    plot_group = paste(antibiotic_treatment, diet_treatment, day, sep = "_"),
+    # Create a unique ID for each mouse's trajectory within its specific treatment group.
+    trajectory_group = paste(antibiotic_treatment, diet_treatment, mouse_identifier, sep = "_")
+  ) %>%
+  # Convert the new grouping variable to a factor and set the levels to enforce the desired plot order.
+  mutate(
+    plot_group = factor(plot_group, levels = c(
+      "PBS_vehicle_0", "PBS_vehicle_3", 
+      "PBS_sucrose_0", "PBS_sucrose_3", 
+      "biapenem_vehicle_0", "biapenem_vehicle_3", 
+      "biapenem_sucrose_0", "biapenem_sucrose_3"
+    ))
+  )
+
+ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool, fill = diet_treatment)) +
+  
+  # Add vertical lines to visually separate the main treatment blocks.
+  #geom_vline(xintercept = c(3.5, 6.5, 9.5), color = "gray80", linetype = "dashed") +
+
+  # Add boxplots. The fill color is mapped to the diet treatment.
+  # Outliers are not plotted here as geom_jitter will show all individual points.
+  geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  
+   # Add thin lines to track the trajectory of each individual mouse.
+  geom_line(aes(group = trajectory_group), color = "gray50", linewidth = 0.5, alpha = 0.7) +
+  
+  # Add individual data points with some horizontal jitter to prevent overlap.
+  geom_point(aes(color = diet_treatment), width = 0.2, size = 2) +
+  
+  # Use a logarithmic scale for the y-axis, which is essential for this type of CFU data.
+  # We customize the labels to show scientific notation (10^2, 10^3, etc.).
+  scale_y_log10(
+    breaks = scales::trans_breaks("log10", function(x) 10^x, n = 9),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
+  
+  # Manually set the colors to match the publication figure (gray for vehicle, pink for sucrose).
+  scale_fill_manual(values = c("vehicle" = "gray", "sucrose" = "#FF69B4")) +
+  scale_color_manual(values = c("vehicle" = "gray40", "sucrose" = "red")) +
+  
+  # Add labels for the axes and title.
+  labs(
+    y = "Enterococcal\nCFU/gram",
+    x = "Treatment Group",
+    title = "EM07 July 25"
+  ) +
+  
+  # Apply a clean, classic theme suitable for publication.
+  theme_classic() +
+  
+  # Further theme adjustments for a polished look.
+  theme(
+    axis.title = element_text(size = 12),
+    axis.text.x = element_text(size = 10, vjust = 0, angle = 90), # Adjust position of day numbers
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "none" # Hide the legend as the colors are explained by the fill.
+  ) +
+  # Extend the plot margin to make room for the annotations.
+  coord_cartesian( clip = "off")
+```
 
