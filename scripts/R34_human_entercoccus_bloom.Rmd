@@ -1,0 +1,112 @@
+---
+title: "Transient or sustained" 
+output: html_document
+date: "2025-07-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr) 
+```
+
+```{r}
+g_relab <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 
+  spread('genus','relab', fill = 0) %>% 
+  select(sampleid, Enterococcus_relab = Enterococcus)
+
+enterococcus_abundance <- read_csv('../data/153_combined_META.csv') %>% 
+  full_join(g_relab) %>% 
+  mutate(Entero_log10 = log10(Enterococcus_relab + 1e-05)) %>% 
+  select(pid, sdrt, sampleid,Enterococcus_relab, Entero_log10 )
+```
+
+
+```{r}
+#  Calculate Antibiotic Exposure Duration within Sampling Window ---
+# calculate the days of exposure to any of the broad spectrum abx from the earlist day of the stool sample collection to the latest day of the stool sampling 
+abx_exposure <- read_csv('../data/R32_meds_expanded_all_medication_classified_for_each_day.csv')
+
+# First, determine the earliest and latest stool sample day for each patient.
+# This defines the relevant time window for our analysis.
+patient_sampling_window <- enterococcus_abundance %>%
+  group_by(pid) %>%
+  summarise(
+    first_sample_day = min(sdrt, na.rm = TRUE),
+    last_sample_day = max(sdrt, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Now, calculate the number of broad-spectrum antibiotic days that fall
+# within each patient's specific sampling window.
+antibiotic_days_in_window <- abx_exposure %>%
+  # Add the sampling window start/end dates to the antibiotic data
+  left_join(patient_sampling_window, by = "pid") %>%
+  # Only consider antibiotic exposures that happened during the sampling period
+  filter(day >= first_sample_day & day <= last_sample_day) %>%
+  # Filter for only the 'broad_spectrum' category
+  filter(exposure_category == "broad_spectrum") %>%
+  # Count the number of broad-spectrum days for each patient
+  group_by(pid) %>%
+  summarise(broad_spectrum_exposure_days = n()) %>%
+  ungroup()
+```
+
+```{r}
+bloom_threshold <- 0.10
+
+# Calculate the duration of the bloom for each patient
+bloom_duration <- enterococcus_abundance %>%
+  # Filter for time points where Enterococcus is above the bloom threshold
+  filter(Enterococcus_relab > bloom_threshold) %>%
+  # Group by patient to count the number of bloom days for each one
+  group_by(pid) %>%
+  # 'n()' counts the number of samples (days) in the bloom state
+  summarise(bloom_days = n()) %>%
+  ungroup()
+
+# ---  Combine Data for Final Analysis ---
+# Create a master list of all patients who have stool samples.
+all_patients <- enterococcus_abundance %>%
+  distinct(pid)
+
+# Combine the antibiotic and bloom duration data. Using left_joins from the master
+# patient list ensures we keep all patients, even if they had zero bloom days
+# or zero antibiotic exposure days.
+analysis_data <- all_patients %>%
+  left_join(antibiotic_days_in_window, by = "pid") %>%
+  left_join(bloom_duration, by = "pid") %>%
+  # If a patient had no blooms or no antibiotics in their window, the count will be NA.
+  # We must replace these NAs with 0.
+  mutate(
+    broad_spectrum_exposure_days = replace_na(broad_spectrum_exposure_days, 0),
+    bloom_days = replace_na(bloom_days, 0)
+  )
+
+# --- 5. Perform Correlation and Plot ---
+# Now we create the scatter plot to visualize the relationship.
+ggplot(analysis_data, aes(x = broad_spectrum_exposure_days, y = bloom_days)) +
+  geom_point(alpha = 0.7, size = 3, color = "#0072B2") +
+  # Add a regression line to show the trend
+  geom_smooth(method = "lm", se = FALSE, color = "#D55E00", linetype = "dashed") +
+  # Use the 'stat_cor' function from ggpubr to automatically calculate and display
+  # the Spearman correlation coefficient and p-value on the plot.
+  stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top", size = 5) +
+  labs(
+    title = "Sustained Antibiotic Exposure is Linked to\nProlonged Enterococcus Blooms",
+    x = "Total Days of Broad-Spectrum Antibiotic Exposure During Stool Sampling",
+    y = "Total Days in Enterococcus Bloom State\n(>10% Abundance)",
+    caption = "Each point represents one patient."
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "grey80", fill = NA)
+  )
+
+```
+
