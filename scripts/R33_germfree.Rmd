@@ -1,0 +1,91 @@
+---
+title: "Germ free"
+output: html_document
+date: "2025-07-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+
+# First, we set up a data frame that defines the four experimental groups.
+# Giving each group a unique y_position helps us stack them vertically in the plot.
+groups_df <- tibble(
+  group_id = 1:4,
+  gavage = c("E. faecalis", "E. faecalis", "PBS", "PBS"),
+  water = c("Sucrose Water", "Regular Water", "Sucrose Water", "Regular Water"),
+  group_label = paste(gavage, water, sep = " + "),
+  y_position = c(4, 3, 2, 1) # This staggers the timelines vertically.
+)
+
+# Next, we define all the events and their timing in hours.
+# Day 3 is represented as 72 hours to keep the x-axis consistent.
+# We also assign a category to each event to control its shape in the plot.
+events_df <- tibble(
+  time_point = c(0, 5, 10, 20, 72),
+  event_label = c("Gavage", "Stool Collection", "Stool Collection", "Stool Collection", "Sacrifice"),
+  event_shape = c("Gavage", "Stool", "Stool", "Stool", "Stool")
+)
+
+# Here, we combine the groups and events to create the full data frame for plotting.
+# expand_grid() creates a row for every combination of group and event.
+experiment_df <- expand_grid(
+  groups_df,
+  events_df
+)
+
+# Now, we create the diagram using ggplot.
+ggplot(experiment_df, aes(x = time_point, y = y_position)) +
+  # This draws the main horizontal timelines for each group.
+  geom_line(aes(group = group_id), color = "gray50", linewidth = 1) +
+
+  # This adds points for each event, using different shapes to distinguish them.
+  geom_point(aes(shape = event_shape), size = 5, color = "steelblue") +
+  # Manually set the shapes: 17=triangle, 16=circle, 15=square.
+  scale_shape_manual(values = c("Gavage" = 17, "Stool" = 16, "Sacrifice" = 15)) +
+
+  # This adds the text labels for each experimental group to the left of the timelines.
+  geom_text(
+    data = groups_df,
+    aes(x = -1, y = y_position, label = group_label),
+    hjust = 1, # Aligns the text to the right, just before the timeline starts.
+    fontface = "bold",
+    size = 4
+  ) +
+
+  # This section cleans up the plot to make it look like a diagram rather than a standard chart.
+  theme_void() + # Removes background, gridlines, and axes.
+  theme(
+    axis.text.x = element_text(color = "black", size = 11, face = "bold"),
+    axis.title.x = element_text(color = "black", size = 14, face = "bold", margin = margin(t = 10)),
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 14, hjust = 0.5, margin = margin(b = 20)),
+    plot.margin = margin(20, 20, 20, 20),
+    legend.position = "none" # The shapes are intuitive, so we hide the legend.
+  ) +
+
+  # Add the main titles and a label for the x-axis.
+  labs(
+    x = "Experimental Timeline",
+    title = "Germ-Free Mouse Experiment Design",
+    subtitle = "Timeline of Treatment and Sample Collection"
+  ) +
+
+  # This customizes the labels on the x-axis to be more descriptive.
+  scale_x_continuous(
+    breaks = c(0, 5, 10, 20, 72),
+    labels = c("Time 0\n(Gavage)", "5 hr", "10 hr", "20 hr", "Day 3\n(Sacrifice)")
+  ) +
+
+  # Finally, this expands the plot area slightly so the labels on the left aren't cut off.
+  coord_cartesian(xlim = c(-20, 80))
+
+ggsave('../data/R33_gf_design.pdf', width = 10)
+```
+
