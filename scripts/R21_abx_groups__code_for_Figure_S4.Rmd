@@ -58,6 +58,8 @@ meds_updated <- bind_rows(
 ) %>% select(-class, -route_clean) %>%
    full_join(link) %>% select(-mrn) %>% relocate(pid, .before = 'drug_name_clean')
 
+
+meds_updated %>% write_csv('../data/R21_meds_updated_all_medication_classified.csv')
 ```
 
 ```{r}

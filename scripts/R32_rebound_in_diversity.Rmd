@@ -1,0 +1,289 @@
+---
+title: "Rebound in diversity"
+output: html_document
+date: "2025-07-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+microbiome_data <- read_csv('../data/153_combined_META.csv')
+microbiome_data %>% count(pid, sort = T)
+```
+
+
+```{r}
+# ---  Identify Rebound Dynamics ---
+# The main idea is to process the data for each patient to see if their
+# diversity follows a "V-shape" pattern over time.
+
+rebound_candidates <- microbiome_data %>%
+  # Make sure the data is sorted by time for each patient
+  arrange(pid, sdrt) %>%
+  # Grouping by patient ID lets us perform calculations for each person individually
+  group_by(pid) %>%
+  # We'll only look at patients with a decent number of samples to see a trend
+  filter(n() >= 4) %>%
+  # Now, let's calculate some key metrics for each patient's diversity journey
+  summarise(
+    # The lowest point of diversity reached
+    nadir_diversity = min(simpson_reciprocal, na.rm = TRUE),
+    # The diversity at their very last sample
+    final_diversity = last(simpson_reciprocal),
+    # The day the diversity was at its lowest
+    nadir_day = sdrt[which.min(simpson_reciprocal)],
+    # The first and last day we have a sample for them
+    first_day = first(sdrt),
+    last_day = last(sdrt),
+    .groups = 'drop' # Ungroup for the final filtering step
+  ) %>%
+  # Now, let's filter for patients who fit our definition of a "rebound"
+  filter(
+    # The lowest point should not be the very first or last sample.
+    # This ensures we see a drop AND a rise, not just a continuous trend.
+    nadir_day > first_day,
+    nadir_day < last_day,
+    # The final diversity should be meaningfully higher than the lowest point.
+    (final_diversity - nadir_diversity) / nadir_diversity > 0.5
+  )
+
+# --- Visualize the Candidates ---
+# It's always a good idea to plot the data for the identified patients
+# to visually confirm the pattern.
+
+# Get the list of candidate patient IDs
+candidate_pids <- rebound_candidates$pid
+
+# Filter the original data to just these patients
+plot_data <- microbiome_data %>%
+  filter(pid %in% candidate_pids)
+
+# Create the plots
+ggplot(plot_data, aes(x = sdrt, y = simpson_reciprocal)) +
+  geom_line(color = "grey50") +
+  geom_point(size = 3, aes(color = simpson_reciprocal)) +
+  facet_wrap(~pid, scales = "free") +
+  labs(
+    title = "Diversity Time Course for Rebound Candidates",
+    x = "Day Relative to Transplant",
+    y = "Simpson Reciprocal Diversity"
+  ) +
+  scale_color_viridis_c() +
+  theme_minimal()
+
+ggsave('../data/R32_rebound_pid.pdf', width = 16, height = 9)
+```
+
+```{r}
+# to classify each day's abx exposures by our rules
+meds_updated <- read_csv('../data/R21_meds_updated_all_medication_classified.csv')
+
+meds_expanded <- meds_updated %>%
+    distinct() %>% 
+    group_by(pid, drug_name_clean, together, startday, stopday, drug_category_for_this_study) %>%
+    summarize(day = seq(startday, stopday), .groups = "drop") %>% 
+    group_by(pid, day) %>%
+  summarise(
+    exposure_category = case_when(
+      any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",  # Only broad_spectrum
+      any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
+      any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterials",
+      TRUE ~ "not_antibacterial"
+    ), .groups = "drop"
+  )
+```
+```{r}
+# summarize the daily sweets intake for the patients 
+nutrition_data <- read_csv('../data/152_combined_DTB.csv') %>% 
+  select(pid, fdrt, Food_code, dehydrated_weight)
+
+daily_sweets_sum <- nutrition_data %>%
+  # The Food_code is numeric in some datasets, so convert to character for string matching
+  mutate(Food_code = as.character(Food_code)) %>%
+  # Filter for food codes that start with '9'
+  filter(str_starts(Food_code, "9")) %>%
+  # Group by patient and day to sum up the weights
+  group_by(pid, fdrt) %>%
+  summarise(daily_sweets_intake = sum(dehydrated_weight, na.rm = TRUE), .groups = 'drop')
+
+# Now, create a complete grid of all patient-day combinations to ensure
+# we have a row for every day, even if no sweets were eaten.
+all_patient_days <- nutrition_data %>%
+  # Get all unique patient-day combinations
+  distinct(pid, fdrt)
+
+# Join the sums back to the complete grid. Days without sweets will have NA.
+sweets_intake <- all_patient_days %>%
+  left_join(daily_sweets_sum, by = c("pid", "fdrt")) %>%
+  # Replace NA with 0 for days where no sweets were consumed
+  mutate(daily_sweets_intake = replace_na(daily_sweets_intake, 0)) %>%
+  # Arrange for readability
+  arrange(pid, fdrt)
+
+selected <- c(103,104,108,120, 138, 14, 140, 161, 169, 173, 18, 26, 35, 37, 38, 42, 44, 47, 53, 55, 6, 60, 64, 68, 7, 70, 71, 73, 74, 78, 81, 82, 84, 88, 90, 94, 99)
+selected_patients <- str_glue('P{selected}')
+```
+
+```{r}
+# Filter all necessary data for the selected patient(s)
+patient_diversity_data <- microbiome_data %>% filter(pid %in% selected_patients)
+patient_sweets_data <- sweets_intake %>% filter(pid %in% selected_patients)
+patient_abx_data <- meds_expanded %>%
+  filter(pid %in% selected_patients, exposure_category == "broad_spectrum")
+
+# To properly scale the two y-axes, we need to find a scaling factor.
+# This factor will transform the sweets intake values to fit on the same plot
+# as the diversity values. We calculate one global factor for all selected patients
+# to keep the scales comparable across the faceted plots.
+max_diversity <- max(patient_diversity_data$simpson_reciprocal, na.rm = TRUE)
+max_sweets <- max(patient_sweets_data$daily_sweets_intake, na.rm = TRUE)
+scaling_factor <- if (max_sweets > 0) max_diversity / max_sweets else 1
+
+# Create the plot
+ggplot() +
+  # Add gray rectangles for broad-spectrum antibiotic exposure periods
+  geom_rect(
+    data = patient_abx_data,
+    aes(xmin = day - 0.5, xmax = day + 0.5, ymin = -Inf, ymax = Inf),
+    fill = "#FF000070",
+    alpha = 0.3
+  ) +
+  # Add the line and points for microbiome diversity
+  geom_line(
+    data = patient_diversity_data,
+    aes(x = sdrt, y = simpson_reciprocal),
+    color = "blue",
+    size = 0.5
+  ) +
+  geom_point(
+    data = patient_diversity_data,
+    aes(x = sdrt, y = simpson_reciprocal),
+    color = "blue",
+    size = 2
+  ) +
+  # Add the line and points for sweets intake, scaling the y-values
+  geom_line(
+    data = patient_sweets_data,
+    aes(x = fdrt, y = daily_sweets_intake * scaling_factor),
+    color = "#db2589",
+    size = 0.5
+  ) +
+  geom_point(
+    data = patient_sweets_data,
+    aes(x = fdrt, y = daily_sweets_intake * scaling_factor),
+    color = "#db2589",
+    size = 2
+  ) +
+  # Facet by patient ID to create a separate plot for each one
+  facet_wrap(~pid, scales = "free_y") +
+  # Add the primary and secondary y-axes
+  scale_y_continuous(
+    # Primary axis for diversity
+    name = "Microbiome α-Diversity (Simpson)",
+    # Secondary axis for sweets intake
+    sec.axis = sec_axis(~ . / scaling_factor, name = "Daily Sweets Intake (grams)")
+  ) +
+  # Add labels and title
+  labs(
+    title = "Case Studies: Selected Rebound Patients",
+    x = "Day Relative to Transplant",
+    caption = "Light pink shading indicates broad-spectrum antibiotic exposure."
+  ) +
+  # Apply a clean theme
+  theme_bw() +
+  theme(
+    axis.title.y.left = element_text(color = "blue"),
+    axis.text.y.left = element_text(color = "blue"),
+    axis.title.y.right = element_text(color = "#db2589"),
+    axis.text.y.right = element_text(color = "#db2589"),
+    strip.background = element_rect(fill="gray50") # Style facet titles
+  )
+ 
+ggsave('../data/R32_rebound_pid_selected.pdf', width = 22, height = 9)
+```
+
+```{r}
+# I looked very hard and saw these 5 patients had some trend ...
+trend <- c('P108','P120','P73','P74','P78')
+
+# Filter all necessary data for the selected patient(s)
+patient_diversity_data <- microbiome_data %>% filter(pid %in% trend)
+patient_sweets_data <- sweets_intake %>% filter(pid %in% trend)
+patient_abx_data <- meds_expanded %>%
+  filter(pid %in% trend, exposure_category == "broad_spectrum")
+
+# To properly scale the two y-axes, we need to find a scaling factor.
+# This factor will transform the sweets intake values to fit on the same plot
+# as the diversity values. We calculate one global factor for all selected patients
+# to keep the scales comparable across the faceted plots.
+max_diversity <- max(patient_diversity_data$simpson_reciprocal, na.rm = TRUE)
+max_sweets <- max(patient_sweets_data$daily_sweets_intake, na.rm = TRUE)
+scaling_factor <- if (max_sweets > 0) max_diversity / max_sweets else 1
+
+# Create the plot
+ggplot() +
+  # Add gray rectangles for broad-spectrum antibiotic exposure periods
+  geom_rect(
+    data = patient_abx_data,
+    aes(xmin = day - 0.5, xmax = day + 0.5, ymin = -Inf, ymax = Inf),
+    fill = "#FF000070",
+    alpha = 0.3
+  ) +
+  # Add the line and points for microbiome diversity
+  geom_line(
+    data = patient_diversity_data,
+    aes(x = sdrt, y = simpson_reciprocal),
+    color = "blue",
+    size = 0.5
+  ) +
+  geom_point(
+    data = patient_diversity_data,
+    aes(x = sdrt, y = simpson_reciprocal),
+    color = "blue",
+    size = 2
+  ) +
+  # Add the line and points for sweets intake, scaling the y-values
+  geom_line(
+    data = patient_sweets_data,
+    aes(x = fdrt, y = daily_sweets_intake * scaling_factor),
+    color = "#db2589",
+    size = 0.5
+  ) +
+  geom_point(
+    data = patient_sweets_data,
+    aes(x = fdrt, y = daily_sweets_intake * scaling_factor),
+    color = "#db2589",
+    size = 2
+  ) +
+  # Facet by patient ID to create a separate plot for each one
+  facet_wrap(~pid, scales = "free_y") +
+  # Add the primary and secondary y-axes
+  scale_y_continuous(
+    # Primary axis for diversity
+    name = "Microbiome α-Diversity (Simpson)",
+    # Secondary axis for sweets intake
+    sec.axis = sec_axis(~ . / scaling_factor, name = "Daily Sweets Intake (grams)")
+  ) +
+  # Add labels and title
+  labs(
+    title = "Case Studies: Selected Rebound Patients",
+    x = "Day Relative to Transplant",
+    subtitle  = "Light pink shading indicates broad-spectrum antibiotic exposure."
+  ) +
+  # Apply a clean theme
+  theme_bw() +
+  theme(
+    axis.title.y.left = element_text(color = "blue"),
+    axis.text.y.left = element_text(color = "blue"),
+    axis.title.y.right = element_text(color = "#db2589"),
+    axis.text.y.right = element_text(color = "#db2589"),
+    strip.background = element_rect(fill="gray80") # Style facet titles
+  )
+```
+
