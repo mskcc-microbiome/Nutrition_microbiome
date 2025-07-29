@@ -68,7 +68,13 @@ bloom_duration <- enterococcus_abundance %>%
   summarise(bloom_days = n()) %>%
   ungroup()
 
-# ---  Combine Data for Final Analysis ---
+# --- . Combine Data for Final Analysis & Normalize for Sampling Frequency ---
+# Get the total number of samples for each patient to use for normalization.
+total_samples_per_patient <- enterococcus_abundance %>%
+  group_by(pid) %>%
+  summarise(total_samples = n()) %>%
+  ungroup()
+
 # Create a master list of all patients who have stool samples.
 all_patients <- enterococcus_abundance %>%
   distinct(pid)
@@ -79,27 +85,34 @@ all_patients <- enterococcus_abundance %>%
 analysis_data <- all_patients %>%
   left_join(antibiotic_days_in_window, by = "pid") %>%
   left_join(bloom_duration, by = "pid") %>%
+  left_join(total_samples_per_patient, by = "pid") %>%
   # If a patient had no blooms or no antibiotics in their window, the count will be NA.
   # We must replace these NAs with 0.
   mutate(
     broad_spectrum_exposure_days = replace_na(broad_spectrum_exposure_days, 0),
     bloom_days = replace_na(bloom_days, 0)
+  ) %>%
+  # Calculate the proportion of time in bloom to control for sampling frequency.
+  mutate(
+    proportion_in_bloom = bloom_days / total_samples
   )
 
 # --- 5. Perform Correlation and Plot ---
 # Now we create the scatter plot to visualize the relationship.
-ggplot(analysis_data, aes(x = broad_spectrum_exposure_days, y = bloom_days)) +
+ggplot(analysis_data, aes(x = broad_spectrum_exposure_days, y = proportion_in_bloom)) +
   geom_point(alpha = 0.7, size = 3, color = "#0072B2") +
   # Add a regression line to show the trend
   geom_smooth(method = "lm", se = FALSE, color = "#D55E00", linetype = "dashed") +
   # Use the 'stat_cor' function from ggpubr to automatically calculate and display
   # the Spearman correlation coefficient and p-value on the plot.
   stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top", size = 5) +
+  # Convert y-axis labels to percentages for better readability.
+  scale_y_continuous(labels = scales::percent_format()) +
   labs(
-    title = "Sustained Antibiotic Exposure is Linked to\nProlonged Enterococcus Blooms",
+    title = "Sustained Antibiotic Exposure is Linked to\nProportion of Time in Bloom",
     x = "Total Days of Broad-Spectrum Antibiotic Exposure During Stool Sampling",
-    y = "Total Days in Enterococcus Bloom State\n(>10% Abundance)",
-    caption = "Each point represents one patient."
+    y = "Proportion of Time in Enterococcus Bloom State\n(>10% Abundance)",
+    caption = "Each point represents one patient.. Bloom duration is normalized by sampling frequency."
   ) +
   theme_minimal(base_size = 14) +
   theme(
@@ -108,5 +121,63 @@ ggplot(analysis_data, aes(x = broad_spectrum_exposure_days, y = bloom_days)) +
     panel.border = element_rect(color = "grey80", fill = NA)
   )
 
+```
+
+```{r}
+# what if we choose the bloom state threshold to be 30%
+bloom_threshold_high <- 0.30
+
+# Calculate the duration of the bloom for each patient
+bloom_duration_high <- enterococcus_abundance %>%
+  # Filter for time points where Enterococcus is above the bloom threshold
+  filter(Enterococcus_relab > bloom_threshold_high) %>%
+  # Group by patient to count the number of bloom days for each one
+  group_by(pid) %>%
+  # 'n()' counts the number of samples (days) in the bloom state
+  summarise(bloom_days = n()) %>%
+  ungroup()
+
+
+# Combine the antibiotic and bloom duration data. Using left_joins from the master
+# patient list ensures we keep all patients, even if they had zero bloom days
+# or zero antibiotic exposure days.
+analysis_data_high <- all_patients %>%
+  left_join(antibiotic_days_in_window, by = "pid") %>%
+  left_join(bloom_duration_high, by = "pid") %>%
+  left_join(total_samples_per_patient, by = "pid") %>%
+  # If a patient had no blooms or no antibiotics in their window, the count will be NA.
+  # We must replace these NAs with 0.
+  mutate(
+    broad_spectrum_exposure_days = replace_na(broad_spectrum_exposure_days, 0),
+    bloom_days = replace_na(bloom_days, 0)
+  ) %>%
+  # Calculate the proportion of time in bloom to control for sampling frequency.
+  mutate(
+    proportion_in_bloom = bloom_days / total_samples
+  )
+
+# --- 5. Perform Correlation and Plot ---
+# Now we create the scatter plot to visualize the relationship.
+ggplot(analysis_data_high, aes(x = broad_spectrum_exposure_days, y = proportion_in_bloom)) +
+  geom_point(alpha = 0.7, size = 3, color = "#0072B2") +
+  # Add a regression line to show the trend
+  geom_smooth(method = "lm", se = FALSE, color = "#D55E00", linetype = "dashed") +
+  # Use the 'stat_cor' function from ggpubr to automatically calculate and display
+  # the Spearman correlation coefficient and p-value on the plot.
+  stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top", size = 5) +
+  # Convert y-axis labels to percentages for better readability.
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Sustained Antibiotic Exposure is Linked to\nProportion of Time in Bloom",
+    x = "Total Days of Broad-Spectrum Antibiotic Exposure During Stool Sampling",
+    y = "Proportion of Time in Enterococcus Bloom State\n(>30% Abundance)",
+    caption = "Each point represents one patient.. Bloom duration is normalized by sampling frequency."
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "grey80", fill = NA)
+  )
 ```
 
