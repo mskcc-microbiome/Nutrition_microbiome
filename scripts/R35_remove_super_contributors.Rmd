@@ -1,0 +1,14 @@
+---
+title: "Remove super contributors"
+output: html_document
+date: "2025-07-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+

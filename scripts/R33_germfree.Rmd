@@ -10,6 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(janitor)
+library(ggrepel)
 ```
 
 ```{r}
@@ -87,5 +89,67 @@ ggplot(experiment_df, aes(x = time_point, y = y_position)) +
   coord_cartesian(xlim = c(-20, 80))
 
 ggsave('../data/R33_gf_design.pdf', width = 10)
+```
+# the CFU
+
+```{r}
+dat <- read_csv('../data/7_29_25_germ_free_faecalis_gavage.csv') 
+
+cfu_data <- dat %>% 
+  filter(!is.na(Colonies_counted)) %>% 
+  mutate(Tube_weight_empty_mg = Tube_weight_empty_g * 1000,
+         Total_weight_stool_and_tube_mg = as.numeric(Total_weight_stool_and_tube_mg), 
+        Stool_weight_mg =  Total_weight_stool_and_tube_mg - Tube_weight_empty_mg) %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/20))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
+  clean_names() %>%
+  mutate(logCFU = log10(cf_us_per_gram_stool))
+```
+
+
+```{r}
+# Clean and prepare the data for plotting
+plot_data <- cfu_data %>%
+  # Remove rows with no CFU data
+  filter(!is.na(logCFU)) %>%
+  # Create a clearer group label for the plot facets
+  mutate(
+    treatment_group = case_when(
+      str_starts(mouse_group, "1-") ~ "E. faecalis + Sucrose Water",
+      str_starts(mouse_group, "2-") ~ "E. faecalis + Regular Water",
+      TRUE ~ "Other"
+    ),
+    # Make the tube_id a factor to treat each mouse as a distinct category
+    tube_id = as.factor(tube_id)
+  )
+
+# Create the plot
+ggplot(plot_data, aes(x = treatment_group, y = logCFU, color = tube_id)) +
+  # Use geom_jitter to see all points clearly, even if they have similar values
+  geom_jitter(width = 0.1, size = 4, alpha = 0.8) +
+  
+  # Add text labels for each mouse ID, using ggrepel to avoid overlap
+  geom_text_repel(aes(label = mouse_group), size = 3.5, fontface = "bold", box.padding = 0.5) +
+  
+  # Clean up the theme and add titles
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 18),
+    plot.subtitle = element_text(hjust = 0.5, size = 12),
+    axis.title.x = element_blank(), # The group names on the x-axis are clear enough
+    axis.text.x = element_text(face = "bold"),
+    legend.position = "none" # Hide legend as colors are just for distinction
+  ) +
+  
+  # Add labels
+  labs(
+    title = "Initial E. faecalis Colonization in Germ-Free Mice",
+    subtitle = "8 Hours Post-Gavage",
+    y = "log10(CFU / gram of feces)"
+  ) +
+  
+  # Set the y-axis to start at a reasonable value
+  coord_cartesian(ylim = c(4, 5.5))
+
+
 ```
 

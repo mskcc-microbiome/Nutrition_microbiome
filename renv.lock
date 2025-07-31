@@ -651,6 +651,100 @@
       "Maintainer": "Achim Zeileis <Achim.Zeileis@R-project.org>",
       "Repository": "CRAN"
     },
+    "GGally": {
+      "Package": "GGally",
+      "Version": "2.3.0",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "Extension to 'ggplot2'",
+      "Authors@R": "c( person(\"Barret\", \"Schloerke\", , \"schloerke@gmail.com\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-9986-114X\")), person(\"Di\", \"Cook\", , \"dicook@monash.edu\", role = c(\"aut\", \"ths\"), comment = c(ORCID = \"0000-0002-3813-7155\")), person(\"Joseph\", \"Larmarange\", , \"joseph@larmarange.net\", role = \"aut\", comment = c(ORCID = \"0000-0001-7097-700X\")), person(\"Francois\", \"Briatte\", , \"f.briatte@gmail.com\", role = \"aut\"), person(\"Moritz\", \"Marbach\", , \"mmarbach@mail.uni-mannheim.de\", role = \"aut\"), person(\"Edwin\", \"Thoen\", , \"edwinthoen@gmail.com\", role = \"aut\"), person(\"Amos\", \"Elberg\", , \"amos.elberg@gmail.com\", role = \"aut\"), person(\"Ott\", \"Toomet\", , \"otoomet@gmail.com\", role = \"ctb\"), person(\"Jason\", \"Crowley\", , \"crowley.jason.s@gmail.com\", role = \"aut\"), person(\"Heike\", \"Hofmann\", , \"hhofmann4@unl.edu\", role = \"ths\", comment = c(ORCID = \"0000-0001-6216-5183\")), person(\"Hadley\", \"Wickham\", , \"h.wickham@gmail.com\", role = \"ths\", comment = c(ORCID = \"0000-0003-4757-117X\")) )",
+      "Description": "The R package 'ggplot2' is a plotting system based on the grammar of graphics.  'GGally' extends 'ggplot2' by adding several functions to reduce the complexity of combining geometric objects with transformed data.  Some of these functions include a pairwise plot matrix, a two group pairwise plot matrix, a parallel coordinates plot, a survival plot, and several functions to plot networks.",
+      "License": "GPL (>= 2.0)",
+      "URL": "https://ggobi.github.io/ggally/, https://github.com/ggobi/ggally",
+      "BugReports": "https://github.com/ggobi/ggally/issues",
+      "Depends": [
+        "ggplot2 (>= 3.5.2)",
+        "R (>= 4.3)"
+      ],
+      "Imports": [
+        "dplyr (>= 1.1.0)",
+        "ggstats (>= 0.9.0)",
+        "grDevices",
+        "grid",
+        "gtable (>= 0.2.0)",
+        "lifecycle",
+        "magrittr",
+        "progress",
+        "RColorBrewer",
+        "rlang",
+        "S7 (>= 0.2.0)",
+        "scales (>= 1.3.0)",
+        "tidyr (>= 1.3.0)",
+        "utils"
+      ],
+      "Suggests": [
+        "broom (>= 0.7.0)",
+        "broom.helpers (>= 1.3.0)",
+        "chemometrics",
+        "crosstalk",
+        "emmeans",
+        "geosphere (>= 1.5-1)",
+        "ggforce",
+        "Hmisc",
+        "igraph (>= 1.0.1)",
+        "intergraph (>= 2.0-2)",
+        "knitr",
+        "labelled",
+        "mapproj",
+        "maps (>= 3.1.0)",
+        "network (>= 1.17.1)",
+        "nnet",
+        "rmarkdown",
+        "scagnostics",
+        "sna (>= 2.3-2)",
+        "spelling",
+        "survival",
+        "testthat (>= 3.0.0)",
+        "vdiffr"
+      ],
+      "RdMacros": "lifecycle",
+      "Config/Needs/website": "tidyverse/tidytemplate",
+      "Config/testthat/edition": "3",
+      "Config/usethis/last-upkeep": "2025-06-13",
+      "Encoding": "UTF-8",
+      "Language": "en-US",
+      "LazyData": "true",
+      "LazyLoad": "yes",
+      "RoxygenNote": "7.3.2",
+      "SystemRequirements": "openssl",
+      "Collate": "'GGally-package.R' 'data-australia-pisa-2012.R' 'data-baseball.R' 'data-flea.R' 'data-happy.R' 'data-nasa.R' 'data-pigs.R' 'data-psychademic.R' 'data-tips.R' 'data-twitter_spambots.R' 'deprecated.R' 'find-combo.R' 'gg-plots.R' 'ggally_colbar.R' 'ggally_cross.R' 'ggaly_trends.R' 'ggbivariate.R' 'ggcoef.R' 'ggcorr.R' 'ggfacet.R' 'gglyph.R' 'ggpairs_getput.R' 'ggmatrix.R' 'ggmatrix_gtable.R' 'ggmatrix_gtable_helpers.R' 'ggmatrix_legend.R' 'ggmatrix_make_plot.R' 'ggmatrix_print.R' 'ggmatrix_progress.R' 'ggnet.R' 'ggnet2.R' 'ggnetworkmap.R' 'ggnostic.R' 'ggpairs.R' 'ggpairs_add.R' 'ggpairs_internal_plots.R' 'ggparcoord.R' 'ggsave.R' 'ggscatmat.R' 'ggsurv.R' 'ggtable.R' 'reexports.R' 'utils-pipe.R' 'utils.R' 'vig_ggally.R' 'zzz.R'",
+      "NeedsCompilation": "no",
+      "Author": "Barret Schloerke [aut, cre] (ORCID: <https://orcid.org/0000-0001-9986-114X>), Di Cook [aut, ths] (ORCID: <https://orcid.org/0000-0002-3813-7155>), Joseph Larmarange [aut] (ORCID: <https://orcid.org/0000-0001-7097-700X>), Francois Briatte [aut], Moritz Marbach [aut], Edwin Thoen [aut], Amos Elberg [aut], Ott Toomet [ctb], Jason Crowley [aut], Heike Hofmann [ths] (ORCID: <https://orcid.org/0000-0001-6216-5183>), Hadley Wickham [ths] (ORCID: <https://orcid.org/0000-0003-4757-117X>)",
+      "Maintainer": "Barret Schloerke <schloerke@gmail.com>",
+      "Repository": "CRAN"
+    },
+    "GPArotation": {
+      "Package": "GPArotation",
+      "Version": "2025.3-1",
+      "Source": "Repository",
+      "Title": "Gradient Projection Factor Rotation",
+      "Authors@R": "c(  person(\"Coen\", \"Bernaards\", email = \"cab.gparotation@gmail.com\", role = c(\"aut\",\"cre\")), person(\"Paul\", \"Gilbert\", email = \"pgilbert.ttv9z@ncf.ca\", role = \"aut\"), person(\"Robert\", \"Jennrich\", role = \"aut\") )",
+      "Depends": [
+        "R (>= 2.0.0)"
+      ],
+      "Description": "Gradient Projection Algorithms for Factor Rotation.  For details see ?GPArotation. When using this package, please cite Bernaards and Jennrich (2005) <doi:10.1177/0013164404272507> 'Gradient Projection Algorithms and Software  for Arbitrary Rotation Criteria in Factor Analysis'.",
+      "LazyData": "yes",
+      "Imports": [
+        "stats"
+      ],
+      "License": "GPL (>= 2)",
+      "URL": "https://optimizer.r-forge.r-project.org/GPArotation_www/",
+      "NeedsCompilation": "no",
+      "Author": "Coen Bernaards [aut, cre], Paul Gilbert [aut], Robert Jennrich [aut]",
+      "Maintainer": "Coen Bernaards <cab.gparotation@gmail.com>",
+      "Repository": "CRAN",
+      "Encoding": "UTF-8"
+    },
     "GenomeInfoDb": {
       "Package": "GenomeInfoDb",
       "Version": "1.40.1",
@@ -1693,6 +1787,45 @@
       "Author": "Hervé Pagès [aut, cre], Michael Lawrence [aut], Patrick Aboyoun [aut], Aaron Lun [ctb], Beryl Kanali [ctb] (Converted vignettes from Sweave to RMarkdown)",
       "Maintainer": "Hervé Pagès <hpages.on.github@gmail.com>"
     },
+    "S7": {
+      "Package": "S7",
+      "Version": "0.2.0",
+      "Source": "Repository",
+      "Title": "An Object Oriented System Meant to Become a Successor to S3 and S4",
+      "Authors@R": "c( person(\"Object-Oriented Programming Working Group\", role = \"cph\"), person(\"Davis\", \"Vaughan\", role = \"aut\"), person(\"Jim\", \"Hester\", role = \"aut\", comment = c(ORCID = \"0000-0002-2739-7082\")), person(\"Tomasz\", \"Kalinowski\", role = \"aut\"), person(\"Will\", \"Landau\", role = \"aut\"), person(\"Michael\", \"Lawrence\", role = \"aut\"), person(\"Martin\", \"Maechler\", role = \"aut\", comment = c(ORCID = \"0000-0002-8685-9910\")), person(\"Luke\", \"Tierney\", role = \"aut\"), person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0003-4757-117X\")) )",
+      "Description": "A new object oriented programming system designed to be a successor to S3 and S4. It includes formal class, generic, and method specification, and a limited form of multiple dispatch. It has been designed and implemented collaboratively by the R Consortium Object-Oriented Programming Working Group, which includes representatives from R-Core, 'Bioconductor', 'Posit'/'tidyverse', and the wider R community.",
+      "License": "MIT + file LICENSE",
+      "URL": "https://rconsortium.github.io/S7/, https://github.com/RConsortium/S7",
+      "BugReports": "https://github.com/RConsortium/S7/issues",
+      "Depends": [
+        "R (>= 3.5.0)"
+      ],
+      "Imports": [
+        "utils"
+      ],
+      "Suggests": [
+        "bench",
+        "callr",
+        "covr",
+        "knitr",
+        "methods",
+        "rmarkdown",
+        "testthat (>= 3.2.0)",
+        "tibble"
+      ],
+      "VignetteBuilder": "knitr",
+      "Config/build/compilation-database": "true",
+      "Config/Needs/website": "sloop",
+      "Config/testthat/edition": "3",
+      "Config/testthat/parallel": "TRUE",
+      "Config/testthat/start-first": "external-generic",
+      "Encoding": "UTF-8",
+      "RoxygenNote": "7.3.2",
+      "NeedsCompilation": "yes",
+      "Author": "Object-Oriented Programming Working Group [cph], Davis Vaughan [aut], Jim Hester [aut] (<https://orcid.org/0000-0002-2739-7082>), Tomasz Kalinowski [aut], Will Landau [aut], Michael Lawrence [aut], Martin Maechler [aut] (<https://orcid.org/0000-0002-8685-9910>), Luke Tierney [aut], Hadley Wickham [aut, cre] (<https://orcid.org/0000-0003-4757-117X>)",
+      "Maintainer": "Hadley Wickham <hadley@posit.co>",
+      "Repository": "CRAN"
+    },
     "SingleCellExperiment": {
       "Package": "SingleCellExperiment",
       "Version": "1.26.0",
@@ -1734,6 +1867,25 @@
       "NeedsCompilation": "no",
       "Author": "Aaron Lun [aut, cph], Davide Risso [aut, cre, cph], Keegan Korthauer [ctb], Kevin Rue-Albrecht [ctb], Luke Zappia [ctb] (<https://orcid.org/0000-0001-7744-8565>, lazappi)",
       "Maintainer": "Davide Risso <risso.davide@gmail.com>"
+    },
+    "SnowballC": {
+      "Package": "SnowballC",
+      "Version": "0.7.1",
+      "Source": "Repository",
+      "Type": "Package",
+      "Date": "2023-04-25",
+      "Title": "Snowball Stemmers Based on the C 'libstemmer' UTF-8 Library",
+      "Authors@R": "person(\"Milan\", \"Bouchet-Valat\", email=\"nalimilan@club.fr\", role=c(\"aut\", \"cre\"))",
+      "Description": "An R interface to the C 'libstemmer' library that implements Porter's word stemming algorithm for collapsing words to a common root to aid comparison of vocabulary. Currently supported languages are Arabic, Basque, Catalan, Danish, Dutch, English, Finnish, French, German, Greek, Hindi, Hungarian, Indonesian, Irish, Italian, Lithuanian, Nepali, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish, Tamil and Turkish.",
+      "License": "BSD_3_clause + file LICENSE",
+      "Copyright": "Dr Martin Porter (2001) and Richard Boulton (2004, 2005) for the 'libstemmer' C library, and Milan Bouchet-Valat (2013) for the R package contents.",
+      "URL": "https://github.com/nalimilan/R.TeMiS",
+      "BugReports": "https://github.com/nalimilan/R.TeMiS/issues",
+      "NeedsCompilation": "yes",
+      "Author": "Milan Bouchet-Valat [aut, cre]",
+      "Maintainer": "Milan Bouchet-Valat <nalimilan@club.fr>",
+      "Repository": "CRAN",
+      "Encoding": "UTF-8"
     },
     "SparseArray": {
       "Package": "SparseArray",
@@ -5785,45 +5937,6 @@
       "Author": "Matthew Kay [aut, cre], Brenton M. Wiernik [ctb]",
       "Repository": "RSPM"
     },
-    "ggfittext": {
-      "Package": "ggfittext",
-      "Version": "0.10.2",
-      "Source": "Repository",
-      "Title": "Fit Text Inside a Box in 'ggplot2'",
-      "Authors@R": "c(person(\"David\", \"Wilkins\", email = \"david@wilkox.org\", role = c(\"aut\", \"cre\")),  person(\"Brady\", \"Johnston\", email = \"brady.johnston@me.com\",  role = c(\"ctb\")) )",
-      "Description": "A 'ggplot2' extension to fit text into a box by growing, shrinking or wrapping the text.",
-      "Depends": [
-        "R (>= 3.6)"
-      ],
-      "License": "GPL-2",
-      "LazyData": "true",
-      "Imports": [
-        "grid (>= 3.1)",
-        "stringi (>= 1.1.2)",
-        "shades (>= 1.3.1)",
-        "gridtext (>= 0.1.4)",
-        "ggplot2 (>= 2.2.1)",
-        "cli (>= 3.6.1)"
-      ],
-      "RoxygenNote": "7.3.1",
-      "URL": "https://wilkox.org/ggfittext/",
-      "BugReports": "https://github.com/wilkox/ggfittext/issues/",
-      "Suggests": [
-        "knitr",
-        "rmarkdown",
-        "testthat (>= 3.0.0)",
-        "vdiffr",
-        "spelling"
-      ],
-      "VignetteBuilder": "knitr",
-      "Encoding": "UTF-8",
-      "Language": "en-GB",
-      "Config/testthat/edition": "3",
-      "NeedsCompilation": "no",
-      "Author": "David Wilkins [aut, cre], Brady Johnston [ctb]",
-      "Maintainer": "David Wilkins <david@wilkox.org>",
-      "Repository": "CRAN"
-    },
     "ggfun": {
       "Package": "ggfun",
       "Version": "0.1.9",
@@ -5862,6 +5975,38 @@
       "Author": "Guangchuang Yu [aut, cre, cph] (ORCID: <https://orcid.org/0000-0002-6485-8781>), Shuangbin Xu [aut] (ORCID: <https://orcid.org/0000-0003-3513-5362>)",
       "Maintainer": "Guangchuang Yu <guangchuangyu@gmail.com>",
       "Repository": "RSPM"
+    },
+    "gghalves": {
+      "Package": "gghalves",
+      "Version": "0.1.4",
+      "Source": "Repository",
+      "Title": "Compose Half-Half Plots Using Your Favourite Geoms",
+      "Authors@R": "person(\"Frederik\", \"Tiedemann\", email = \"fj.tiedemann@googlemail.com\", role = c(\"aut\", \"cre\"))",
+      "Description": "A 'ggplot2' extension for easy plotting of half-half geom combinations. Think half boxplot and half jitterplot, or half violinplot and half dotplot.",
+      "URL": "https://github.com/erocoar/gghalves",
+      "License": "MIT + file LICENSE",
+      "Encoding": "UTF-8",
+      "Depends": [
+        "ggplot2 (>= 3.3.6)",
+        "R (>= 3.3.0)"
+      ],
+      "Imports": [
+        "grid",
+        "gtable",
+        "grDevices"
+      ],
+      "RoxygenNote": "7.2.0",
+      "Suggests": [
+        "knitr",
+        "rmarkdown",
+        "dplyr"
+      ],
+      "Collate": "'utilities.R' 'geom_half_dotplot.R' 'geom_half_boxplot.R' 'geom_half_point.R' 'geom_half_point_panel.R' 'geom_half_violin.R' 'stat-half-bindot.R' 'stat-half-point.R' 'stat-half-ydensity.R' 'ggproto-classes.R'",
+      "VignetteBuilder": "knitr",
+      "NeedsCompilation": "no",
+      "Author": "Frederik Tiedemann [aut, cre]",
+      "Maintainer": "Frederik Tiedemann <fj.tiedemann@googlemail.com>",
+      "Repository": "CRAN"
     },
     "ggimage": {
       "Package": "ggimage",
@@ -6404,6 +6549,65 @@
       "NeedsCompilation": "no",
       "Author": "Lionel Henry [aut, cre], Hadley Wickham [aut], Winston Chang [aut], RStudio [cph]",
       "Maintainer": "Lionel Henry <lionel@rstudio.com>",
+      "Repository": "CRAN"
+    },
+    "ggstats": {
+      "Package": "ggstats",
+      "Version": "0.10.0",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "Extension to 'ggplot2' for Plotting Stats",
+      "Authors@R": "c( person( \"Joseph\", \"Larmarange\", , \"joseph@larmarange.net\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7097-700X\") ) )",
+      "Description": "Provides new statistics, new geometries and new positions for  'ggplot2' and a suite of functions to facilitate the creation of  statistical plots.",
+      "License": "GPL (>= 3)",
+      "URL": "https://larmarange.github.io/ggstats/, https://github.com/larmarange/ggstats",
+      "BugReports": "https://github.com/larmarange/ggstats/issues",
+      "Depends": [
+        "R (>= 4.2)"
+      ],
+      "Imports": [
+        "cli",
+        "dplyr",
+        "forcats",
+        "ggplot2 (>= 3.4.0)",
+        "lifecycle",
+        "patchwork",
+        "purrr",
+        "rlang",
+        "scales",
+        "stats",
+        "stringr",
+        "utils",
+        "tidyr"
+      ],
+      "Suggests": [
+        "betareg",
+        "broom",
+        "broom.helpers (>= 1.20.0)",
+        "emmeans",
+        "glue",
+        "gtsummary",
+        "knitr",
+        "labelled (>= 2.11.0)",
+        "reshape",
+        "rmarkdown",
+        "nnet",
+        "parameters",
+        "pscl",
+        "testthat (>= 3.0.0)",
+        "spelling",
+        "survey",
+        "survival",
+        "vdiffr"
+      ],
+      "Encoding": "UTF-8",
+      "RoxygenNote": "7.3.2",
+      "Config/testthat/edition": "3",
+      "Language": "en-US",
+      "VignetteBuilder": "knitr",
+      "NeedsCompilation": "no",
+      "Author": "Joseph Larmarange [aut, cre] (ORCID: <https://orcid.org/0000-0001-7097-700X>)",
+      "Maintainer": "Joseph Larmarange <joseph@larmarange.net>",
       "Repository": "CRAN"
     },
     "ggsurvfit": {
@@ -7745,6 +7949,32 @@
       "NeedsCompilation": "no",
       "Author": "Folashade Daniel [cre], Revolution Analytics [aut, cph], Steve Weston [aut]",
       "Maintainer": "Folashade Daniel <fdaniel@microsoft.com>",
+      "Repository": "CRAN"
+    },
+    "janeaustenr": {
+      "Package": "janeaustenr",
+      "Version": "1.0.0",
+      "Source": "Repository",
+      "Title": "Jane Austen's Complete Novels",
+      "Authors@R": "person(\"Julia\", \"Silge\", , \"julia.silge@gmail.com\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0002-3671-836X\"))",
+      "Description": "Full texts for Jane Austen's 6 completed novels, ready for text analysis. These novels are \"Sense and Sensibility\", \"Pride and Prejudice\", \"Mansfield Park\", \"Emma\", \"Northanger Abbey\", and \"Persuasion\".",
+      "License": "MIT + file LICENSE",
+      "URL": "https://github.com/juliasilge/janeaustenr",
+      "BugReports": "https://github.com/juliasilge/janeaustenr/issues",
+      "Depends": [
+        "R (>= 3.5)"
+      ],
+      "Suggests": [
+        "dplyr",
+        "testthat"
+      ],
+      "Config/testthat/edition": "3",
+      "Encoding": "UTF-8",
+      "LazyData": "true",
+      "RoxygenNote": "7.2.1",
+      "NeedsCompilation": "no",
+      "Author": "Julia Silge [aut, cre] (<https://orcid.org/0000-0002-3671-836X>)",
+      "Maintainer": "Julia Silge <julia.silge@gmail.com>",
       "Repository": "CRAN"
     },
     "janitor": {
@@ -10536,6 +10766,45 @@
       "Maintainer": "Simon Jackman <simon.jackman@sydney.edu.au>",
       "Repository": "CRAN"
     },
+    "psych": {
+      "Package": "psych",
+      "Version": "2.5.6",
+      "Source": "Repository",
+      "Date": "2025-06-20",
+      "Title": "Procedures for Psychological, Psychometric, and Personality Research",
+      "Authors@R": "person(\"William\", \"Revelle\", role =c(\"aut\",\"cre\"), email=\"revelle@northwestern.edu\", comment=c(ORCID  = \"0000-0003-4880-9610\") )",
+      "Description": "A general purpose toolbox developed originally for personality, psychometric theory and experimental psychology.  Functions are primarily for multivariate analysis and scale construction using factor analysis, principal component analysis, cluster analysis and reliability analysis, although others provide basic descriptive statistics. Item Response Theory is done using  factor analysis of tetrachoric and polychoric correlations. Functions for analyzing data at multiple levels include within and between group statistics, including correlations and factor analysis.  Validation and cross validation of scales developed using basic machine learning algorithms are provided, as are functions for simulating and testing particular item and test structures. Several functions  serve as a useful front end for structural equation modeling.  Graphical displays of path diagrams, including mediation models, factor analysis and structural equation models are created using basic graphics. Some of the functions are written to support a book on psychometric theory as well as publications in personality research. For more information, see the <https://personality-project.org/r/> web page.",
+      "License": "GPL (>= 2)",
+      "Imports": [
+        "mnormt",
+        "parallel",
+        "stats",
+        "graphics",
+        "grDevices",
+        "methods",
+        "lattice",
+        "nlme",
+        "GPArotation"
+      ],
+      "Suggests": [
+        "psychTools",
+        "lavaan",
+        "lme4",
+        "Rcsdp",
+        "graph",
+        "knitr",
+        "Rgraphviz"
+      ],
+      "LazyData": "yes",
+      "ByteCompile": "true",
+      "VignetteBuilder": "knitr",
+      "URL": "https://personality-project.org/r/psych/ https://personality-project.org/r/psych-manual.pdf",
+      "NeedsCompilation": "no",
+      "Author": "William Revelle [aut, cre] (ORCID: <https://orcid.org/0000-0003-4880-9610>)",
+      "Maintainer": "William Revelle <revelle@northwestern.edu>",
+      "Repository": "CRAN",
+      "Encoding": "UTF-8"
+    },
     "purrr": {
       "Package": "purrr",
       "Version": "1.0.4",
@@ -11427,6 +11696,57 @@
       "Maintainer": "Yihui Xie <xie@yihui.name>",
       "Repository": "CRAN"
     },
+    "rmcorr": {
+      "Package": "rmcorr",
+      "Version": "0.7.0",
+      "Source": "Repository",
+      "Title": "Repeated Measures Correlation",
+      "Authors@R": "c( person(\"Jonathan Z.\", \"Bakdash\", email = \"jbakdash@gmail.com\", role = \"aut\", comment = c(ORCID = \"0000-0002-1409-4779\") ), person(\"Laura R.\", \"Marusich\", email = \"lmarusich@gmail.com\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0002-3524-6110\") ) )",
+      "Description": "Compute the repeated measures correlation, a statistical technique for determining the overall within-individual relationship among paired measures assessed on two or more occasions, first introduced by Bland and Altman (1995). Includes functions for diagnostics, p-value, effect size with confidence interval including optional bootstrapping, as well as graphing. Also includes several example datasets. For more details, see the web documentation  <https://lmarusich.github.io/rmcorr/index.html> and the  original paper: Bakdash and Marusich (2017) <doi:10.3389/fpsyg.2017.00456>.",
+      "Depends": [
+        "R (>= 4.1.0)"
+      ],
+      "License": "GPL-2",
+      "LazyData": "true",
+      "Imports": [
+        "stats",
+        "grDevices",
+        "graphics",
+        "psych",
+        "RColorBrewer"
+      ],
+      "RoxygenNote": "7.3.2",
+      "Encoding": "UTF-8",
+      "Suggests": [
+        "knitr",
+        "rmarkdown",
+        "ggplot2",
+        "plotrix",
+        "lme4",
+        "merTools",
+        "pwr",
+        "AICcmodavg",
+        "pals",
+        "testthat (>= 3.0.0)",
+        "vdiffr",
+        "corrplot",
+        "cocor",
+        "covr",
+        "ggExtra",
+        "gglm",
+        "dplyr",
+        "esc",
+        "patchwork"
+      ],
+      "VignetteBuilder": "knitr",
+      "Config/testthat/edition": "3",
+      "URL": "https://github.com/lmarusich/rmcorr",
+      "BugReports": "https://github.com/lmarusich/rmcorr/issues",
+      "NeedsCompilation": "no",
+      "Author": "Jonathan Z. Bakdash [aut] (<https://orcid.org/0000-0002-1409-4779>), Laura R. Marusich [aut, cre] (<https://orcid.org/0000-0002-3524-6110>)",
+      "Maintainer": "Laura R. Marusich <lmarusich@gmail.com>",
+      "Repository": "CRAN"
+    },
     "robustbase": {
       "Package": "robustbase",
       "Version": "0.99-4-1",
@@ -11905,31 +12225,6 @@
       "NeedsCompilation": "no",
       "Author": "Simon Potter [aut, trl, cre], Simon Sapin [aut], Ian Bicking [aut]",
       "Maintainer": "Simon Potter <simon@sjp.co.nz>",
-      "Repository": "CRAN"
-    },
-    "shades": {
-      "Package": "shades",
-      "Version": "1.4.0",
-      "Source": "Repository",
-      "Date": "2019-08-02",
-      "Title": "Simple Colour Manipulation",
-      "Author": "Jon Clayden",
-      "Maintainer": "Jon Clayden <code@clayden.org>",
-      "Description": "Functions for easily manipulating colours, creating colour scales and calculating colour distances.",
-      "Suggests": [
-        "testthat",
-        "covr",
-        "ggplot2"
-      ],
-      "Enhances": [
-        "colorspace"
-      ],
-      "Encoding": "UTF-8",
-      "License": "BSD_3_clause + file LICENCE",
-      "URL": "https://github.com/jonclayden/shades",
-      "BugReports": "https://github.com/jonclayden/shades/issues",
-      "RoxygenNote": "6.1.1",
-      "NeedsCompilation": "no",
       "Repository": "CRAN"
     },
     "shape": {
@@ -12838,6 +13133,70 @@
       "Maintainer": "Lionel Henry <lionel@posit.co>",
       "Repository": "CRAN"
     },
+    "tidytext": {
+      "Package": "tidytext",
+      "Version": "0.4.2",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "Text Mining using 'dplyr', 'ggplot2', and Other Tidy Tools",
+      "Authors@R": "c( person(\"Gabriela\", \"De Queiroz\", , \"gabidequeiroz@gmail.com\", role = \"ctb\"), person(\"Colin\", \"Fay\", , \"contact@colinfay.me\", role = \"ctb\", comment = c(ORCID = \"0000-0001-7343-1846\")), person(\"Emil\", \"Hvitfeldt\", , \"emilhhvitfeldt@gmail.com\", role = \"ctb\"), person(\"Os\", \"Keyes\", , \"ironholds@gmail.com\", role = \"ctb\", comment = c(ORCID = \"0000-0001-5196-609X\")), person(\"Kanishka\", \"Misra\", , \"kmisra@purdue.edu\", role = \"ctb\"), person(\"Tim\", \"Mastny\", , \"tim.mastny@gmail.com\", role = \"ctb\"), person(\"Jeff\", \"Erickson\", , \"jeff@erick.so\", role = \"ctb\"), person(\"David\", \"Robinson\", , \"admiral.david@gmail.com\", role = \"aut\"), person(\"Julia\", \"Silge\", , \"julia.silge@gmail.com\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0002-3671-836X\")) )",
+      "Description": "Using tidy data principles can make many text mining tasks easier, more effective, and consistent with tools already in wide use. Much of the infrastructure needed for text mining with tidy data frames already exists in packages like 'dplyr', 'broom', 'tidyr', and 'ggplot2'. In this package, we provide functions and supporting data sets to allow conversion of text to and from tidy formats, and to switch seamlessly between tidy tools and existing text mining packages.",
+      "License": "MIT + file LICENSE",
+      "URL": "https://juliasilge.github.io/tidytext/, https://github.com/juliasilge/tidytext",
+      "BugReports": "https://github.com/juliasilge/tidytext/issues",
+      "Depends": [
+        "R (>= 2.10)"
+      ],
+      "Imports": [
+        "cli",
+        "dplyr (>= 1.1.1)",
+        "generics",
+        "janeaustenr",
+        "lifecycle",
+        "Matrix",
+        "methods",
+        "purrr (>= 0.1.1)",
+        "rlang (>= 0.4.10)",
+        "stringr",
+        "tibble",
+        "tokenizers",
+        "vctrs"
+      ],
+      "Suggests": [
+        "broom",
+        "covr",
+        "data.table",
+        "ggplot2",
+        "hunspell",
+        "knitr",
+        "mallet",
+        "NLP",
+        "quanteda",
+        "readr",
+        "reshape2",
+        "rmarkdown",
+        "scales",
+        "stm",
+        "stopwords",
+        "testthat (>= 2.1.0)",
+        "textdata",
+        "tidyr",
+        "tm",
+        "topicmodels",
+        "vdiffr",
+        "wordcloud"
+      ],
+      "VignetteBuilder": "knitr",
+      "Config/Needs/website": "ropensci/gutenbergr",
+      "Config/testthat/edition": "3",
+      "Encoding": "UTF-8",
+      "LazyData": "TRUE",
+      "RoxygenNote": "7.3.1",
+      "NeedsCompilation": "no",
+      "Author": "Gabriela De Queiroz [ctb], Colin Fay [ctb] (<https://orcid.org/0000-0001-7343-1846>), Emil Hvitfeldt [ctb], Os Keyes [ctb] (<https://orcid.org/0000-0001-5196-609X>), Kanishka Misra [ctb], Tim Mastny [ctb], Jeff Erickson [ctb], David Robinson [aut], Julia Silge [aut, cre] (<https://orcid.org/0000-0002-3671-836X>)",
+      "Maintainer": "Julia Silge <julia.silge@gmail.com>",
+      "Repository": "CRAN"
+    },
     "tidytree": {
       "Package": "tidytree",
       "Version": "0.4.6",
@@ -12998,6 +13357,45 @@
       "Maintainer": "Yihui Xie <xie@yihui.name>",
       "Repository": "RSPM"
     },
+    "tokenizers": {
+      "Package": "tokenizers",
+      "Version": "0.3.0",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "Fast, Consistent Tokenization of Natural Language Text",
+      "Date": "2022-12-19",
+      "Description": "Convert natural language text into tokens. Includes tokenizers for shingled n-grams, skip n-grams, words, word stems, sentences, paragraphs, characters, shingled characters, lines, Penn Treebank, regular expressions, as well as functions for counting characters, words, and sentences, and a function for splitting longer texts into separate documents, each with the same number of words.  The tokenizers have a consistent interface, and the package is built on the 'stringi' and 'Rcpp' packages for  fast yet correct tokenization in 'UTF-8'.",
+      "License": "MIT + file LICENSE",
+      "LazyData": "yes",
+      "Authors@R": "c(person(\"Lincoln\", \"Mullen\", role = c(\"aut\", \"cre\"), email = \"lincoln@lincolnmullen.com\", comment = c(ORCID = \"0000-0001-5103-6917\")), person(\"Os\", \"Keyes\", role = c(\"ctb\"), email = \"ironholds@gmail.com\", comment = c(ORCID = \"0000-0001-5196-609X\")), person(\"Dmitriy\", \"Selivanov\", role = c(\"ctb\"), email = \"selivanov.dmitriy@gmail.com\"), person(\"Jeffrey\", \"Arnold\", role = c(\"ctb\"), email = \"jeffrey.arnold@gmail.com\", comment = c(ORCID = \"0000-0001-9953-3904\")), person(\"Kenneth\", \"Benoit\", role = c(\"ctb\"), email = \"kbenoit@lse.ac.uk\", comment = c(ORCID = \"0000-0002-0797-564X\")))",
+      "URL": "https://docs.ropensci.org/tokenizers/, https://github.com/ropensci/tokenizers",
+      "BugReports": "https://github.com/ropensci/tokenizers/issues",
+      "RoxygenNote": "7.2.1",
+      "Depends": [
+        "R (>= 3.1.3)"
+      ],
+      "Imports": [
+        "stringi (>= 1.0.1)",
+        "Rcpp (>= 0.12.3)",
+        "SnowballC (>= 0.5.1)"
+      ],
+      "LinkingTo": [
+        "Rcpp"
+      ],
+      "Encoding": "UTF-8",
+      "Suggests": [
+        "covr",
+        "knitr",
+        "rmarkdown",
+        "stopwords (>= 0.9.0)",
+        "testthat"
+      ],
+      "VignetteBuilder": "knitr",
+      "NeedsCompilation": "yes",
+      "Author": "Lincoln Mullen [aut, cre] (<https://orcid.org/0000-0001-5103-6917>), Os Keyes [ctb] (<https://orcid.org/0000-0001-5196-609X>), Dmitriy Selivanov [ctb], Jeffrey Arnold [ctb] (<https://orcid.org/0000-0001-9953-3904>), Kenneth Benoit [ctb] (<https://orcid.org/0000-0002-0797-564X>)",
+      "Maintainer": "Lincoln Mullen <lincoln@lincolnmullen.com>",
+      "Repository": "CRAN"
+    },
     "treeio": {
       "Package": "treeio",
       "Version": "1.28.0",
@@ -13054,42 +13452,6 @@
       "NeedsCompilation": "no",
       "Author": "Guangchuang Yu [aut, cre] (<https://orcid.org/0000-0002-6485-8781>), Tommy Tsan-Yuk Lam [ctb, ths], Shuangbin Xu [ctb] (<https://orcid.org/0000-0003-3513-5362>), Bradley Jones [ctb], Casey Dunn [ctb], Tyler Bradley [ctb], Konstantinos Geles [ctb]",
       "Maintainer": "Guangchuang Yu <guangchuangyu@gmail.com>"
-    },
-    "treemapify": {
-      "Package": "treemapify",
-      "Version": "2.5.6",
-      "Source": "Repository",
-      "Title": "Draw Treemaps in 'ggplot2'",
-      "Authors@R": "c( person(\"David\", \"Wilkins\", , \"david@wilkox.org\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0002-3385-8981\")), person(\"Bob\", \"Rudis\", , \"bob@rud.is\", role = c(\"ctb\"), comment = c(ORCID = \"0000-0001-5670-2640\")) )",
-      "URL": "https://wilkox.org/treemapify/",
-      "BugReports": "https://github.com/wilkox/treemapify/issues/",
-      "Description": "Provides 'ggplot2' geoms for drawing treemaps.",
-      "Depends": [
-        "R (>= 3.6)"
-      ],
-      "Imports": [
-        "ggplot2 (>= 2.2.1)",
-        "ggfittext (>= 0.5.0)",
-        "grid (>= 3.1)",
-        "cli (>= 3.6.1)"
-      ],
-      "Suggests": [
-        "knitr",
-        "rmarkdown",
-        "testthat",
-        "vdiffr",
-        "spelling"
-      ],
-      "License": "GPL (>= 3)",
-      "LazyData": "true",
-      "RoxygenNote": "7.2.3",
-      "VignetteBuilder": "knitr",
-      "Encoding": "UTF-8",
-      "Language": "en-GB",
-      "NeedsCompilation": "no",
-      "Author": "David Wilkins [aut, cre] (<https://orcid.org/0000-0002-3385-8981>), Bob Rudis [ctb] (<https://orcid.org/0000-0001-5670-2640>)",
-      "Maintainer": "David Wilkins <david@wilkox.org>",
-      "Repository": "CRAN"
     },
     "truncnorm": {
       "Package": "truncnorm",
