@@ -85,59 +85,61 @@ model_fit <- brm(
 model_results <- tidy(model_fit, conf.int = TRUE)  # it is the 95% CI by default
 ```
 ```{r}
-# ---  Calculate Conditional Effects for Each Group ---
-# This section calculates the absolute effect of "sweets + antibiotics" within each
-# conditioning level, rather than showing differences from a baseline.
+# ---  Calculate Conditional Effects Correctly Using Posterior Draws ---
+# This is the statistically sound way to calculate the effect for each group.
+# It uses the full posterior distribution to correctly propagate uncertainty.
 
-# First, extract the baseline effect (for the Ablative group)
-baseline_effect <- model_results %>% filter(term == "fg_sweets:empiricalTRUE")
+# First, extract the posterior draws for the relevant coefficients.
+# The 'as_draws_df' function converts the model's posterior samples into a tidy data frame.
+posterior_draws <- as_draws_df(model_fit)
 
-# Extract the difference for the Reduced group
-reduced_diff <- model_results %>% filter(term == "fg_sweets:empiricalTRUE:intensityreduced")
+# Now, calculate the conditional effect for each draw.
+conditional_effects_draws <- posterior_draws %>%
+  transmute(
+    # The effect for the Ablative group is just its own coefficient.
+    `Ablative (High Intensity)` = `b_fg_sweets:empiricalTRUE`,
+    
+    # The effect for the Reduced group is the baseline effect + its interaction term.
+    `Reduced Intensity` = `b_fg_sweets:empiricalTRUE` + `b_fg_sweets:empiricalTRUE:intensityreduced`,
+    
+    # The effect for the Non-Ablative group is the baseline effect + its interaction term.
+    `Non-Ablative` = `b_fg_sweets:empiricalTRUE` + `b_fg_sweets:empiricalTRUE:intensitynonablative`
+  )
 
-# Extract the difference for the Non-Ablative group
-nonablative_diff <- model_results %>% filter(term == "fg_sweets:empiricalTRUE:intensitynonablative")
+# ---  Summarize the Posterior to Get Point Estimates and Intervals ---
+# Now we summarize the thousands of draws for each conditional effect into a
+# point estimate (the mean of the draws) and a credible interval (the quantiles).
 
-# Calculate the effect for the Reduced group by adding the baseline effect and the difference
-# Note: A proper calculation of the combined confidence interval would require the model's posterior draws.
-# For this visualization, we are summing the point estimates.
-reduced_effect <- tibble(
-  term_label = "Reduced Intensity",
-  estimate = baseline_effect$estimate + reduced_diff$estimate,
-  conf.low = baseline_effect$conf.low + reduced_diff$conf.low, # Approximation
-  conf.high = baseline_effect$conf.high + reduced_diff$conf.high  # Approximation
-)
-
-# Calculate the effect for the Non-Ablative group
-nonablative_effect <- tibble(
-  term_label = "Non-Ablative",
-  estimate = baseline_effect$estimate + nonablative_diff$estimate,
-  conf.low = baseline_effect$conf.low + nonablative_diff$conf.low, # Approximation
-  conf.high = baseline_effect$conf.high + nonablative_diff$conf.high  # Approximation
-)
-
-# Combine all three groups into a single data frame for plotting
-plot_data <- bind_rows(
-  baseline_effect %>% mutate(term_label = "Ablative"),
-  reduced_effect,
-  nonablative_effect
-) %>%
+plot_data <- conditional_effects_draws %>%
+  # Convert the data to a long format for easy summarization and plotting
+  pivot_longer(
+    cols = everything(),
+    names_to = "term_label",
+    values_to = "estimate"
+  ) %>%
+  # Group by each term to summarize
+  group_by(term_label) %>%
+  # Use mean_qi to get the mean (point estimate) and the 95% credible interval
+  mean_qi(estimate) %>%
+  # Rename columns to match the plotting code below
+  rename(conf.low = .lower, conf.high = .upper) %>%
   # Make the labels a factor to control their order on the plot
-  mutate(term_label = fct_relevel(term_label, "Ablative", "Reduced Intensity", "Non-Ablative")) %>%
-  select(term_label, estimate, conf.low, conf.high)
+  mutate(term_label = fct_relevel(term_label, "Ablative (High Intensity)", "Reduced Intensity", "Non-Ablative")) %>% 
+  mutate(is_significant = (conf.low * conf.high) > 0)
 
 
-# --- 3. Create the More Intuitive Coefficient Plot ---
+# --- 4. Create the More Intuitive Coefficient Plot ---
 ggplot(plot_data, aes(x = estimate, y = term_label)) +
-  # Add a vertical line at zero. If a confidence interval crosses this line,
+  # Add a vertical line at zero. If a credible interval crosses this line,
   # the effect is not statistically significant.
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey70") +
   
-  # Add the error bars (the "whiskers") representing the 95% confidence interval
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 0.8, color = "gray50") +
+  # Add the error bars (the "whiskers") representing the 95% credible interval
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high,  color = is_significant), height = 0.2, linewidth = 0.8) +
   
-  # Add the points representing the model's estimate for each term
-  geom_point(size = 4, color = "#0072B2") +
+  # Add the points representing the model's posterior mean for each term
+  geom_point(size = 4, aes(  color = is_significant)) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
   
   # Add labels and a title
   labs(
