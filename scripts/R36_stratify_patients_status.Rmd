@@ -1,0 +1,158 @@
+---
+title: "Stratification by patient status"
+output: html_document
+date: "2025-08-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(broom.mixed)
+library(brms)   
+library(ggpubr)
+library(patchwork)
+library(tidybayes)
+library(cowplot)
+library(ggridges)
+library(brmstools)
+library(bayesplot)
+options(mc.cores = parallel::detectCores())
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+ncores <- parallel::detectCores()
+```
+- Why Not to Split the Data     
+  
+- Loss of Power
+
+- Wasted Information: The model learns about the general effects of diet and antibiotics from the entire cohort. By splitting the data, you prevent the model from "borrowing strength" across the groups, making your estimates less precise.
+
+- No Direct Comparison: Running three separate models doesn't actually give you a statistical test to say whether the effect of sweets * abx is significantly different between the ablative and non-ablative groups.
+
+# run three way interaction model
+
+I am testing if the effect of sweets * abx depends on the intensity level. In statistical terms, you are testing for an interaction between (sweets * abx) and intensity.
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv')
+```
+
+
+```{r}
+# Combine the main food groups and the current sweet variable
+other_food_terms <- meta %>% select(starts_with('fg')) %>% select(-fg_sweets) %>% colnames()
+
+other_food_terms_ <- paste(other_food_terms, collapse = ' + ')
+
+sweet_interaction_term <- 'fg_sweets * empirical * intensity'
+
+all_terms <- paste(other_food_terms_, sweet_interaction_term, sep =  ' + ')
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0   + TPN + EN +",
+  all_terms,
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+  prior(normal(0, 1), class = 'b') + # General prior for all food effects
+  # Specific priors that override the general one for non-food covariates
+  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") 
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = meta,
+  prior = priors,
+  warmup = 1000, iter = 3000,
+  chains = 2, cores = 10, # Adjust cores as needed
+  seed = 123,
+  silent = 2
+)
+
+# Tidy the output and return only the interaction term for the sweet subcategory
+model_results <- tidy(model_fit, conf.int = TRUE)  # it is the 95% CI by default
+```
+```{r}
+# ---  Calculate Conditional Effects for Each Group ---
+# This section calculates the absolute effect of "sweets + antibiotics" within each
+# conditioning level, rather than showing differences from a baseline.
+
+# First, extract the baseline effect (for the Ablative group)
+baseline_effect <- model_results %>% filter(term == "fg_sweets:empiricalTRUE")
+
+# Extract the difference for the Reduced group
+reduced_diff <- model_results %>% filter(term == "fg_sweets:empiricalTRUE:intensityreduced")
+
+# Extract the difference for the Non-Ablative group
+nonablative_diff <- model_results %>% filter(term == "fg_sweets:empiricalTRUE:intensitynonablative")
+
+# Calculate the effect for the Reduced group by adding the baseline effect and the difference
+# Note: A proper calculation of the combined confidence interval would require the model's posterior draws.
+# For this visualization, we are summing the point estimates.
+reduced_effect <- tibble(
+  term_label = "Reduced Intensity",
+  estimate = baseline_effect$estimate + reduced_diff$estimate,
+  conf.low = baseline_effect$conf.low + reduced_diff$conf.low, # Approximation
+  conf.high = baseline_effect$conf.high + reduced_diff$conf.high  # Approximation
+)
+
+# Calculate the effect for the Non-Ablative group
+nonablative_effect <- tibble(
+  term_label = "Non-Ablative",
+  estimate = baseline_effect$estimate + nonablative_diff$estimate,
+  conf.low = baseline_effect$conf.low + nonablative_diff$conf.low, # Approximation
+  conf.high = baseline_effect$conf.high + nonablative_diff$conf.high  # Approximation
+)
+
+# Combine all three groups into a single data frame for plotting
+plot_data <- bind_rows(
+  baseline_effect %>% mutate(term_label = "Ablative"),
+  reduced_effect,
+  nonablative_effect
+) %>%
+  # Make the labels a factor to control their order on the plot
+  mutate(term_label = fct_relevel(term_label, "Ablative", "Reduced Intensity", "Non-Ablative")) %>%
+  select(term_label, estimate, conf.low, conf.high)
+
+
+# --- 3. Create the More Intuitive Coefficient Plot ---
+ggplot(plot_data, aes(x = estimate, y = term_label)) +
+  # Add a vertical line at zero. If a confidence interval crosses this line,
+  # the effect is not statistically significant.
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey70") +
+  
+  # Add the error bars (the "whiskers") representing the 95% confidence interval
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, linewidth = 0.8, color = "gray50") +
+  
+  # Add the points representing the model's estimate for each term
+  geom_point(size = 4, color = "#0072B2") +
+  
+  # Add labels and a title
+  labs(
+    title = "Effect of Sweets + Antibiotics on Microbiome Diversity",
+    subtitle = "Shown for each conditioning intensity group",
+    x = "Estimated Change in Log(Alpha Diversity)",
+    y = "" # No y-axis label needed
+  ) +
+  
+  # Use a clean theme
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major.y = element_blank(), # Remove horizontal grid lines
+    plot.title.position = "plot"
+  )
+
+```
+
