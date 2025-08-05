@@ -1655,6 +1655,85 @@ correlation_heatmap <- ggplot(corr_results %>% mutate(r = round(r, digits = 2)),
 # Print the plot
 print(correlation_heatmap)
 ```
+```{r}
+# Load the required library
+library(corrplot)
+
+# --- Manually Create the Correlation Matrix from Your Results ---
+# Instead of calculating correlations from raw data, we'll build the
+# matrix directly from the 'r' values in your screenshot.
+
+# Define the variable names for clarity
+var_names <- c(
+  "Nonalcoholic_beverages",
+  "Sugars_and_sweets",
+  "Water",
+  "Formulated_beverages"
+)
+
+# Create the matrix of correlation coefficients ('r' values)
+# The matrix is filled by row. The diagonal is 1 (correlation with self).
+# The lower triangle mirrors the upper triangle.
+cor_matrix <- matrix(c(
+  1.000,   0.050,  -0.097,  -0.058,  # Row for Nonalcoholic
+  0.050,   1.000,   0.007,  -0.026,  # Row for Sugars
+ -0.097,   0.007,   1.000,  -0.000,  # Row for Water
+ -0.058,  -0.026,  -0.000,   1.000   # Row for Formulated
+), nrow = 4, ncol = 4, byrow = TRUE, dimnames = list(var_names, var_names))
+
+
+# --- Create the Matrix of P-values ---
+# This matrix corresponds to the correlation matrix and will be used
+# to identify and visualize significant correlations.
+p_matrix <- matrix(c(
+  0.000,   0.146,   0.005,   0.091,  # P-values for Nonalcoholic
+  0.146,   0.000,   0.845,   0.457,  # P-values for Sugars
+  0.005,   0.845,   0.000,   0.989,  # P-values for Water
+  0.091,   0.457,   0.989,   0.000   # P-values for Formulated
+), nrow = 4, ncol = 4, byrow = TRUE, dimnames = list(var_names, var_names))
+
+
+# --- Generate the Visualizations ---
+
+# Set up the plotting area to show multiple plots
+par(mfrow = c(1, 2)) # Arrange plots in 1 row and 2 columns
+
+# --- Plot 1: Mixed Visualization (Pies & Numbers) ---
+# This version combines numbers in the lower triangle with pie charts
+# in the upper triangle. The pie fill represents the correlation strength.
+corrplot.mixed(cor_matrix,
+               lower.col = "black",
+               number.cex = 0.9,
+               upper = "pie",
+               tl.col = "black",
+               tl.srt = 45,
+               title = "Mixed Correlogram",
+               mar=c(0,0,1,0))
+
+
+# --- Plot 2: Highlighting Significant Correlations ---
+# This plot displays all coefficients but visually marks the non-significant
+# ones with a cross. This is a very common and effective technique.
+# We use the p-value matrix to determine significance (p < 0.05).
+corrplot(cor_matrix,
+         p.mat = p_matrix,
+         method = "circle",
+         type = "lower",
+         insig = "p-value", # Show p-values for non-significant results
+         sig.level = 0.05,  # Set the significance level
+         pch.cex = 0.9,     # Size of the p-value text
+         tl.col = "black",
+         tl.srt = 45,
+         addCoef.col = "black",
+         diag = FALSE,
+         title = "Significant Correlations (p < 0.05)",
+         mar=c(0,0,1,0))
+
+# Reset plotting area to default
+par(mfrow = c(1, 1))
+
+
+```
 
 # 4 subgroups together
 

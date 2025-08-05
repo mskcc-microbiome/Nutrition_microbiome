@@ -94,71 +94,9 @@ ggsave('../data/R33_gf_design.pdf', width = 10)
 # the CFU
 
 ```{r}
-dat <- read_csv('../data/7_29_25_germ_free_faecalis_gavage.csv') 
-
-cfu_data <- dat %>% 
-  filter(!is.na(Colonies_counted)) %>% 
-  mutate(Tube_weight_empty_mg = Tube_weight_empty_g * 1000,
-         Total_weight_stool_and_tube_mg = as.numeric(Total_weight_stool_and_tube_mg), 
-        Stool_weight_mg =  Total_weight_stool_and_tube_mg - Tube_weight_empty_mg) %>% 
-  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/20))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
-  clean_names() %>%
-  mutate(logCFU = log10(cf_us_per_gram_stool))
-```
-
-
-```{r}
-# Clean and prepare the data for plotting
-plot_data <- cfu_data %>%
-  # Remove rows with no CFU data
-  filter(!is.na(logCFU)) %>%
-  # Create a clearer group label for the plot facets
-  mutate(
-    treatment_group = case_when(
-      str_starts(mouse_group, "1-") ~ "E. faecalis + Sucrose Water",
-      str_starts(mouse_group, "2-") ~ "E. faecalis + Regular Water",
-      TRUE ~ "Other"
-    ),
-    # Make the tube_id a factor to treat each mouse as a distinct category
-    tube_id = as.factor(tube_id)
-  )
-
-# Create the plot
-ggplot(plot_data, aes(x = treatment_group, y = logCFU, color = tube_id)) +
-  # Use geom_jitter to see all points clearly, even if they have similar values
-  geom_jitter(width = 0.1, size = 4, alpha = 0.8) +
-  
-  # Add text labels for each mouse ID, using ggrepel to avoid overlap
-  geom_text_repel(aes(label = mouse_group), size = 3.5, fontface = "bold", box.padding = 0.5) +
-  
-  # Clean up the theme and add titles
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold", hjust = 0.5, size = 18),
-    plot.subtitle = element_text(hjust = 0.5, size = 12),
-    axis.title.x = element_blank(), # The group names on the x-axis are clear enough
-    axis.text.x = element_text(face = "bold"),
-    legend.position = "none" # Hide legend as colors are just for distinction
-  ) +
-  
-  # Add labels
-  labs(
-    title = "Initial E. faecalis Colonization in Germ-Free Mice",
-    subtitle = "8 Hours Post-Gavage",
-    y = "log10(CFU / gram of feces)"
-  ) +
-  
-  # Set the y-axis to start at a reasonable value
-  coord_cartesian(ylim = c(4, 5.5))
-
-
-```
-# 48h after gavage
-
-```{r}
 # Load the data from the CSV file.
 # The `read_csv` function is great because it handles column types automatically.
-raw_data <- read_tsv("../data/7_29_25_germ_free_faecalis_gavage - sheet1.tsv")
+raw_data <- read_csv("../data/7_29_25_germ_free_faecalis_gavage - sheet1.csv")
 
 # Clean and prepare the data for plotting.
 plot_data <- raw_data %>%
@@ -175,6 +113,7 @@ plot_data <- raw_data %>%
       `Time Point` == "8h post gavage" ~ 8,
       `Time Point` == "24h post gavage" ~ 24,
       `Time Point` == "48h post gavage" ~ 48,
+      `Time Point` == "144h post gavage" ~ 144,
     ),
     # Create clean labels for the two treatment groups based on the new request.
     Treatment = case_when(
@@ -194,13 +133,6 @@ ggplot(plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group
   geom_line(alpha = 0.8, linewidth = 1, color = 'gray') +
   # Add points to show the exact measurement at each time point.
   geom_point(size = 2) +
-  
-  # Use ggrepel to add mouse ID labels that don't overlap.
-  # geom_text_repel(data = label_data, aes(label = `Mouse Group`),
-  #                 fontface = "bold",
-  #                 nudge_x = 2, # Push labels slightly to the right of the last point
-  #                 direction = "y",
-  #                 hjust = 0) +
 
   # Facet_wrap creates separate panels for each treatment group.
   facet_wrap(~Treatment) +
@@ -212,7 +144,7 @@ ggplot(plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group
   ) +
   
    # This is the key part to set the x-axis breaks
-  scale_x_continuous(breaks = c(4, 8, 24, 48)) +
+  scale_x_continuous(breaks = c(4, 8, 24, 48, 144)) +
   
   # Use a clean theme and add informative titles and labels.
   theme_bw(base_size = 14) +
@@ -230,7 +162,7 @@ ggplot(plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group
   ) +
   
   # Ensure the labels have enough space on the right.
-  coord_cartesian(xlim = c(0, 53))
+  coord_cartesian(xlim = c(0, 150))
 
 
 ```
