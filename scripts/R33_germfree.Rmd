@@ -13,6 +13,7 @@ library(tidyverse)
 library(janitor)
 library(ggrepel)
 library(scales)
+library(patchwork)
 ```
 
 ```{r}
@@ -93,77 +94,187 @@ ggsave('../data/R33_gf_design.pdf', width = 10)
 ```
 # the CFU
 
+for this figure:
+
+
+-plot with a thickish line for the group median and thin semi-transparent spaghetti tracings for inividual mice
+-add p value; can be with Vardi test or GEE
+
 ```{r}
 # Load the data from the CSV file.
 # The `read_csv` function is great because it handles column types automatically.
-raw_data <- read_csv("../data/7_29_25_germ_free_faecalis_gavage - sheet1.csv")
-
-# Clean and prepare the data for plotting.
-plot_data <- raw_data %>%
-  # The column names have spaces, so we use backticks `` to refer to them.
-  # First, filter for only the groups of interest (starting with "1-" or "2-").
-  filter(str_starts(`Mouse Group`, "1-") | str_starts(`Mouse Group`, "2-")) %>%
+raw_data <- read_csv("../data/7_29_25_germ_free_faecalis_gavage - sheet1.csv") %>% 
   # We can only plot values greater than 0 on a log scale.
   mutate(CFUs_per_GramStool = if_else(CFUs_per_GramStool == 0, 1, CFUs_per_GramStool)) %>% 
-  # The 'mutate' function creates new columns.
+  mutate(log10_CFUs_per_GramStool = log10(CFUs_per_GramStool))
+```
+
+
+```{r}
+# add the pre-innoculation (hour 0) enterococcus abundance (0 from bhi anaerobic culturing)  
+baseline_data <- tibble(
+  # The 'Time Point' is the same for all baseline measurements.
+  `Time Point` = rep("0h (pre-innoculation)", 10),
+  
+  # A vector containing the unique group IDs for each of the 10 mice.
+  `Mouse Group` = c("1-1", "1-3", "1-10", 
+                    "2-1", "2-3", "2-10", 
+                    "3-1", "3-3", 
+                    "4-1", "4-3"),
+                    
+  # The notes column specifies the source of the germ-free confirmation.
+  Notes = rep("BHI anaerobic culturing", 10),
+  
+  # The CFU/gram is set to 1, representing the limit of detection (no growth).
+  `CFUs_per_GramStool` = rep(1, 10),
+  
+  # The log10 of 1 is 0.
+  `log10_CFUs_per_GramStool` = rep(0, 10)
+)
+
+
+no_gavage_culturing_48 <- tibble(
+  # The 'Time Point' is the same for all baseline measurements.
+  `Time Point` = rep("48h", 4),
+  
+  # A vector containing the unique group IDs for each of the 10 mice.
+  `Mouse Group` = c(
+                    "3-1", "3-3", 
+                    "4-1", "4-3"),
+                    
+  # The notes column specifies the source of the germ-free confirmation.
+  Notes = rep("BHI anaerobic culturing", 4),
+  
+  # The CFU/gram is set to 1, representing the limit of detection (no growth).
+  `CFUs_per_GramStool` = rep(1, 4),
+  
+  # The log10 of 1 is 0.
+  `log10_CFUs_per_GramStool` = rep(0, 4)
+)
+
+all_raw <- bind_rows(baseline_data, raw_data , no_gavage_culturing_48)
+```
+
+
+```{r}
+# Clean and transform the data for plotting.
+plot_data <- all_raw %>%
+  # Use mutate to create new, cleaner columns.
   mutate(
     # Convert the 'Time Point' text into a numerical hour for the x-axis.
     Time_h = case_when(
+      `Time Point` == "0h (pre-innoculation)" ~ 0,
       `Time Point` == "4h post gavage" ~ 4,
+      `Time Point` == "48h" ~ 48,
       `Time Point` == "8h post gavage" ~ 8,
       `Time Point` == "24h post gavage" ~ 24,
       `Time Point` == "48h post gavage" ~ 48,
-      `Time Point` == "144h post gavage" ~ 144,
+      `Time Point` == "144h post gavage" ~ 144
     ),
-    # Create clean labels for the two treatment groups based on the new request.
+    # Create descriptive labels for the four treatment groups.
     Treatment = case_when(
       str_starts(`Mouse Group`, "1-") ~ "E. faecalis + Sucrose Water",
-      str_starts(`Mouse Group`, "2-") ~ "E. faecalis + Regular Water"
-    )
+      str_starts(`Mouse Group`, "2-") ~ "E. faecalis + Regular Water",
+      str_starts(`Mouse Group`, "3-") ~ "PBS + Sucrose Water",
+      str_starts(`Mouse Group`, "4-") ~ "PBS + Regular Water"
+    ),
+    # Ensure the treatment groups are ordered correctly in the plot panels.
+    Treatment = factor(Treatment, levels = c(
+      "E. faecalis + Sucrose Water", "E. faecalis + Regular Water",
+      "PBS + Sucrose Water", "PBS + Regular Water"
+    ))
+  ) %>%
+  # Remove any rows where time could not be parsed.
+  filter(!is.na(Time_h))
+
+# --- Median Calculation ---
+
+# Calculate the median CFU for each group at each time point.
+# This will be used to draw the thick central trend line.
+Mean_data <- plot_data %>%
+  group_by(Treatment, Time_h) %>%
+  summarise(
+    Mean_CFU = mean(`CFUs_per_GramStool`, na.rm = TRUE),
+    .groups = 'drop'
   )
 
-# Create a smaller data frame just for the labels at the last time point.
-label_data <- plot_data %>%
-  group_by(TubeID) %>%
-  filter(Time_h == max(Time_h))
+# --- Plot Generation ---
 
-# Generate the plot.
-ggplot(plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment)) +
-  # Draw lines connecting the points for each mouse.
-  geom_line(alpha = 0.8, linewidth = 1, color = 'gray') +
-  # Add points to show the exact measurement at each time point.
-  geom_point(size = 2) +
+# --- Split Data for Two Plots ---
 
-  # Facet_wrap creates separate panels for each treatment group.
-  facet_wrap(~Treatment) +
-  
-  # Set the Y axis to a log10 scale and format the labels as 10^x
-  scale_y_log10(
-    breaks = trans_breaks("log10", function(x) 10^x),
-    labels = trans_format("log10", math_format(10^.x))
-  ) +
-  
-   # This is the key part to set the x-axis breaks
-  scale_x_continuous(breaks = c(4, 8, 24, 48, 144)) +
-  
-  # Use a clean theme and add informative titles and labels.
-  theme_bw(base_size = 14) +
-  labs(
-    title = "E. faecalis Colonization Over Time in Germ-Free Mice",
-    x = "Time Post-Gavage (Hours)",
-    y = "CFU / gram of feces"
-  ) +
-  
-  # Customize the plot's appearance.
+# Data for the top row (gavage groups)
+gavage_plot_data <- plot_data %>%
+  filter(str_starts(`Mouse Group`, "[12]-"))
+
+# Data for the bottom row (PBS control groups)
+pbs_plot_data <- plot_data %>%
+  filter(str_starts(`Mouse Group`, "[34]-"))
+
+# Calculate mean for each subset
+gavage_mean_data <- gavage_plot_data %>%
+  group_by(Treatment, Time_h) %>%
+  summarise(Mean_CFU = mean(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
+
+pbs_mean_data <- pbs_plot_data %>%
+  group_by(Treatment, Time_h) %>%
+  summarise(Mean_CFU = mean(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
+
+
+# Calculate the full y-axis range across all data to ensure scales are identical.
+# The lower limit is set to 1 (for log scale) and the upper limit is the max CFU value.
+y_limits <- c(1, max(plot_data$`CFUs_per_GramStool`, na.rm = TRUE))
+# Define consistent x-axis limits for all plots.
+x_limits <- c(0, 144)
+# Define consistent x-axis breaks for all plots.
+x_breaks <- c(0, 4, 8, 24, 48, 144)
+
+# --- Plot Generation ---
+
+# Define a common theme to reuse
+common_theme <- theme_bw(base_size = 14) +
   theme(
-    legend.position = "none", # Legend is redundant because of the panel titles.
+    legend.position = "none",
     plot.title = element_text(face = "bold", hjust = 0.5),
-    strip.text = element_text(face = "bold", size = 12) # Style the panel titles.
-  ) +
-  
-  # Ensure the labels have enough space on the right.
-  coord_cartesian(xlim = c(0, 150))
+    plot.subtitle = element_text(hjust = 0.5, color = "gray30"),
+    strip.text = element_text(face = "bold", size = 11),
+    panel.grid.minor = element_blank()
+  )
+
+# Plot 1: Top Row (Gavage Groups)
+p1 <- ggplot() +
+  geom_line(data = gavage_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3, linewidth = 0.5) +
+  geom_point(data = gavage_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3) +
+  geom_line(data = gavage_mean_data, aes(x = Time_h, y = Mean_CFU, color = Treatment), linewidth = 1.2) +
+  scale_y_log10(labels = trans_format("log10", math_format(10^.x)), oob = oob_squish_infinite, limits = y_limits) +
+ # Set both the breaks and the limits for the x-axis.
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  facet_wrap(~Treatment, ncol = 2) +
+  labs(x = "Time Post-Gavage (Hours)", y = "CFU / gram of feces") +
+  common_theme
+
+# Plot 2: Bottom Row (PBS Groups)
+p2 <- ggplot() +
+  geom_line(data = pbs_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3, linewidth = 0.5) +
+  geom_point(data = pbs_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3) +
+  geom_line(data = pbs_mean_data, aes(x = Time_h, y = Mean_CFU, color = Treatment), linewidth = 1.2) +
+  scale_y_log10(labels = trans_format("log10", math_format(10^.x)), oob = oob_squish_infinite, limits = y_limits) +
+  # Set both the breaks and the limits for the x-axis.
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  facet_wrap(~Treatment, ncol = 2) +
+  # Remove the x-axis title and labels for the bottom plot
+  labs(x = "Time (Hours)",  y = "CFU / gram of feces") +
+  common_theme 
+
+# Combine the two plots vertically using patchwork
+p1 / p2 +
+  plot_annotation(
+    title = "Bacterial Colonization Timeline in Germ-Free Mice",
+    subtitle = "Individual mouse trajectories with group means",
+    theme = theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 20),
+                  plot.subtitle = element_text(hjust = 0.5, color = "gray30", size = 14))
+  )
 
 
+ggsave('../data/R33_gf_full_course.jpg', width = 10, height = 7)
 ```
 
