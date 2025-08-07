@@ -187,16 +187,7 @@ plot_data <- all_raw %>%
   # Remove any rows where time could not be parsed.
   filter(!is.na(Time_h))
 
-# --- Median Calculation ---
 
-# Calculate the median CFU for each group at each time point.
-# This will be used to draw the thick central trend line.
-Mean_data <- plot_data %>%
-  group_by(Treatment, Time_h) %>%
-  summarise(
-    Mean_CFU = mean(`CFUs_per_GramStool`, na.rm = TRUE),
-    .groups = 'drop'
-  )
 
 # --- Plot Generation ---
 
@@ -214,6 +205,11 @@ pbs_plot_data <- plot_data %>%
 gavage_mean_data <- gavage_plot_data %>%
   group_by(Treatment, Time_h) %>%
   summarise(Mean_CFU = mean(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
+
+# the median
+gavage_median_data <- gavage_plot_data %>%
+  group_by(Treatment, Time_h) %>%
+  summarise(median_CFU = median(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
 
 pbs_mean_data <- pbs_plot_data %>%
   group_by(Treatment, Time_h) %>%
@@ -276,5 +272,88 @@ p1 / p2 +
 
 
 ggsave('../data/R33_gf_full_course.jpg', width = 10, height = 7)
+```
+
+```{r}
+# if annotating the median as the line
+p1_with_median <- ggplot() +
+  geom_line(data = gavage_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3, linewidth = 0.5) +
+  geom_point(data = gavage_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3) +
+  geom_line(data = gavage_median_data, aes(x = Time_h, y = median_CFU, color = Treatment), linewidth = 1.2) +
+  scale_y_log10(labels = trans_format("log10", math_format(10^.x)), oob = oob_squish_infinite, limits = y_limits) +
+ # Set both the breaks and the limits for the x-axis.
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  facet_wrap(~Treatment, ncol = 2) +
+  labs(x = "Time Post-Gavage (Hours)", y = "CFU / gram of feces") +
+  common_theme
+
+p1_with_median / p2 +
+  plot_annotation(
+    title = "Bacterial Colonization Timeline in Germ-Free Mice",
+    subtitle = "Individual mouse trajectories with group medians",
+    theme = theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 20),
+                  plot.subtitle = element_text(hjust = 0.5, color = "gray30", size = 14))
+  )
+
+
+ggsave('../data/R33_gf_full_course_with_median.jpg', width = 10, height = 7)
+```
+
+
+
+# the AUC test 
+
+```{r}
+library(DescTools) 
+library(ggpubr)
+
+analysis_data <- plot_data %>%
+  # First, filter for only the groups of interest (E. faecalis gavage).
+  filter(str_starts(`Mouse Group`, "1-") | str_starts(`Mouse Group`, "2-"))
+
+# Now, calculate the AUC for each mouse.
+# We group by mouse ID and treatment, then summarize to get one AUC value per mouse.
+auc_results <- analysis_data %>%
+  group_by(`Mouse Group`, Treatment) %>%
+  summarize(
+    # The AUC function from DescTools calculates the area under the curve.
+    # We use the log-transformed CFU values for this calculation.
+    auc_value = AUC(x = Time_h, y = log10_CFUs_per_GramStool),
+    # The .groups = 'drop' argument cleans up the grouping structure afterward.
+    .groups = 'drop'
+  )
+
+# Let's look at the calculated AUC values for each mouse.
+print("AUC calculated for each mouse:")
+print(auc_results)
+
+# Finally, perform the Wilcoxon rank-sum test (Mann-Whitney U test).
+# This compares the distribution of AUC values between the two treatment groups.
+# It's ideal here because the sample size is small and we can't assume normality.
+statistical_test <- wilcox.test(auc_value ~ Treatment, data = auc_results)
+
+# Print the results of the statistical test.
+print("--- Wilcoxon Rank-Sum Test Results ---")
+print(statistical_test)
+
+# To visualize the result, a simple boxplot of the AUC values is helpful.
+ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatment)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.1, size = 3) +
+  # This function from ggpubr runs the test and adds the p-value to the plot.
+  stat_compare_means(
+    method = "wilcox.test", 
+    comparisons = list(c("E. faecalis + Sucrose Water", "E. faecalis + Regular Water")),
+    label = "p.format" # Displays the p-value in a standard format.
+  ) +
+  labs(
+    title = "Comparison of Total Bacterial Load (AUC)",
+    x = "Treatment Group",
+    y = "Area Under Curve (log10 CFU * hours)"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(legend.position = "none")
+
+
 ```
 
