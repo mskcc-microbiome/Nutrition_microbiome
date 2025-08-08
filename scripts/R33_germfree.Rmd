@@ -16,82 +16,97 @@ library(scales)
 library(patchwork)
 ```
 
+
 ```{r}
+# Manually create a tibble that contains every event for every group.
+# This "long" data format is ideal for plotting with ggplot2.
+# This version includes the stool plating at 144h for the E. faecalis groups.
+experiment_design_df <- tribble(
+  ~group_name, ~y_position, ~color_group, ~time_h, ~event_type,
+  # Group 1: E. faecalis + Sucrose Water
+  "E. faecalis + Sucrose Water", 4, "Sucrose Water",   0, "BHI Anaerobic Culture",
+  "E. faecalis + Sucrose Water", 4, "Sucrose Water",   4, "Stool Plating",
+  "E. faecalis + Sucrose Water", 4, "Sucrose Water",   8, "Stool Plating",
+  "E. faecalis + Sucrose Water", 4, "Sucrose Water",  24, "Stool Plating",
+  "E. faecalis + Sucrose Water", 4, "Sucrose Water",  48, "Stool Plating",
+  "E. faecalis + Sucrose Water", 4, "Sucrose Water", 144, "Stool Plating", # Final stool plating
 
-# First, we set up a data frame that defines the four experimental groups.
-# Giving each group a unique y_position helps us stack them vertically in the plot.
-groups_df <- tibble(
-  group_id = 1:4,
-  gavage = c("E. faecalis", "E. faecalis", "PBS", "PBS"),
-  water = c("Sucrose Water", "Regular Water", "Sucrose Water", "Regular Water"),
-  group_label = paste(gavage, water, sep = " + "),
-  y_position = c(4, 3, 2, 1) # This staggers the timelines vertically.
+  # Group 2: E. faecalis + Regular Water
+  "E. faecalis + Regular Water", 3, "Regular Water",   0, "BHI Anaerobic Culture",
+  "E. faecalis + Regular Water", 3, "Regular Water",   4, "Stool Plating",
+  "E. faecalis + Regular Water", 3, "Regular Water",   8, "Stool Plating",
+  "E. faecalis + Regular Water", 3, "Regular Water",  24, "Stool Plating",
+  "E. faecalis + Regular Water", 3, "Regular Water",  48, "Stool Plating",
+  "E. faecalis + Regular Water", 3, "Regular Water", 144, "Stool Plating", # Final stool plating
+
+  # Group 3: PBS + Sucrose Water
+  "PBS + Sucrose Water", 2, "Sucrose Water",   0, "BHI Anaerobic Culture",
+  "PBS + Sucrose Water", 2, "Sucrose Water",   4, "Stool Plating",
+  "PBS + Sucrose Water", 2, "Sucrose Water",  48, "BHI Anaerobic Culture",
+  "PBS + Sucrose Water", 2, "Sucrose Water", 144, "", # No final stool plating for PBS group
+
+  # Group 4: PBS + Regular Water
+  "PBS + Regular Water", 1, "Regular Water",   0, "BHI Anaerobic Culture",
+  "PBS + Regular Water", 1, "Regular Water",   4, "Stool Plating",
+  "PBS + Regular Water", 1, "Regular Water",  48, "BHI Anaerobic Culture",
+  "PBS + Regular Water", 1, "Regular Water", 144, ""  # No final stool plating for PBS group
 )
 
-# Next, we define all the events and their timing in hours.
-# Day 3 is represented as 72 hours to keep the x-axis consistent.
-# We also assign a category to each event to control its shape in the plot.
-events_df <- tibble(
-  time_point = c(0, 5, 10, 20, 72),
-  event_label = c("Gavage", "Stool Collection", "Stool Collection", "Stool Collection", "Sacrifice"),
-  event_shape = c("Gavage", "Stool", "Stool", "Stool", "Stool")
-)
-
-# Here, we combine the groups and events to create the full data frame for plotting.
-# expand_grid() creates a row for every combination of group and event.
-experiment_df <- expand_grid(
-  groups_df,
-  events_df
-)
-
-# Now, we create the diagram using ggplot.
-ggplot(experiment_df, aes(x = time_point, y = y_position)) +
-  # This draws the main horizontal timelines for each group.
-  geom_line(aes(group = group_id), color = "gray50", linewidth = 1) +
-
-  # This adds points for each event, using different shapes to distinguish them.
-  geom_point(aes(shape = event_shape), size = 5, color = "steelblue") +
-  # Manually set the shapes: 17=triangle, 16=circle, 15=square.
-  scale_shape_manual(values = c("Gavage" = 17, "Stool" = 16, "Sacrifice" = 15)) +
-
-  # This adds the text labels for each experimental group to the left of the timelines.
+# Now, create the diagram using ggplot.
+ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
+  # Draw the horizontal timelines for each group.
+  geom_line(aes(group = group_name), color = "gray40", linewidth = 0.8) +
+  
+  # Add points for each event, mapping shape to event_type and color to color_group.
+  geom_point(aes(shape = event_type, color = color_group), size = 4, alpha = 0.9) +
+  
+  # Manually define the colors and shapes to match the request.
+  scale_color_manual(values = c("Sucrose Water" = "#F8766D", "Regular Water" = "#00BFC4")) +
+  scale_shape_manual(values = c("BHI Anaerobic Culture" = 15, "Stool Plating" = 17, "Sacrifice" = 16)) + # 15=square, 17=triangle, 16=circle
+  
+  # Add the group labels to the left of the timelines.
   geom_text(
-    data = groups_df,
-    aes(x = -1, y = y_position, label = group_label),
-    hjust = 1, # Aligns the text to the right, just before the timeline starts.
-    fontface = "bold",
-    size = 4
+    data = experiment_design_df %>% distinct(group_name, y_position),
+    aes(x = -2, y = y_position, label = group_name),
+    hjust = 1,
+    fontface = "bold"
   ) +
-
-  # This section cleans up the plot to make it look like a diagram rather than a standard chart.
-  theme_void() + # Removes background, gridlines, and axes.
+  
+  # Use a clean theme for a diagrammatic look.
+  theme_classic(base_size = 14) +
   theme(
-    axis.text.x = element_text(color = "black", size = 11, face = "bold"),
-    axis.title.x = element_text(color = "black", size = 14, face = "bold", margin = margin(t = 10)),
-    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
-    plot.subtitle = element_text(size = 14, hjust = 0.5, margin = margin(b = 20)),
-    plot.margin = margin(20, 20, 20, 20),
-    legend.position = "none" # The shapes are intuitive, so we hide the legend.
+    axis.line.y = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", hjust = 0.5)
   ) +
-
-  # Add the main titles and a label for the x-axis.
+  
+  # Add informative titles and labels.
   labs(
-    x = "Experimental Timeline",
     title = "Germ-Free Mouse Experiment Design",
-    subtitle = "Timeline of Treatment and Sample Collection"
+    x = "Time Post-Gavage (Hours)",
+    color = "Water Treatment",
+    shape = "Action"
   ) +
-
-  # This customizes the labels on the x-axis to be more descriptive.
+  
+  # Customize the x-axis breaks to show all key time points.
+  # The label for 144h is updated to include the sacrifice information.
   scale_x_continuous(
-    breaks = c(0, 5, 10, 20, 72),
-    labels = c("Time 0\n(Gavage)", "5 hr", "10 hr", "20 hr", "Day 3\n(Sacrifice)")
+    breaks = c(0, 4, 8, 24, 48, 144),
+    labels = c("0", "4", "8", "24", "48", "144\n(Sacrifice)")
   ) +
+  
+  # Expand plot limits so labels on the left are not cut off.
+  coord_cartesian(xlim = c(-45, 150))
 
-  # Finally, this expands the plot area slightly so the labels on the left aren't cut off.
-  coord_cartesian(xlim = c(-20, 80))
 
-ggsave('../data/R33_gf_design.pdf', width = 10)
+ggsave('../data/R33_gf_design_new.pdf', width = 10)
 ```
+
+
 # the CFU
 
 for this figure:
@@ -187,8 +202,11 @@ plot_data <- all_raw %>%
   # Remove any rows where time could not be parsed.
   filter(!is.na(Time_h))
 
+plot_data %>% write_csv('../data/R33_germ_free_data_for_plot.csv')
+```
 
 
+```{r}
 # --- Plot Generation ---
 
 # --- Split Data for Two Plots ---
