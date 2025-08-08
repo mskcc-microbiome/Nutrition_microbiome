@@ -14,6 +14,7 @@ library(brms)
 library(broom.mixed)
 library(tidybayes)
 library(patchwork)
+library(ggridges)
 ```
 
 Model the magnitude of compositional disruption itself. This is done by using a beta-diversity metric (like Bray-Curtis distance) from each patient's baseline sample as a continuous outcome variable. 
@@ -109,12 +110,10 @@ ggplot(summary_df, aes(x = Metric, y = Count, fill = Condition)) +
     plot.title = element_text(face = "bold", size = 16),
     legend.position = "top"
   )
-
 ```
 
 
-
-# focus on the subset that has the earlist sample <= 0
+# use all of the samples
 
 ```{r}
 all_food_vars <- meta %>% select(starts_with('fg')) %>% colnames()
@@ -144,7 +143,7 @@ priors <-
 # Fit the model (using fewer iterations for this example to run quickly)
 model_fit <- brm(
   formula = formula,
-  data = data %>% filter(sdrt1 <= 0)  ,
+  data = data   ,
   #prior = priors,
   #family = Beta(link = "logit"), # Use the Beta family
   control = list(adapt_delta = 0.99, max_treedepth = 15),
@@ -178,77 +177,81 @@ interaction_df <- cleaned_effects %>% filter(effect_type == "Interaction") %>%
   # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
   mutate(is_significant = (conf.low * conf.high) > 0)
 
-# Plot A: Main Clinical Covariates
-plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-  geom_pointrange(aes(xmin = conf.low, xmax = conf.high), color = "gray50", linewidth = 1, size = 0.7) +
-  labs(
-    title = '', # Use the name of the list element as the title
-    subtitle = "Main Clinical Effects",
-    x = "Coefficient Estimate",
-    y = "Covariate"
-  ) +
-  theme_bw(base_size = 12)
 ```
 
+## ridgeline plot
+
 ```{r}
-# This pipe creates clean labels and adds a special 'highlight' column
-interaction_df_processed <- interaction_df %>%
-  # Create a column to flag the specific term you want to highlight
+# We'll extract all interaction effects and create clean labels for plotting.
+posterior_draws <- model_fit %>%
+  gather_draws(`b_empirical.*:fg_.*`, regex = TRUE) %>%
   mutate(
-    highlight_status = case_when(
-      clean_term == "abx * fg sweets" ~ "Of Interest",
-      is_significant == TRUE    ~ "Significant",
-      TRUE                      ~ "Not Significant"
-    )
+    # Create a clear label for the two conditions we are comparing.
+    condition = if_else(
+      str_detect(.variable, "empiricalTRUE"), 
+      "During Antibiotic Exposure", 
+      "No Antibiotic Exposure"
+    ),
+    # Clean up the variable name to get just the food group.
+    food_group = str_remove_all(.variable, "b_empirical(TRUE|FALSE):fg_")
   )
 
-# --- Step 3: Create the Visualization ---
+# --- 2. Calculate the Sorting Order ---
+# We want to sort the plot based on the median effect size during antibiotic exposure.
+# This calculates the order and saves it as a character vector.
+sorting_order <- posterior_draws %>%
+  filter(condition == "During Antibiotic Exposure") %>%
+  group_by(food_group) %>%
+  summarise(median_effect = median(.value)) %>%
+  arrange(median_effect) %>%
+  pull(food_group) # pull() extracts the single column.
 
-plot_interactions <- ggplot(interaction_df_processed, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
-  # Add a vertical line at zero, which represents "no effect"
-  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-  
-  # Use geom_pointrange to show the estimate (point) and confidence interval (line)
-  # The color and alpha (transparency) are now mapped to our new 'highlight_status' column
-  geom_pointrange(
-    aes(xmin = conf.low, xmax = conf.high, color = highlight_status, alpha = highlight_status),
-    linewidth = 1, size = 0.7
+# --- 3. Apply the Sorting Order ---
+# Now, we apply that calculated order to our main data frame.
+# We do this by converting the 'food_group' column to a factor with specific levels.
+# ggplot will respect this factor order when it builds the plot.
+posterior_draws_ordered <- posterior_draws %>%
+  mutate(
+    food_group = factor(food_group, levels = sorting_order)
+  )
+
+# --- 4. Create the Faceted Plot ---
+ggplot(posterior_draws_ordered, aes(x = .value, y = food_group)) +
+  # Add the density ridges, but this time we don't need to color them manually
+  # as the facets will separate them.
+  geom_density_ridges(
+    aes(fill = condition), # Color by condition for clarity
+    alpha = 0.8, 
+    color = "white", 
+    show.legend = FALSE # The facet titles make a legend redundant.
   ) +
-  
-  # Manually define the colors and alpha levels for each status
-  scale_color_manual(
-    values = c(
-      "Significant" = "red",
-      "Of Interest" = "blue",
-      "Not Significant" = "gray50"
-    ),
-    name = "Effect Status" # Legend title
-  ) +
-  scale_alpha_manual(
-    values = c(
-      "Significant" = 1.0, # Fully opaque
-      "Of Interest" = 1.0, # Fully opaque
-      "Not Significant" = 0.5  # More transparent
-    ),
-    guide = "none" # Hide the separate alpha legend
-  ) +
-  
-  # Add labels and a clean theme
+  # Add the point estimate and 95% credible interval.
+  stat_pointinterval(.width = .95) +
+  # Add a vertical line at zero for reference.
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  # This is the key to creating the two side-by-side panels.
+  # 'scales = "free_x"' allows each panel to have its own x-axis range.
+  facet_wrap(~ condition, scales = "free_x") +
+  # Manually set the colors to be consistent.
+  scale_fill_manual(values = c("During Antibiotic Exposure" = "skyblue", "No Antibiotic Exposure" = "salmon")) +
+  # Add informative labels and a clean theme.
   labs(
-    title = "Food Group Interaction Effects on Compositional Disruption",
-    subtitle = "Highlighting key trends and significant effects",
+    title = "Food Group Effects on Microbiome Disruption",
+    subtitle = "Sorted by median effect during antibiotic exposure. Panels show the effect with and without antibiotics.",
     x = "Coefficient Estimate (Change in Bray-Curtis Distance)",
-    y = "Food Group x Antibiotic Exposure"
+    y = "Food Group"
   ) +
-  theme_bw(base_size = 14) +
-  theme(legend.position = "bottom")
+  theme_minimal(base_size = 14) +
+  theme(
+    # Improve panel titles and spacing for a cleaner look.
+    strip.text = element_text(face = "bold", size = 12),
+    panel.spacing = unit(2, "lines")
+  )
+
+```
 
 
-# Combine the plots and add the overall title for this model's results
-plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
-
-
+```{r}
 # quantify the pd of abx * sweets
 posterior_draws <- as_draws_df(model_fit)
 
@@ -272,7 +275,7 @@ pd <- mean(posterior_draws$`b_empiricalTRUE:fg_sweets` > 0)
 ```{r}
 library(gghalves) # For creating the raincloud plot effect
 
-ggplot(full_data %>% filter(sdrt1 <= 0), aes(x = empirical, y = stool_dist, fill = empirical)) +
+ggplot(full_data, aes(x = empirical, y = stool_dist, fill = empirical)) +
   # Add the 'rain' - the individual data points (jittered)
   geom_half_point(
     side = "l", # Show points on the left
