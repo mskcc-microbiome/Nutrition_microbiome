@@ -156,6 +156,8 @@ model_fit <- brm(
 
 results_df <- tidy(model_fit, conf.int = TRUE)
 ```
+## the interval forest plot
+
 ```{r}
 # This pipe filters for the fixed effects and creates clean, human-readable labels.
 cleaned_effects <- results_df %>%
@@ -178,118 +180,128 @@ interaction_df <- cleaned_effects %>% filter(effect_type == "Interaction") %>%
   # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
   mutate(is_significant = (conf.low * conf.high) > 0)
 
+
+# Plot A: Main Clinical Covariates
+plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high), color = "gray50", linewidth = 1, size = 0.7) +
+  labs(
+    title = '', # Use the name of the list element as the title
+    subtitle = "Main Clinical Effects",
+    x = "Coefficient Estimate",
+    y = "Covariate"
+  ) +
+  theme_bw(base_size = 12)
+
+# Plot B: Food Group Interaction Effects
+plot_interactions <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high, color = is_significant), linewidth = 1, size = 0.7) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
+  labs(
+    title = "Food Group Interaction Effects",
+    x = "Coefficient Estimate",
+    y = "Food Group x Antibiotic Exposure"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "none")
+
+# Combine the plots and add the overall title for this model's results
+plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
 ```
 
-## ridgeline plot
+## heatmap plot
 
 ```{r}
-# We'll extract all interaction effects and create clean labels for plotting.
+# --- 1. Data Preparation ---
+# We'll extract all interaction effects and create a single, unique label for each effect.
 posterior_draws <- model_fit %>%
   gather_draws(`b_empirical.*:fg_.*`, regex = TRUE) %>%
   mutate(
     # Create a clear label for the two conditions we are comparing.
     condition = if_else(
-      str_detect(.variable, "empiricalTRUE"), 
-      "During Antibiotic Exposure", 
-      "No Antibiotic Exposure"
+      str_detect(.variable, "empiricalTRUE"),
+      "Abx *",
+      ""
     ),
     # Clean up the variable name to get just the food group.
-    food_group = str_remove_all(.variable, "b_empirical(TRUE|FALSE):fg_")
+    food_group = str_remove_all(.variable, "b_empirical(TRUE|FALSE):fg_"),
+    # Create a unique identifier for each effect by combining food group and condition.
+    # This will be our new y-axis.
+    effect_label = paste(condition, food_group)
   )
 
 # --- 2. Calculate the Sorting Order ---
-# We want to sort the plot based on the median effect size during antibiotic exposure.
+# We want to sort the plot based on the median of ALL effects combined.
 # This calculates the order and saves it as a character vector.
 sorting_order <- posterior_draws %>%
-  filter(condition == "During Antibiotic Exposure") %>%
-  group_by(food_group) %>%
+  group_by(effect_label) %>%
   summarise(median_effect = median(.value)) %>%
   arrange(median_effect) %>%
-  pull(food_group) # pull() extracts the single column.
+  pull(effect_label) # pull() extracts the single column.
 
-# --- 3. Apply the Sorting Order ---
-# Now, we apply that calculated order to our main data frame.
-# We do this by converting the 'food_group' column to a factor with specific levels.
-# ggplot will respect this factor order when it builds the plot.
+# --- 3. Apply the Sorting Order to All Plotting Data ---
+# We apply the calculated order to our main data frame.
 posterior_draws_ordered <- posterior_draws %>%
-  mutate(
-    food_group = factor(food_group, levels = sorting_order)
-  )
+  mutate(effect_label = factor(effect_label, levels = sorting_order))
 
-# Create a data frame for the POSITIVE annotations.
-prob_annotations_pos <- posterior_draws_ordered %>%
-  group_by(food_group, condition) %>%
-  summarise(
-    prob_positive = mean(.value > 0),
-    .groups = 'drop'
-  ) %>%
-  mutate(
-    label_text = paste0(scales::percent(prob_positive, accuracy = 1), " > 0"),
-    x_pos = 0.004 # Fixed x position for positive labels
-  )
-
-# Create a data frame for the NEGATIVE annotations.
-prob_annotations_neg <- posterior_draws_ordered %>%
-  group_by(food_group, condition) %>%
-  summarise(
-    prob_negative = mean(.value < 0),
-    .groups = 'drop'
-  ) %>%
-  mutate(
-    label_text = paste0(scales::percent(prob_negative, accuracy = 1), "< 0 "),
-    x_pos = -0.002 # Fixed x position for negative labels
-  )
-
-
-# --- 4. Create the Faceted Plot ---
-ggplot(posterior_draws_ordered, aes(x = .value, y = food_group)) +
-
-  # Add a faint, complete outline of the density ridge on top for context.
-  geom_density_ridges(fill = NA, color = "black", size = 0.2) +
-  # Add the point estimate and 95% credible interval.
-  stat_pointinterval(.width = .95, size = 0.4, position = position_nudge(y = -0.1)) +
- # Add the text annotations for the POSITIVE probabilities.
-  geom_text(
-    data = prob_annotations_pos,
-    aes(x = x_pos, label = label_text),
-    size = 3.5,
-    hjust = 0, # Left-align text
-    nudge_y = 0.3,
-    color = "blue4"
-  ) +
-  # Add the text annotations for the NEGATIVE probabilities.
-  geom_text(
-    data = prob_annotations_neg,
-    aes(x = x_pos, label = label_text),
-    size = 3.5,
-    hjust = 1, # Right-align text
-    nudge_y = 0.3,
-    color = "red4"
-  ) +
-  # Add a vertical line at zero for reference.
+# --- 4. Create the Forest Plot (Left Panel) ---
+# This plot shows the median effect and 95% credible intervals for all effects in one list.
+p_forest <- ggplot(posterior_draws_ordered, aes(x = .value, y = effect_label, color = condition)) +
+  stat_pointinterval(.width = .95) +
   geom_vline(xintercept = 0, linetype = "dashed") +
-  # This is the key to creating the two side-by-side panels.
-  facet_wrap(~ condition, scales = "free_x") +
-  # Manually set the colors for our positive/negative fills.
-  scale_fill_manual(
-    name = "Effect Direction",
-    values = c("Positive" = "skyblue", "Negative" = "salmon")
-  ) +
-  # Add informative labels and a clean theme.
+  scale_color_manual(values = c("During Antibiotic Exposure" = "skyblue", "No Antibiotic Exposure" = "salmon"), name = "Condition") +
   labs(
-    title = "Food Group Effects on Microbiome Disruption",
-    subtitle = "Sorted by median effect during antibiotic exposure. Annotations show probability of a positive effect.",
     x = "Coefficient Estimate (Change in Bray-Curtis Distance)",
-    y = "Food Group"
+    y = "Food Group Effect"
   ) +
   theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+
+# --- 5. Create the Probability Heatmap (Right Panel) ---
+# This heatmap shows the probability of a positive effect for all effects in a single column.
+prob_summary_heatmap <- posterior_draws_ordered %>%
+  group_by(effect_label) %>%
+  summarise(prob_positive = mean(.value > 0), .groups = 'drop') %>%
+  mutate(label_text = scales::percent(prob_positive, accuracy = 1))
+
+p_heatmap <- ggplot(prob_summary_heatmap, aes(x = 1, y = effect_label, fill = prob_positive)) +
+  geom_tile(color = "white", lwd = 1.5) +
+  geom_text(aes(label = label_text), color = "black", size = 4) +
+ # Use the new color scale and add a name to create a legend.
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "blue",
+    midpoint = 0.5,
+    name = "Probability of\nincreased microbiome\ndisruption", # This title will appear on the legend
+    labels = scales::percent
+  ) +
+  labs(x = "", y = "") + # A concise label for the single column
+  theme_minimal(base_size = 14) +
   theme(
-    legend.position = "bottom",
-    strip.text = element_text(face = "bold", size = 12),
-    panel.spacing = unit(2, "lines")
+    axis.text.y = element_blank(), # Remove y-axis text to align with the forest plot
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid = element_blank(),
+    axis.text.x = element_blank() # Rotate label
   )
 
-ggsave('../data/R30_ridgeline_panels.jpg', width = 12, height = 15)
+# --- 6. Combine the Plots ---
+# The patchwork package makes combining plots as simple as adding them together.
+# 'plot_layout' allows us to control the relative widths of the panels.
+combined_plot <- p_forest + p_heatmap +
+  plot_layout(widths = c(5, 1)) + # Make the forest plot 5x wider than the heatmap
+  plot_annotation(
+    title = "Food Group Effects on Microbiome Disruption",
+    subtitle = "Sorted by median effect across all conditions."
+  )
+
+# Display the final combined plot
+combined_plot
+
+
+
+ggsave('../data/R30_heatmap_panels.jpg', width = 10, height = 10)
 ```
 
 
