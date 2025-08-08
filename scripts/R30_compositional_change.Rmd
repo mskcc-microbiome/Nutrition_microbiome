@@ -193,21 +193,6 @@ plot_main_effects <- ggplot(main_effects_df, aes(x = estimate, y = fct_reorder(c
   ) +
   theme_bw(base_size = 12)
 
-# Plot B: Food Group Interaction Effects
-plot_interactions <- ggplot(interaction_df, aes(x = estimate, y = fct_reorder(clean_term, estimate))) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-  geom_pointrange(aes(xmin = conf.low, xmax = conf.high, color = is_significant), linewidth = 1, size = 0.7) +
-  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray50"), guide = "none") +
-  labs(
-    title = "Food Group Interaction Effects",
-    x = "Coefficient Estimate",
-    y = "Food Group x Antibiotic Exposure"
-  ) +
-  theme_bw(base_size = 12) +
-  theme(legend.position = "none")
-
-# Combine the plots and add the overall title for this model's results
-plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
 ```
 
 ## heatmap plot
@@ -268,7 +253,7 @@ prob_summary_heatmap <- posterior_draws_ordered %>%
 
 p_heatmap <- ggplot(prob_summary_heatmap, aes(x = 1, y = effect_label, fill = prob_positive)) +
   geom_tile(color = "white", lwd = 1.5) +
-  geom_text(aes(label = label_text), color = "black", size = 4) +
+  geom_text(aes(label = label_text), color = "yellow", size = 4) +
  # Use the new color scale and add a name to create a legend.
   scale_fill_gradient2(
     low = "red", mid = "white", high = "blue",
@@ -289,20 +274,19 @@ p_heatmap <- ggplot(prob_summary_heatmap, aes(x = 1, y = effect_label, fill = pr
 # --- 6. Combine the Plots ---
 # The patchwork package makes combining plots as simple as adding them together.
 # 'plot_layout' allows us to control the relative widths of the panels.
-combined_plot <- p_forest + p_heatmap +
-  plot_layout(widths = c(5, 1)) + # Make the forest plot 5x wider than the heatmap
-  plot_annotation(
-    title = "Food Group Effects on Microbiome Disruption",
-    subtitle = "Sorted by median effect across all conditions."
-  )
+p_bottom_combined <- p_forest + p_heatmap +
+  plot_layout(widths = c(5, 1))  # Make the forest plot 5x wider than the heatmap
+  # plot_annotation(
+  #   title = "Food Group Effects on Microbiome Disruption",
+  #   subtitle = "Sorted by median effect across all conditions."
+  # )
 
 # Display the final combined plot
-combined_plot
-
-
-
-ggsave('../data/R30_heatmap_panels.jpg', width = 10, height = 10)
+p_bottom_combined
 ```
+
+
+
 
 
 ```{r}
@@ -327,58 +311,69 @@ pd <- mean(posterior_draws$`b_empiricalTRUE:fg_sweets` > 0)
 # stool_dist viz
 
 ```{r}
-library(gghalves) # For creating the raincloud plot effect
+p_dist_violin <- ggplot(full_data, aes(x = stool_dist, y = as.factor(empirical))) +
+  # Add the jittered points first, so they are in the background.
+  # 'height = 0.2' controls the vertical spread of the points.
+  geom_jitter(
+    #aes(color = as.factor(empirical)),
+    height = 0.2,
+    alpha = 0.3,
+    show.legend = FALSE
+  ) +
+  # Overlay the boxplot. 'outlier.shape = NA' hides the default outlier points
+  # because we are already showing all points with geom_jitter.
+  geom_violin(
+    fill = "white",
+    alpha = 0.5,
+    outlier.shape = NA
+  ) +
 
-ggplot(full_data, aes(x = empirical, y = stool_dist, fill = empirical)) +
-  # Add the 'rain' - the individual data points (jittered)
-  geom_half_point(
-    side = "l", # Show points on the left
-    aes(color = empirical),
-    shape = 16,
-    size = 1.5,
-    alpha = 0.4
-  ) +
-  # Add the 'cloud' - the density distribution
-  geom_half_violin(
-    side = "r", # Show the density plot on the right
-    nudge = 0.05,
-    trim = FALSE,
-    alpha = 0.7
-  ) +
-  # Add the boxplot in the middle
-  geom_boxplot(
-    width = 0.15,
-    outlier.shape = NA, # Hide outliers since we are plotting all points
-    alpha = 0.7
-  ) +
-  # Flip the coordinates for better readability
-  coord_flip() +
-  # Add a statistical comparison of the means (Wilcoxon test)
-  ggpubr::stat_compare_means(
-    method = "wilcox.test",
-    label = "p.signif",
-    label.x = 1.5,
-    label.y = 1.4
-  ) +
-  # Customize colors and remove legends that are not needed
-  scale_color_manual(values = c("Exposed" = "#D55E00", "Not Exposed" = "#0072B2"), guide = "none") +
-  scale_fill_manual(values = c("Exposed" = "#D55E00", "Not Exposed" = "#0072B2"), guide = "none") +
-  # Add informative labels and a title
+  # Use a clear color scheme.
+  scale_color_manual(values = c("TRUE" = "skyblue", "FALSE" = "salmon")) +
+  # Add informative labels.
   labs(
-    title = "Variability in Microbiome Disruption by Antibiotic Exposure",
-    subtitle = "The spread of distances from baseline is larger in antibiotic-exposed samples",
-    x = "",
-    y = "Bray-Curtis Distance from Baseline"
+    x = "Bray-Curtis Distance from Baseline",
+    y = "Antibiotic Exposure"
   ) +
-  # Use a clean theme
-  theme_minimal(base_size = 12) +
-  theme(
-    plot.title = element_text(face = "bold", size = 16),
-    panel.grid.major.y = element_blank(), # Clean up the background
-    panel.grid.minor.y = element_blank()
-  )
+  # Use a clean theme for publication.
+  theme_minimal(base_size = 14)
+
+
 ```
 The above plot shows that, overall, antibiotics are associated with a greater shift from baseline. The magnitude of that shift is highly variable and is significantly influenced by diet, which is why the model assigns significance to the diet-antibiotic interactions rather than to the antibiotic term alone.
+
+# assemble
+
+```{r}
+# --- 4. Stack All Three Plots Vertically (A, B, C) ---
+# Using the '/' operator from patchwork stacks plots vertically.
+# We can also control the relative heights and add tags.
+final_plot <- p_dist_violin / plot_main_effects / p_bottom_combined +
+  plot_layout(heights = c(1.5, 1, 4), guides = "collect") + # Adjust heights for balance
+  plot_annotation(
+    #title = "Full Model of Microbiome Disruption",
+    tag_levels = 'A' # Automatically label plots A, B, C
+  ) &
+  theme(plot.tag = element_text(size = 18, face = "bold"))
+# Display the final stacked plot
+
+library(cowplot)
+title <- ggdraw() + 
+  draw_label("Rebuttal fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 3))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R30_composition_model.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', 
+      dpi = 300)    
+```
+
 
 # using the diet dist
 
