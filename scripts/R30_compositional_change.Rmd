@@ -112,6 +112,8 @@ ggplot(summary_df, aes(x = Metric, y = Count, fill = Condition)) +
 
 ```
 
+
+
 # focus on the subset that has the earlist sample <= 0
 
 ```{r}
@@ -142,7 +144,7 @@ priors <-
 # Fit the model (using fewer iterations for this example to run quickly)
 model_fit <- brm(
   formula = formula,
-  data = data %>% filter(sdrt1 <= 0) ,
+  data = data %>% filter(sdrt1 <= 0)  ,
   #prior = priors,
   #family = Beta(link = "logit"), # Use the Beta family
   control = list(adapt_delta = 0.99, max_treedepth = 15),
