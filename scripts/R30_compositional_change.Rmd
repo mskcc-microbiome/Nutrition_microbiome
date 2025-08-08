@@ -15,6 +15,7 @@ library(broom.mixed)
 library(tidybayes)
 library(patchwork)
 library(ggridges)
+library(ggrepel) # For better label placement
 ```
 
 Model the magnitude of compositional disruption itself. This is done by using a beta-diversity metric (like Bray-Curtis distance) from each patient's baseline sample as a continuous outcome variable. 
@@ -215,39 +216,80 @@ posterior_draws_ordered <- posterior_draws %>%
     food_group = factor(food_group, levels = sorting_order)
   )
 
+# Create a data frame for the POSITIVE annotations.
+prob_annotations_pos <- posterior_draws_ordered %>%
+  group_by(food_group, condition) %>%
+  summarise(
+    prob_positive = mean(.value > 0),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    label_text = paste0(scales::percent(prob_positive, accuracy = 1), " > 0"),
+    x_pos = 0.004 # Fixed x position for positive labels
+  )
+
+# Create a data frame for the NEGATIVE annotations.
+prob_annotations_neg <- posterior_draws_ordered %>%
+  group_by(food_group, condition) %>%
+  summarise(
+    prob_negative = mean(.value < 0),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    label_text = paste0(scales::percent(prob_negative, accuracy = 1), "< 0 "),
+    x_pos = -0.002 # Fixed x position for negative labels
+  )
+
+
 # --- 4. Create the Faceted Plot ---
 ggplot(posterior_draws_ordered, aes(x = .value, y = food_group)) +
-  # Add the density ridges, but this time we don't need to color them manually
-  # as the facets will separate them.
-  geom_density_ridges(
-    aes(fill = condition), # Color by condition for clarity
-    alpha = 0.8, 
-    color = "white", 
-    show.legend = FALSE # The facet titles make a legend redundant.
-  ) +
+
+  # Add a faint, complete outline of the density ridge on top for context.
+  geom_density_ridges(fill = NA, color = "black", size = 0.2) +
   # Add the point estimate and 95% credible interval.
-  stat_pointinterval(.width = .95) +
+  stat_pointinterval(.width = .95, size = 0.4, position = position_nudge(y = -0.1)) +
+ # Add the text annotations for the POSITIVE probabilities.
+  geom_text(
+    data = prob_annotations_pos,
+    aes(x = x_pos, label = label_text),
+    size = 3.5,
+    hjust = 0, # Left-align text
+    nudge_y = 0.3,
+    color = "blue4"
+  ) +
+  # Add the text annotations for the NEGATIVE probabilities.
+  geom_text(
+    data = prob_annotations_neg,
+    aes(x = x_pos, label = label_text),
+    size = 3.5,
+    hjust = 1, # Right-align text
+    nudge_y = 0.3,
+    color = "red4"
+  ) +
   # Add a vertical line at zero for reference.
   geom_vline(xintercept = 0, linetype = "dashed") +
   # This is the key to creating the two side-by-side panels.
-  # 'scales = "free_x"' allows each panel to have its own x-axis range.
   facet_wrap(~ condition, scales = "free_x") +
-  # Manually set the colors to be consistent.
-  scale_fill_manual(values = c("During Antibiotic Exposure" = "skyblue", "No Antibiotic Exposure" = "salmon")) +
+  # Manually set the colors for our positive/negative fills.
+  scale_fill_manual(
+    name = "Effect Direction",
+    values = c("Positive" = "skyblue", "Negative" = "salmon")
+  ) +
   # Add informative labels and a clean theme.
   labs(
     title = "Food Group Effects on Microbiome Disruption",
-    subtitle = "Sorted by median effect during antibiotic exposure. Panels show the effect with and without antibiotics.",
+    subtitle = "Sorted by median effect during antibiotic exposure. Annotations show probability of a positive effect.",
     x = "Coefficient Estimate (Change in Bray-Curtis Distance)",
     y = "Food Group"
   ) +
   theme_minimal(base_size = 14) +
   theme(
-    # Improve panel titles and spacing for a cleaner look.
+    legend.position = "bottom",
     strip.text = element_text(face = "bold", size = 12),
     panel.spacing = unit(2, "lines")
   )
 
+ggsave('../data/R30_ridgeline_panels.jpg', width = 12, height = 15)
 ```
 
 
