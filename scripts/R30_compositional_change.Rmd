@@ -370,7 +370,7 @@ combined <- plot_grid(
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/R30_composition_model.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', 
+      width = 8.5, height = 11, units = "inch", device = 'pdf', 
       dpi = 300)    
 ```
 

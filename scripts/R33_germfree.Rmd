@@ -95,7 +95,7 @@ design <- ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
   # The label for 144h is updated to include the sacrifice information.
   scale_x_continuous(
     breaks = c(0, 4, 8, 24, 48, 144),
-    labels = c("0", "4", "8", "24", "48", "144 (Sacrifice)")
+    labels = c("0", "4", "8", "24", "48", "144\n(Sacrifice)")
   ) +
   
   # Expand plot limits so labels on the left are not cut off.
