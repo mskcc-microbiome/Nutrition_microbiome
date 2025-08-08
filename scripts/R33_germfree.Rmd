@@ -15,7 +15,7 @@ library(ggrepel)
 library(scales)
 library(patchwork)
 ```
-
+# design
 
 ```{r}
 # Manually create a tibble that contains every event for every group.
@@ -53,12 +53,12 @@ experiment_design_df <- tribble(
 )
 
 # Now, create the diagram using ggplot.
-ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
+design <- ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
   # Draw the horizontal timelines for each group.
   geom_line(aes(group = group_name), color = "gray40", linewidth = 0.8) +
   
   # Add points for each event, mapping shape to event_type and color to color_group.
-  geom_point(aes(shape = event_type, color = color_group), size = 4, alpha = 0.9) +
+  geom_point(aes(shape = event_type, color = color_group), size = 2, alpha = 0.9) +
   
   # Manually define the colors and shapes to match the request.
   scale_color_manual(values = c("Sucrose Water" = "#F8766D", "Regular Water" = "#00BFC4")) +
@@ -68,8 +68,7 @@ ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
   geom_text(
     data = experiment_design_df %>% distinct(group_name, y_position),
     aes(x = -2, y = y_position, label = group_name),
-    hjust = 1,
-    fontface = "bold"
+    hjust = 1
   ) +
   
   # Use a clean theme for a diagrammatic look.
@@ -79,14 +78,14 @@ ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
     axis.text.y = element_blank(),
     axis.ticks.y = element_blank(),
     axis.title.y = element_blank(),
-    legend.position = "bottom",
+    legend.position = "none",
     legend.title = element_text(face = "bold"),
     plot.title = element_text(face = "bold", hjust = 0.5)
   ) +
   
   # Add informative titles and labels.
   labs(
-    title = "Germ-Free Mouse Experiment Design",
+   # title = "Germ-Free Mouse Experiment Design",
     x = "Time Post-Gavage (Hours)",
     color = "Water Treatment",
     shape = "Action"
@@ -96,14 +95,14 @@ ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
   # The label for 144h is updated to include the sacrifice information.
   scale_x_continuous(
     breaks = c(0, 4, 8, 24, 48, 144),
-    labels = c("0", "4", "8", "24", "48", "144\n(Sacrifice)")
+    labels = c("0", "4", "8", "24", "48", "144 (Sacrifice)")
   ) +
   
   # Expand plot limits so labels on the left are not cut off.
   coord_cartesian(xlim = c(-45, 150))
+design
 
-
-ggsave('../data/R33_gf_design_new.pdf', width = 10)
+#ggsave('../data/R33_gf_design_new.pdf', width = 10)
 ```
 
 
@@ -122,10 +121,7 @@ raw_data <- read_csv("../data/7_29_25_germ_free_faecalis_gavage - sheet1.csv") %
   # We can only plot values greater than 0 on a log scale.
   mutate(CFUs_per_GramStool = if_else(CFUs_per_GramStool == 0, 1, CFUs_per_GramStool)) %>% 
   mutate(log10_CFUs_per_GramStool = log10(CFUs_per_GramStool))
-```
 
-
-```{r}
 # add the pre-innoculation (hour 0) enterococcus abundance (0 from bhi anaerobic culturing)  
 baseline_data <- tibble(
   # The 'Time Point' is the same for all baseline measurements.
@@ -206,116 +202,68 @@ plot_data %>% write_csv('../data/R33_germ_free_data_for_plot.csv')
 ```
 
 
+
 ```{r}
-# --- Plot Generation ---
-
-# --- Split Data for Two Plots ---
-
-# Data for the top row (gavage groups)
-gavage_plot_data <- plot_data %>%
-  filter(str_starts(`Mouse Group`, "[12]-"))
-
-# Data for the bottom row (PBS control groups)
-pbs_plot_data <- plot_data %>%
-  filter(str_starts(`Mouse Group`, "[34]-"))
-
-# Calculate mean for each subset
-gavage_mean_data <- gavage_plot_data %>%
+# Calculate the median CFU for each group at each time point.
+# This will be used to draw the dashed median line.
+median_data <- plot_data %>%
   group_by(Treatment, Time_h) %>%
-  summarise(Mean_CFU = mean(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
+  summarize(median_CFU = median(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
 
-# the median
-gavage_median_data <- gavage_plot_data %>%
-  group_by(Treatment, Time_h) %>%
-  summarise(median_CFU = median(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
-
-pbs_mean_data <- pbs_plot_data %>%
-  group_by(Treatment, Time_h) %>%
-  summarise(Mean_CFU = mean(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
-
-
-# Calculate the full y-axis range across all data to ensure scales are identical.
-# The lower limit is set to 1 (for log scale) and the upper limit is the max CFU value.
-y_limits <- c(1, max(plot_data$`CFUs_per_GramStool`, na.rm = TRUE))
-# Define consistent x-axis limits for all plots.
-x_limits <- c(0, 144)
-# Define consistent x-axis breaks for all plots.
-x_breaks <- c(0, 4, 8, 24, 48, 144)
-
-# --- Plot Generation ---
-
-# Define a common theme to reuse
-common_theme <- theme_bw(base_size = 14) +
+# Create the improved plot.
+CFU <- ggplot() +
+  # Layer 1: Individual mouse trajectories (now thinner and more transparent).
+  geom_line(data = plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment),
+            linewidth = 0.5, alpha = 0.4) +
+            
+  # Layer 2: Individual data points (now bigger).
+  geom_point(data = plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, color = Treatment),
+             size = 3.5, alpha = 0.6) +
+             
+  # Layer 3: The median line (thicker and dashed).
+  geom_line(data = median_data, aes(x = Time_h, y = median_CFU, color = Treatment),
+            linetype = "dashed", linewidth = 1.2) +
+            
+  # Facet_wrap creates separate panels for each treatment group.
+  facet_wrap(~Treatment) +
+  
+  # Set the Y axis to a log10 scale and format the labels as 10^x.
+  scale_y_log10(
+    breaks = trans_breaks("log10", function(x) 10^x),
+    labels = trans_format("log10", math_format(10^.x)),
+    limits = c(1, NA) # Start the axis at 1 (log10=0).
+  ) +
+  
+  # Manually set the colors to match the previous plot.
+  scale_color_manual(values = c(
+    "E. faecalis + Sucrose Water" = "#F8766D", # Reddish-Pink
+    "PBS + Sucrose Water" = "#F8766D",
+    "E. faecalis + Regular Water" = "#00BFC4", # Teal/Cyan
+    "PBS + Regular Water" = "#00BFC4"
+  )) +
+  
+  # Use a clean theme and add informative titles and labels.
+  theme_bw(base_size = 14) +
+  labs(
+    #title = "Bacterial Colonization Timeline in Germ-Free Mice",
+    #subtitle = "Individual mouse trajectories with group medians",
+    x = "Time Post-Gavage (Hours)",
+    y = "CFU / gram of feces"
+  ) +
+  
+  # Customize the plot's appearance.
   theme(
     legend.position = "none",
     plot.title = element_text(face = "bold", hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5, color = "gray30"),
-    strip.text = element_text(face = "bold", size = 11),
-    panel.grid.minor = element_blank()
+    plot.subtitle = element_text(hjust = 0.5),
+    strip.text = element_text(face = "bold", size = 12)
   )
-
-# Plot 1: Top Row (Gavage Groups)
-p1 <- ggplot() +
-  geom_line(data = gavage_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3, linewidth = 0.5) +
-  geom_point(data = gavage_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3) +
-  geom_line(data = gavage_mean_data, aes(x = Time_h, y = Mean_CFU, color = Treatment), linewidth = 1.2) +
-  scale_y_log10(labels = trans_format("log10", math_format(10^.x)), oob = oob_squish_infinite, limits = y_limits) +
- # Set both the breaks and the limits for the x-axis.
-  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
-  facet_wrap(~Treatment, ncol = 2) +
-  labs(x = "Time Post-Gavage (Hours)", y = "CFU / gram of feces") +
-  common_theme
-
-# Plot 2: Bottom Row (PBS Groups)
-p2 <- ggplot() +
-  geom_line(data = pbs_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3, linewidth = 0.5) +
-  geom_point(data = pbs_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3) +
-  geom_line(data = pbs_mean_data, aes(x = Time_h, y = Mean_CFU, color = Treatment), linewidth = 1.2) +
-  scale_y_log10(labels = trans_format("log10", math_format(10^.x)), oob = oob_squish_infinite, limits = y_limits) +
-  # Set both the breaks and the limits for the x-axis.
-  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
-  facet_wrap(~Treatment, ncol = 2) +
-  # Remove the x-axis title and labels for the bottom plot
-  labs(x = "Time (Hours)",  y = "CFU / gram of feces") +
-  common_theme 
-
-# Combine the two plots vertically using patchwork
-p1 / p2 +
-  plot_annotation(
-    title = "Bacterial Colonization Timeline in Germ-Free Mice",
-    subtitle = "Individual mouse trajectories with group means",
-    theme = theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 20),
-                  plot.subtitle = element_text(hjust = 0.5, color = "gray30", size = 14))
-  )
-
-
-ggsave('../data/R33_gf_full_course.jpg', width = 10, height = 7)
-```
-
-```{r}
-# if annotating the median as the line
-p1_with_median <- ggplot() +
-  geom_line(data = gavage_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3, linewidth = 0.5) +
-  geom_point(data = gavage_plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment), alpha = 0.3) +
-  geom_line(data = gavage_median_data, aes(x = Time_h, y = median_CFU, color = Treatment), linewidth = 1.2) +
-  scale_y_log10(labels = trans_format("log10", math_format(10^.x)), oob = oob_squish_infinite, limits = y_limits) +
- # Set both the breaks and the limits for the x-axis.
-  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
-  facet_wrap(~Treatment, ncol = 2) +
-  labs(x = "Time Post-Gavage (Hours)", y = "CFU / gram of feces") +
-  common_theme
-
-p1_with_median / p2 +
-  plot_annotation(
-    title = "Bacterial Colonization Timeline in Germ-Free Mice",
-    subtitle = "Individual mouse trajectories with group medians",
-    theme = theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 20),
-                  plot.subtitle = element_text(hjust = 0.5, color = "gray30", size = 14))
-  )
-
 
 ggsave('../data/R33_gf_full_course_with_median.jpg', width = 10, height = 7)
 ```
+
+# median VS mean   
+
 ```{r}
 # one figure where I only plot the median and the mean line
 summary_data <- bind_rows(
@@ -363,8 +311,6 @@ ggplot(summary_data, aes(x = Time_h, y = CFU, color = Treatment, linetype = Metr
 ggsave('../data/R33_gm_summaries_2.jpg', width = 10, height = 5)
 ```
 
-
-
 # the AUC test 
 
 ```{r}
@@ -387,23 +333,17 @@ auc_results <- analysis_data %>%
     .groups = 'drop'
   )
 
-# Let's look at the calculated AUC values for each mouse.
-print("AUC calculated for each mouse:")
-print(auc_results)
 
 # Finally, perform the Wilcoxon rank-sum test (Mann-Whitney U test).
 # This compares the distribution of AUC values between the two treatment groups.
 # It's ideal here because the sample size is small and we can't assume normality.
 statistical_test <- wilcox.test(auc_value ~ Treatment, data = auc_results)
 
-# Print the results of the statistical test.
-print("--- Wilcoxon Rank-Sum Test Results ---")
-print(statistical_test)
 
 # To visualize the result, a simple boxplot of the AUC values is helpful.
-ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatment)) +
+auc_plot <- ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatment)) +
   geom_boxplot(alpha = 0.7) +
-  geom_jitter(width = 0.1, size = 3) +
+  geom_jitter(width = 0.05, size = 3) + 
   # This function from ggpubr runs the test and adds the p-value to the plot.
   stat_compare_means(
     method = "wilcox.test", 
@@ -411,13 +351,44 @@ ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatment)) +
     label = "p.format" # Displays the p-value in a standard format.
   ) +
   labs(
-    title = "Comparison of Total Bacterial Load (AUC)",
+    #title = "Comparison of Total Bacterial Load (AUC)",
     x = "Treatment Group",
-    y = "Area Under Curve (log10 CFU * hours)"
+    y = "Area Under Curve\nlog10(CFU/g) * hours"
   ) +
   theme_classic(base_size = 14) +
   theme(legend.position = "none")
 
+auc_plot
+```
 
+# assemble 
+
+```{r}
+# --- 4. Stack All Three Plots Vertically (A, B, C) ---
+# Using the '/' operator from patchwork stacks plots vertically.
+# We can also control the relative heights and add tags.
+final_plot <- design / CFU / auc_plot +
+  plot_layout(heights = c(1, 2, 1), guides = "collect") + # Adjust heights for balance
+  plot_annotation(
+    #title = "Full Model of Microbiome Disruption",
+    tag_levels = 'A' # Automatically label plots A, B, C
+  ) &
+  theme(plot.tag = element_text(size = 18, face = "bold"))
+
+library(cowplot)
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 3))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,5,1,1), "cm"))
+
+ggsave('../data/R33_germ_free_mouse.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
 ```
 
