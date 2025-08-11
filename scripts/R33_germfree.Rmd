@@ -52,27 +52,46 @@ experiment_design_df <- tribble(
   "PBS + Regular Water", 1, "Regular Water", 144, ""  # No final stool plating for PBS group
 )
 
+# Create a data frame for the background rectangles.
+rect_data <- experiment_design_df %>%
+  distinct(group_name, y_position, color_group)
+```
+
+## ggplot
+
+```{r}
 # Now, create the diagram using ggplot.
 design <- ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
-  # Draw the horizontal timelines for each group.
-  geom_line(aes(group = group_name), color = "gray40", linewidth = 0.8) +
+    # Layer 1: The background rectangles to show continuous treatment.
+  geom_rect(
+    data = rect_data,
+    aes(xmin = 0, xmax = 144, ymin = y_position - 0.2, ymax = y_position + 0.2, fill = color_group),
+    alpha = 0.2, # Make the rectangles semi-transparent
+    inherit.aes = FALSE
+  ) +
   
-  # Add points for each event, mapping shape to event_type and color to color_group.
-  geom_point(aes(shape = event_type, color = color_group), size = 2, alpha = 0.9) +
+ # Layer 2: The horizontal timelines, colored by treatment.
+  geom_line(aes(group = group_name, color = color_group), linewidth = 0.8) +
   
-  # Manually define the colors and shapes to match the request.
+  # Layer 3: The action points (squares and triangles), now all black.
+  geom_point(aes(shape = event_type), size = 2, color = "black") +
+  
+  # Manually define the fill and color for the rectangles and lines.
+  scale_fill_manual(values = c("Sucrose Water" = "#F8766D", "Regular Water" = "#00BFC4")) +
   scale_color_manual(values = c("Sucrose Water" = "#F8766D", "Regular Water" = "#00BFC4")) +
-  scale_shape_manual(values = c("BHI Anaerobic Culture" = 15, "Stool Plating" = 17, "Sacrifice" = 16)) + # 15=square, 17=triangle, 16=circle
+  
+  # Manually define the shapes for the action points.
+  scale_shape_manual(values = c("BHI Anaerobic Culture" = 15, "Stool Plating" = 17, "Sacrifice" = 16)) +
   
   # Add the group labels to the left of the timelines.
   geom_text(
     data = experiment_design_df %>% distinct(group_name, y_position),
     aes(x = -2, y = y_position, label = group_name),
-    hjust = 1
+    hjust = 1, size = 3
   ) +
   
   # Use a clean theme for a diagrammatic look.
-  theme_classic(base_size = 14) +
+  theme_classic(base_size = 11) +
   theme(
     axis.line.y = element_blank(),
     axis.text.y = element_blank(),
@@ -85,21 +104,22 @@ design <- ggplot(experiment_design_df, aes(x = time_h, y = y_position)) +
   
   # Add informative titles and labels.
   labs(
-   # title = "Germ-Free Mouse Experiment Design",
     x = "Time Post-Gavage (Hours)",
-    color = "Water Treatment",
+    fill = "Water Treatment", # Legend title for the fill color
     shape = "Action"
   ) +
   
   # Customize the x-axis breaks to show all key time points.
-  # The label for 144h is updated to include the sacrifice information.
   scale_x_continuous(
     breaks = c(0, 4, 8, 24, 48, 144),
-    labels = c("0", "4", "8", "24", "48", "144\n(Sacrifice)")
+    labels = c("0", "4", "8", "24", "48", "144 (Sacrifice)")
   ) +
   
   # Expand plot limits so labels on the left are not cut off.
-  coord_cartesian(xlim = c(-45, 150))
+  coord_cartesian(xlim = c(-45, 150)) +
+  
+  # This ensures the color legend for the lines is not displayed, as it's redundant.
+  guides(color = "none")
 design
 
 #ggsave('../data/R33_gf_design_new.pdf', width = 10)
@@ -201,7 +221,7 @@ plot_data <- all_raw %>%
 plot_data %>% write_csv('../data/R33_germ_free_data_for_plot.csv')
 ```
 
-
+## CFU plot
 
 ```{r}
 # Calculate the median CFU for each group at each time point.
@@ -241,7 +261,10 @@ CFU <- ggplot() +
     "E. faecalis + Regular Water" = "#00BFC4", # Teal/Cyan
     "PBS + Regular Water" = "#00BFC4"
   )) +
-  
+    scale_x_continuous(
+    breaks = c(0, 4, 8, 24, 48, 144),
+    labels = c("0", "4", "8", "24", "48", "144")
+  ) +
   # Use a clean theme and add informative titles and labels.
   theme_bw(base_size = 14) +
   labs(
@@ -256,6 +279,7 @@ CFU <- ggplot() +
     legend.position = "none",
     plot.title = element_text(face = "bold", hjust = 0.5),
     plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(size = 9),
     strip.text = element_text(face = "bold", size = 12)
   )
 
@@ -343,7 +367,7 @@ statistical_test <- wilcox.test(auc_value ~ Treatment, data = auc_results)
 # To visualize the result, a simple boxplot of the AUC values is helpful.
 auc_plot <- ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatment)) +
   geom_boxplot(alpha = 0.7) +
-  geom_jitter(width = 0.05, size = 3) + 
+  geom_jitter(width = 0.35, size = 3) + 
   # This function from ggpubr runs the test and adds the p-value to the plot.
   stat_compare_means(
     method = "wilcox.test", 
@@ -368,7 +392,7 @@ auc_plot
 # Using the '/' operator from patchwork stacks plots vertically.
 # We can also control the relative heights and add tags.
 final_plot <- design / CFU / auc_plot +
-  plot_layout(heights = c(1, 2, 1), guides = "collect") + # Adjust heights for balance
+  plot_layout(heights = c(1, 2, 1.5), guides = "collect") + # Adjust heights for balance
   plot_annotation(
     #title = "Full Model of Microbiome Disruption",
     tag_levels = 'A' # Automatically label plots A, B, C
@@ -385,7 +409,7 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,5,1,1), "cm"))
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/R33_germ_free_mouse.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
