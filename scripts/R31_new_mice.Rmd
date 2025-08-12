@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(janitor)
+library(scales)
 ```
 ```{r}
 library(vdbR)
@@ -752,5 +753,146 @@ ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool)) +
   ) +
   # Extend the plot margin to make room for the annotations.
   coord_cartesian( clip = "off")
+```
+
+# sugar delayed 1
+
+## design
+
+```{r}
+# Load the required R packages
+library(ggplot2)
+library(dplyr)
+
+# Data definition for points and segments
+point_data <- tibble::tribble(
+  ~group,                ~event,             ~day,
+  "Standard",            "Antibiotic",       1, "Delay +1",            "Antibiotic",       1, "Delay +2",            "Antibiotic",       1,
+  "Standard",            "Stool Collection", 1, "Delay +1",            "Stool Collection", 1, "Delay +2",            "Stool Collection", 1,
+  "Standard",            "Stool Collection", 3, "Delay +1",            "Stool Collection", 3, "Delay +2",            "Stool Collection", 3,
+  "Standard",            "Stool Collection", 6, "Delay +1",            "Stool Collection", 6, "Delay +2",            "Stool Collection", 6,
+  "Standard",            "Stool Collection", 9, "Delay +1",            "Stool Collection", 9, "Delay +2",            "Stool Collection", 9
+)
+
+segment_data <- tibble::tribble(
+    ~group,      ~start, ~end,
+    "Standard",  1,      6,
+    "Delay +1",  2,      6,
+    "Delay +2",  3,      6
+)
+
+group_order <- c("Standard", "Delay +1", "Delay +2")
+point_data$group <- factor(point_data$group, levels = group_order)
+segment_data$group <- factor(segment_data$group, levels = group_order)
+
+# --- Fully Corrected ggplot Code ---
+ggplot() +
+  geom_hline(yintercept = 0, color = "gray50", linewidth = 0.6) +
+  geom_segment(
+    data = segment_data,
+    aes(x = start, xend = end, y = 0, yend = 0),
+    color = "#E41A1C",
+    linewidth = 5,
+    alpha = 0.8
+  ) +
+  geom_point(
+    data = point_data,
+    aes(x = day, y = 0, shape = event, color = event),
+    size = 6,
+    fill = "white",
+    stroke = 1.2
+  ) +
+  geom_point(aes(x = -100, y = -100, fill = "Sucrose"), shape = 22, size = 5) +
+  scale_fill_manual(
+    name = NULL,
+    values = c("Sucrose" = "#E41A1C"),
+    labels = c("Sucrose" = "Sucrose Treatment")
+  ) +
+  facet_wrap(~group, ncol = 1, strip.position = "left") +
+  scale_color_manual(
+    name = "Event",
+    values = c("Antibiotic" = "#377EB8", "Stool Collection" = "black"),
+    labels = c("Antibiotic" = "Single Antibiotic Dose", "Stool Collection" = "Stool Collection")
+  ) +
+  scale_shape_manual(
+    name = "Event",
+    values = c("Antibiotic" = 24, "Stool Collection" = 16),
+    labels = c("Antibiotic" = "Single Antibiotic Dose", "Stool Collection" = "Stool Collection")
+  ) +
+  labs(
+    title = "Experimental Design: Delayed Sucrose Administration",
+    x = "Day of Experiment",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    strip.text.y.left = element_text(angle = 0, face = "bold"),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16)
+  ) + # The '+' now correctly connects theme() to the next component
+  scale_x_continuous(breaks = seq(0, 10, 1), limits = c(0, 10)) +
+  guides(
+    color = guide_legend(nrow = 1),
+    shape = guide_legend(nrow = 1),
+    fill = guide_legend(nrow = 1)
+  )
+```
+## CFU
+
+```{r}
+delay1 <- read_csv('../data/8_5_25_Biapenem_Sugar_Delay_1.csv') %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
+  clean_names() %>%
+  mutate(logCFU = log10(cf_us_per_gram_stool)) %>% 
+  mutate(
+    trajectory_group = paste(treatment, mouse_identifier, sep = "_")
+  ) 
+
+
+ggplot(delay1, aes(x = factor(day), y = cf_us_per_gram_stool)) +
+  # Use a boxplot to show the distribution of CFU/g at each day.
+  # A small value (1) is added to cfu_per_gram to avoid issues with taking the log of zero.
+  geom_boxplot( outlier.shape = NA) +
+  # Add individual data points with some jitter to see the raw data.
+  geom_point( alpha = 0.6) +
+
+  # Facet the plot by the cleaned treatment names.
+  # `scales = "free_x"` allows each panel to have its own x-axis range if needed.
+  facet_grid(~treatment, scales = "free_x") +
+  # Add thin lines to track the trajectory of each individual mouse.
+  geom_line(aes(group = trajectory_group), color = "gray50", linewidth = 0.5, alpha = 0.5) +
+
+  # Use a log10 scale for the y-axis, which is standard for CFU data.
+  # The `label_log()` function from the 'scales' package creates nice labels (e.g., 10^6).
+  scale_y_log10(
+    breaks = trans_breaks("log10", function(x) 10^x),
+    labels = trans_format("log10", math_format(10^.x))
+  ) +
+  # Add minor tick marks for the log scale, which helps with readability.
+  #annotation_logticks(sides = "l") +
+
+  # Add labels and a title to make the plot informative.
+  labs(
+    #title = "Enterococcus Burden by Treatment Group and Day",
+    x = "Day of Experiment",
+    y = "Enterococcus (CFU / gram of feces)",
+    fill = "Treatment Group" # Title for the legend
+  ) +
+
+  # Use a clean, minimal theme and adjust some settings for clarity.
+  theme_light(base_size = 14) +
+  theme(
+    legend.position = "none", # The facets already label the groups, so no legend is needed.
+    strip.text = element_text(face = "bold"), # Make the facet titles bold.
+    axis.text.x = element_text(angle = 0, hjust = 1) # Rotate x-axis labels if they overlap.
+  )
+
+ggsave('../data/R31_sugar_delay1.png', width = 12, height = 6)
 ```
 

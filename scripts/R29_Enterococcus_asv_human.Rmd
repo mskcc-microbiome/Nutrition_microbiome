@@ -13,6 +13,7 @@ library(tidyverse)
 library(brms)   
 library(broom.mixed)
 library(tidybayes)
+library(patchwork)
 library(cowplot)
 library(brmstools)
 library(vdbR)
@@ -414,7 +415,6 @@ asv_detailed_summary %>%
     median_abundance_pct_all_samples = "Median Abund. % (All)"
   )
 
-
 ```
 
 
@@ -435,14 +435,15 @@ prevalence_df <- e_asv %>%
   mutate(prevalence = n_present / total_samples)
 ```
 
+## abundance and prevelance of the two 
 
 ```{r}
 # Now, we filter this list to keep only the ASVs that are prevalent
-# in at least 5% of all samples. We also sort them from most to least prevalent.
+# in at least 10% of all samples. We also sort them from most to least prevalent.
 # This sorted list will determine the order of the ASVs on our plot's x-axis.
 prevalent_asv_keys <- prevalence_df %>%
-  filter(prevalence >= 0.05) %>%
-  arrange(desc(prevalence)) %>%
+  filter(prevalence >= 0.1) %>%
+  arrange(prevalence) %>%
   pull(asv_key) # pull() extracts the column as a vector
 
 # We filter the original data to include only these prevalent ASVs.
@@ -454,54 +455,100 @@ plot_data <- e_asv %>%
   # to the sorted list we created. This ensures the x-axis is correctly ordered.
   mutate(asv_key = factor(asv_key, levels = prevalent_asv_keys))
 
-# Finally, we create the plot using ggplot2.
-ggplot(plot_data, aes(x = asv_key, y = count_relative)) +
-  # Add the boxplots. The fill color is mapped to the prevalence value.
-  # We set outlier.shape = NA because the jittered points will show all data points anyway.
-  geom_boxplot(
-    aes(fill = prevalence),
-    outlier.shape = NA,
-    alpha = 0.8 # Make the boxes slightly transparent
+# Now, create the raincloud plot
+relab_rain <- ggplot(plot_data, aes(x = asv_key, y = count_relative)) +
+  
+  # The "Cloud": a half-violin plot to show the distribution's shape
+  ggdist::stat_halfeye(
+    adjust = 0.5, 
+    width = 0.6, 
+    .width = 0, 
+    justification = -0.2, 
+    point_colour = NA
+  ) + 
+  
+  # A traditional boxplot to show summary stats (median, quartiles)
+  # geom_boxplot(
+  #   width = 0.12, 
+  #   outlier.shape = NA # outliers will be shown by the jitter plot
+  # ) +
+  # 
+  # The "Rain": show all the individual data points
+  gghalves::geom_half_point(
+    side = "l", # show points on the left side
+    range_scale = 0.4, 
+    alpha = 0.2
   ) +
-  # Add the jittered points to show the distribution of individual samples.
-  # We make them small and semi-transparent to avoid overplotting.
-  geom_jitter(
-    width = 0.2, # Controls the amount of horizontal spread
-    alpha = 0.1,
-    size = 1.5,
-    color = "gray30"
+  
+  # Add a point for the mean, making it stand out
+  stat_summary(fun = mean, geom = "point", shape = 23,  # Here, we map the color aesthetic to a descriptive string
+    aes(color = "Mean"),  size = 3, fill = "white") +
+  # This new scale manually defines the color for our "Mean" aesthetic
+  scale_color_manual(name = "Statistic", values = c("Mean" = "black")) +
+  
+  # General aesthetics for a clean look
+  labs(
+    #title = "Distribution of Abundance for Present ASVs",
+    #subtitle = "Showing samples with relative abundance > 0 and present in at least 10% of the samples",
+    x = "ASV Key",
+    y = "Relative Abundance"
   ) +
-  # Because relative abundance data often spans several orders of magnitude,
-  # a log scale on the y-axis is very helpful for visualization.
-  scale_y_log10(
-    name = "Relative Abundance",
-    # Format the y-axis labels as percentages for readability
-    labels = scales::percent_format(accuracy = 0.01)
+  theme_minimal() +
+  theme(legend.position = 'top') +
+  coord_flip() # Flip coordinates to make it horizontal, which is easier to read
+
+```
+
+```{r}
+plot_data_bars <-  prevalence_df %>%
+  filter(asv_key %in% prevalent_asv_keys) %>%
+  # This is a key step: we turn `asv_key` into a factor and set its levels
+  # to the sorted list we created. This ensures the x-axis is correctly ordered.
+  mutate(asv_key = factor(asv_key, levels = prevalent_asv_keys))
+
+# ---  Panel 2: The Prevalence Bar Plot ---
+# Here we create the new horizontal bar plot
+p2 <- ggplot(plot_data_bars, aes(x = prevalence, y = asv_key)) +
+  geom_col(aes(fill = prevalence), alpha = 0.8) +
+  # Add text labels to the bars for clarity
+  geom_text(aes(label = scales::percent(prevalence, accuracy = 0.1)), hjust = -0.2, size = 3) +
+  scale_x_continuous(
+    labels = scales::percent, 
+    limits = c(0, 1) # Ensure axis goes from 0% to 100%
   ) +
-  # Define the color scale for the boxplot fill.
+  labs(
+   # title = "Prevalence",
+    #subtitle = "Percentage of samples",
+    x = "Prevalence",
+    y = "ASV Key"
+  ) +
+  theme_minimal() +
+   # Define the color scale for the boxplot fill.
   # viridis is a colorblind-friendly and visually appealing palette.
   scale_fill_viridis_c(
     name = "Prevalence",
     # Format the legend labels as percentages.
     labels = scales::percent_format(accuracy = 1)
   ) +
-  # Add informative labels and a title.
-  labs(
-    title = "Relative Abundance of Prevalent Enterococcus ASVs",
-    subtitle = "Showing ASVs present in at least 5% of samples, sorted by prevalence",
-    x = "ASV Key"
-  ) +
-  # Use a clean, minimal theme for the plot.
-  theme_minimal(base_size = 12) +
-  # Make some final theme adjustments for better readability.
+  # This cleans up the y-axis since the labels are already on the first plot
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
-    plot.title = element_text(face = "bold", size = 16),
-    plot.subtitle = element_text(size = 11),
-    legend.position = "bottom"
+    #axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none"
   )
+  
+
+# --- 5. Combine the Plots ---
+# plot_grid gives us the alignment control we need
+plot_grid(relab_rain, p2, 
+          align = 'vh', # This is the key: 'v' for vertical alignment
+          nrow = 1,      # Arrange in one row
+          rel_widths = c(1.2, 1)) # Optional: Give the left plot a bit more width
 
 ```
+
+
+
 
 # compare the same sample shotgun and 16s sequenced
 
