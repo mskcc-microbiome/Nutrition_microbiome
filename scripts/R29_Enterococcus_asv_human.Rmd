@@ -541,7 +541,7 @@ p2 <- ggplot(plot_data_bars, aes(x = prevalence, y = asv_key)) +
 
 # --- 5. Combine the Plots ---
 # plot_grid gives us the alignment control we need
-pa <- plot_grid(relab_rain, p2, 
+p_asv_level <- plot_grid(relab_rain, p2, 
           align = 'vh', # This is the key: 'v' for vertical alignment
           nrow = 1,      # Arrange in one row
           rel_widths = c(1.2, 1)) # Optional: Give the left plot a bit more width
@@ -864,9 +864,37 @@ p2 <- ggplot(prevalence_sorted, aes(x = prevalence, y = species_ordered)) +
 
 # --- 5. Combine the Plots ---
 
-plot_grid(p_labels, p_abundance, p2, align = 'h', # Align horizontally
+p_species_level <- plot_grid(p_labels, p_abundance, p2, align = 'h', # Align horizontally
           axis = "tb",
           nrow = 1,
-          rel_widths = c(0.6, 1.5, 1))
+          rel_widths = c(0.3, 1.5, 1))
+```
+
+# final plot assemble  
+
+```{r}
+# plot_grid arranges the plots and aligns them
+final_plot <- plot_grid(
+  p_asv_level, 
+  p_species_level, 
+  nrow = 2,          # Arrange them in two rows (vertically)
+  align = 'hv',       # Align them horizontally
+  rel_heights = c(1, 1.5) # Give the bottom plot 1.5x the height of the top one
+)
+
+title <- ggdraw() + 
+  draw_label("Supplemental Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R29_Enterococcus_spp.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300) 
 ```
 
