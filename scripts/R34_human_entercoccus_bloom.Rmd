@@ -322,4 +322,41 @@ ggplot(combined_summary, aes(x = "", y = duration_days)) +
   )
 
 ```
+```{r}
+# looking at the few patients that had the duration >= 20 days for the threshold of 0.3
+# Define the list of patients to be plotted.
+patients_of_interest <- c("P53", "P54", "P24", "P40", "P82")
+
+# Filter the main dataframe to only include data for these specific patients.
+plot_data <- enterococcus_abundance %>%
+  filter(pid %in% patients_of_interest)
+
+# --- Plotting Section ---
+
+# Create the time course plots using ggplot.
+ggplot(plot_data, aes(x = sdrt, y = Enterococcus_relab)) +
+  # Add points for each individual sample time.
+  geom_point(color = "steelblue", size = 2) +
+  # Add lines to connect the points for each patient, showing the trajectory.
+  geom_line(color = "steelblue", alpha = 0.8) +
+  # Add a horizontal dashed line at the 0.3 relative abundance threshold.
+  geom_hline(yintercept = 0.3, linetype = "dashed", color = "red") +
+  # Use facet_wrap to create a separate plot for each patient.
+  # 'scales = "free_x"' allows the x-axis to be different for each patient,
+  # which is useful if they have different sampling time ranges.
+  facet_wrap(~ pid) +
+  # Add informative labels and a title.
+  labs(
+    title = "Time Course of Enterococcus Relative Abundance",
+    x = "Study Day (sdrt)",
+    y = "Relative Abundance"
+  ) +
+  # Apply a clean theme.
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    strip.text = element_text(face = "bold") # Make the patient ID labels bold.
+  )
+
+```
 
