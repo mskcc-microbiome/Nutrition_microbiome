@@ -11,6 +11,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(janitor)
+library(cowplot)
+library(patchwork)
 library(scales)
 ```
 ```{r}
@@ -761,15 +763,17 @@ ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool)) +
 
 ```{r}
 # Define the experimental groups and their properties
+
+
 groups <- tibble(
   group_name = factor(
-    c("Abx + Sucrose (Standard)", "Abx + Sucrose (Delay +1)", "Abx + Sucrose (Delay +2)", "PBS + Sucrose", "PBS + Water"),
-    levels = c("PBS + Water", "PBS + Sucrose", "Abx + Sucrose (Delay +2)", "Abx + Sucrose (Delay +1)", "Abx + Sucrose (Standard)")
+    c("Abx + Sucrose (Standard)", "Abx + Sucrose (Delay +1)", "Abx + Sucrose (Delay +2)", "PBS + Sucrose", "PBS + Water", "Abx + Water"),
+    levels = c( "PBS + Sucrose", "PBS + Water", "Abx + Sucrose (Delay +2)", "Abx + Sucrose (Delay +1)", "Abx + Sucrose (Standard)", "Abx + Water")
   ),
-  injection_type = c("Abx", "Abx", "Abx", "PBS", "PBS"),
-  treatment_type = c("Sucrose_water", "Sucrose_water", "Sucrose_water", "Sucrose_water", "Regular_water"),
-  treatment_start = c(1, 2, 3, 1, 1),
-  treatment_end = c(6, 6, 6, 6, 6)
+  injection_type = c("Abx", "Abx", "Abx", "PBS", "PBS", "Abx"),
+  treatment_type = c("Sucrose_water", "Sucrose_water", "Sucrose_water", "Sucrose_water", "Regular_water", "Regular_water"),
+  treatment_start = c(1, 2, 3, 1, 1, 1),
+  treatment_end = c(6, 6, 6, 6, 6, 6)
 )
 
 # --- Prepare data for plotting ---
@@ -780,8 +784,8 @@ treatment_rects <- groups %>%
   mutate(
     ymin = as.numeric(group_name) ,
     ymax = as.numeric(group_name) + 0.3,
-    xmin = treatment_start,
-    xmax = treatment_end  
+    xmin = treatment_start-0.1,
+    xmax = treatment_end+0.1  
   )
 
 # Data for the stool collection points (triangles)
@@ -799,7 +803,7 @@ injections <- groups %>%
     )
 
 # --- Create the plot ---
-ggplot() +
+design <- ggplot() +
   # Add shaded rectangles for sucrose/water treatment periods
   geom_rect(
     data = treatment_rects,
@@ -872,20 +876,42 @@ ggsave('../data/R31_delay_design.jpg')
 ## CFU
 
 ```{r}
-delay1 <- read_csv('../data/8_5_25_Biapenem_Sugar_Delay_1.csv') %>% 
+# It's good practice to define the file paths first.
+# Replace these with the actual paths to your files.
+file_exp1 <- "../data/8_6_25_Biapenem_Sugar_Delay_1 - sheet1.csv"
+file_exp2 <- "../data/8_8_25_Biapenem_Sugar_Delay_2 - sheet1.csv"
+
+# Read the first CSV file into a data frame.
+# The mutate() function then adds a new column called 'experiment',
+# labeling all rows from this file as "Experiment 1".
+exp1_data <- read_csv(file_exp1) %>%
+  mutate(experiment_no = "Experiment_1")
+
+# Do the same for the second CSV file, labeling these rows as "Experiment 2".
+exp2_data <- read_csv(file_exp2) %>%
+  mutate(experiment_no = "Experiment_2",
+         `Mice Weights` = as.numeric(`Mice Weights`)) # two mice died 
+
+
+# --- Combine the Data ---
+
+# The bind_rows() function stacks the two data frames on top of each other.
+# It automatically matches columns by their names, which is perfect for this task.
+combined_data <- bind_rows(exp1_data, exp2_data) %>% 
   mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
   clean_names() %>%
-  mutate(logCFU = log10(cf_us_per_gram_stool)) %>% 
+  mutate(log10_cf_us_per_gram_stool = log10(cf_us_per_gram_stool)) %>% 
   mutate(
+    # Create a unique ID for each mouse's trajectory within its specific treatment group.
     trajectory_group = paste(treatment, mouse_identifier, sep = "_")
-  )
-
-delay1 %>% write_csv('../data/R31_Biapenem_Sugar_Delay_1.csv')
+  ) %>% 
+  relocate(log10_cf_us_per_gram_stool, .after = 'mice_weights') %>% 
+  relocate(experiment_no, .after = 'log10_cf_us_per_gram_stool') 
 ```
 
 
 ```{r}
-ggplot(delay1, aes(x = factor(day), y = cf_us_per_gram_stool)) +
+ggplot(combined_data, aes(x = factor(day), y = cf_us_per_gram_stool)) +
   # Use a boxplot to show the distribution of CFU/g at each day.
   # A small value (1) is added to cfu_per_gram to avoid issues with taking the log of zero.
   geom_boxplot( outlier.shape = NA) +
@@ -923,6 +949,140 @@ ggplot(delay1, aes(x = factor(day), y = cf_us_per_gram_stool)) +
     axis.text.x = element_text(angle = 0, hjust = 1) # Rotate x-axis labels if they overlap.
   )
 
-ggsave('../data/R31_sugar_delay1.png', width = 12, height = 6)
+ggsave('../data/R31_sugar_delay.png', width = 12, height = 6)
+```
+
+## AUC vardi
+
+
+```{r}
+library(DescTools)
+
+auc_data <- combined_data %>%
+  group_by(experiment_no, treatment, mouse_identifier) %>%
+  # Arrange data by day for correct AUC calculation
+  arrange(day, .by_group = TRUE) %>%
+  # Calculate the AUC using the trapezoidal rule from the DescTools package.
+  # This is robust to missing time points for some mice.
+  # The 'na.rm = TRUE' handles cases where a mouse might have only one time point.
+  summarise(
+    auc = AUC(x = day, y = log10_cf_us_per_gram_stool, na.rm = TRUE),
+    .groups = 'drop' # Ungroup the data after summarising
+  )
+```
+
+```{r}
+# Perform a Kruskal-Wallis test, which is a non-parametric method
+# to see if there are significant differences in AUC among the treatment groups.
+# This is appropriate because the AUC values may not be normally distributed.
+kruskal_test_result <- kruskal.test(auc ~ treatment , data = auc_data %>% filter(str_detect(treatment, 'Biapenem_Sucrose')) )
+
+# Print the results of the statistical test
+print("Kruskal-Wallis test for differences in AUC between treatment groups:")
+print(kruskal_test_result)
+```
+
+```{r}
+# --- Visualize AUC Data ---
+
+# Clean up treatment names for better plot labels
+auc_data_viz <- auc_data %>%
+  mutate(treatment = recode(treatment,
+    "Biapenem_Only" = "Abx + Water",
+    "Biapenem_Sucrose_reg" = "Abx + Sucrose (Standard)",
+    "Biapenem_Sucrose_+1" = "Abx + Sucrose (Delay +1)",
+    "Biapenem_Sucrose_+2" = "Abx + Sucrose (Delay +2)",
+    "PBS_Only" = "PBS + Water",
+    "PBS_Sucrose" = "PBS + Sucrose"
+  ))
+
+# Define the desired order for the treatment groups on the plot
+treatment_order <- c(
+  "PBS + Sucrose", 
+  "PBS + Water", 
+  "Abx + Sucrose (Delay +2)", 
+  "Abx + Sucrose (Delay +1)", 
+  "Abx + Sucrose (Standard)", 
+  "Abx + Water"
+)
+
+# Set the treatment column as a factor with the specified order
+auc_data_viz$treatment <- factor(auc_data_viz$treatment, levels = treatment_order)
+
+# Define the new color palette for the groups
+color_palette <- c(
+  "PBS + Water" = "lightgray",
+  "PBS + Sucrose" = "lightpink",
+  "Abx + Water" = "gray32",
+  "Abx + Sucrose (Standard)" = "deeppink2",
+  "Abx + Sucrose (Delay +1)" = "deeppink2",
+  "Abx + Sucrose (Delay +2)" = "deeppink2"
+)
+
+# Define the specific comparisons for the p-values
+comparison_list <- list(
+  c("Abx + Water", "Abx + Sucrose (Standard)"),
+  c("Abx + Water", "Abx + Sucrose (Delay +1)"),
+  c("Abx + Water", "Abx + Sucrose (Delay +2)")
+)
+
+# Create the boxplot
+auc_plot <- ggplot(auc_data_viz, aes(x = treatment, y = auc, color = treatment)) +
+  # Boxplot now uses color for the outline and has no fill
+  geom_boxplot(outlier.shape = NA, fill = NA, linewidth = 1) +
+  # Overlay individual data points
+  geom_jitter(width = 0.2, size = 2.5) +
+  # Apply the custom color palette
+  scale_color_manual(values = color_palette) +
+  # Add statistical comparisons
+  stat_compare_means(
+    comparisons = comparison_list,
+    method = "wilcox.test", # Use Wilcoxon rank-sum test
+    label = "p.format",      # Display the formatted p-value
+    tip.length = 0.01
+  ) +
+  # Flip coordinates to make labels easier to read
+  coord_flip(ylim = c(0, max(auc_data_viz$auc, na.rm = TRUE) * 1.23)) + # Adjust y-limit for p-values
+  # Add labels and title
+  labs(
+    title = "Total Enterococcus Burden (AUC) by Treatment Group",
+    subtitle = "Comparison of AUC across different treatment conditions",
+    x = "Treatment Group",
+    y = "Area Under the Curve (log10 CFU/gram * days)"
+  ) +
+  # Use a clean theme
+  theme_classic() +
+  theme(
+    legend.position = "none", # Hide legend as colors are on the axis
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.y = element_text(face = "bold")
+  )
+
+# Print the plot
+print(auc_plot)
+
+
+```
+
+```{r}
+final_plot <-  plot_grid(design, auc_plot, 
+                 label_size = 12, ncol = 1,labels = c('A','B'),
+                align = 'vh', axis = 'lrtb')
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R31_delayed_sugar.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
 ```
 
