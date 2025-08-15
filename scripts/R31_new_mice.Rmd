@@ -954,6 +954,73 @@ ggsave('../data/R31_sugar_delay.png', width = 12, height = 6)
 
 ## AUC vardi
 
+### vardi
+
+```{r}
+library(clinfun)
+
+# The recode step is done once here to prepare the full dataset.
+# This makes the names consistent for all subsequent tests.
+prepared_data <- combined_data %>%
+  mutate(treatment = recode(treatment,
+    "Biapenem_Only" = "Abx + Water",
+    "Biapenem_Sucrose_reg" = "Abx + Sucrose (Standard)",
+    "Biapenem_Sucrose_+1" = "Abx + Sucrose (Delay +1)",
+    "Biapenem_Sucrose_+2" = "Abx + Sucrose (Delay +2)",
+    "PBS_Only" = "PBS + Water",
+    "PBS_Sucrose" = "PBS + Sucrose"
+  ))
+
+# --- 3. Run Vardi Test for Each Sucrose Group vs. Control ---
+
+# A list of the sucrose groups to compare against the control.
+sucrose_groups <- c(
+  "Abx + Sucrose (Standard)",
+  "Abx + Sucrose (Delay +1)",
+  "Abx + Sucrose (Delay +2)"
+)
+```
+
+
+```{r}
+vardidf <- prepared_data %>% 
+  mutate(mouse_identifier = str_glue('{experiment_no}_{mouse_identifier}')) %>% 
+  select(treatment:mouse_identifier, log10_cf_us_per_gram_stool) %>% 
+  spread('day','log10_cf_us_per_gram_stool') 
+
+vardicts <- vardidf %>% 
+  select(-mouse_identifier, -treatment) %>% as.matrix()
+
+vardigrp <- vardidf$treatment
+  
+# Make pairwise comparisons between all the groups
+combos.to.test <-  data.frame(combn(unique(vardigrp),2))
+combos.to.test[] <- lapply(combos.to.test, as.character)
+stats.results <- plyr::ldply(combos.to.test, function(x) {
+  # x <- combos.to.test[[1]]
+  paste(x)
+  u <- aucVardiTest(vardicts, vardigrp, tim = c(1, 3, 6), cgrps=x) 
+  u$p.value
+  return(data.frame(Grp.Vs = x[1],
+                    Gr = x[2],
+                    p.value = round(u$p.value, 3)))
+}) 
+
+
+#set thresholds for what asterisks mean
+stats.results$.id <- NULL
+p.value.star <- 0.05      
+p.value.double <- 0.01
+
+stats.results$sig[stats.results$p.value > p.value.star] <- " "
+stats.results$sig[stats.results$p.value <= p.value.star] <- "*"
+stats.results$sig[stats.results$p.value <= p.value.double] <- "**"
+print(stats.results, row.names = F)
+ stats.results %>% 
+   filter()
+```
+
+
 
 ```{r}
 library(DescTools)
