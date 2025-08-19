@@ -14,6 +14,7 @@ library(janitor)
 library(ggrepel)
 library(scales)
 library(patchwork)
+library(ggpubr)
 ```
 # design
 
@@ -183,7 +184,18 @@ no_gavage_culturing_48 <- tibble(
   `log10_CFUs_per_GramStool` = rep(0, 4)
 )
 
-all_raw <- bind_rows(baseline_data, raw_data , no_gavage_culturing_48)
+# add the repeat experiment data 
+repeat_data <- read_csv("../data/8_13_25_germ_free_faecalis_gavage_repeat - sheet1.csv") %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
+  mutate(log10_CFUs_per_GramStool = log10(CFUs_per_GramStool)) %>% 
+  mutate(experiment_no = 2)
+
+
+all_raw <- bind_rows(
+  bind_rows(baseline_data, raw_data , no_gavage_culturing_48) %>% mutate(experiment_no = 1, Total_weight_stool_and_tube_mg = as.numeric(Total_weight_stool_and_tube_mg)),
+  repeat_data
+) %>% 
+  mutate(mouse_identifier = str_glue('E{experiment_no}__{`Mouse Group`}'))
 ```
 
 
@@ -233,7 +245,7 @@ median_data <- plot_data %>%
 # Create the improved plot.
 CFU <- ggplot() +
   # Layer 1: Individual mouse trajectories (now thinner and more transparent).
-  geom_line(data = plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment),
+  geom_line(data = plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = mouse_identifier, color = Treatment),
             linewidth = 0.5, alpha = 0.4) +
             
   # Layer 2: Individual data points (now bigger).
@@ -284,6 +296,54 @@ CFU <- ggplot() +
   )
 
 ggsave('../data/R33_gf_full_course_with_median.jpg', width = 10, height = 7)
+```
+
+
+```{r}
+# zoom in on the 24 hour only 
+cfu_24h_data <- plot_data %>%
+  filter( Time_h == 24 ) %>% 
+  # Convert the Experiment column to a factor for plotting.
+  mutate(experiment_no = as.factor(experiment_no))
+
+# Create the boxplot.
+ggplot(cfu_24h_data, aes(x = Treatment, y = log10_CFUs_per_GramStool)) +
+  # Add the boxplot layer. `outlier.shape = NA` hides the default outlier points
+  # since we will be plotting all points ourselves.
+  geom_boxplot(width = 0.5, alpha = 0.4, outlier.shape = NA) +
+  
+  # Add the individual data points, jittered to prevent overlap.
+  # The shape of the points is mapped to the 'Experiment' column.
+  geom_jitter(aes(shape = experiment_no), width = 0.25, size = 4) +
+  
+  # This function from ggpubr runs the Wilcoxon test and adds the p-value.
+  stat_compare_means(
+    method = "wilcox.test",
+    comparisons = list(c("E. faecalis + Sucrose Water", "E. faecalis + Regular Water")),
+    label = "p.format" # Displays the p-value in a standard format.
+  ) +
+  
+  
+  # Manually define the shapes for the two experiments.
+  scale_shape_manual(values = c("1" = 16, "2" = 17)) + # Circle and Triangle
+  
+  # Add informative titles and labels.
+  theme_bw(base_size = 14) +
+  labs(
+    title = "E. faecalis Colonization at 24 Hours",
+    x = "Treatment Group",
+    y = "log10 CFU / gram of feces",
+    shape = "Experiment" # Legend title for the shapes.
+  ) +
+  
+  # Customize the plot's appearance.
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 10, hjust = 1),
+    legend.position = "bottom"
+  ) 
+
+
 ```
 
 # median VS mean   
@@ -384,6 +444,105 @@ auc_plot <- ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatme
 
 auc_plot
 ```
+
+
+# GF repeat
+
+```{r}
+repeat_data <- read_csv("../data/8_13_25_germ_free_faecalis_gavage_repeat - sheet1.csv") %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
+  #clean_names() %>%
+  mutate(log10_CFUs_per_GramStool = log10(CFUs_per_GramStool)) 
+
+plot_data <- repeat_data %>%
+  # Use mutate to create new, cleaner columns.
+  mutate(
+    # Convert the 'Time Point' text into a numerical hour for the x-axis.
+    Time_h = case_when(
+      `Time Point` == "4h post gavage" ~ 4,
+      `Time Point` == "8h post gavage" ~ 8,
+      `Time Point` == "24h post gavage" ~ 24,
+      `Time Point` == "48h post gavage" ~ 48,
+      `Time Point` == "144h post gavage" ~ 144
+    ),
+    # Create descriptive labels for the four treatment groups.
+    Treatment = case_when(
+      str_starts(`Mouse Group`, "1-") ~ "E. faecalis + Sucrose Water",
+      str_starts(`Mouse Group`, "2-") ~ "E. faecalis + Regular Water"
+    ),
+    # Ensure the treatment groups are ordered correctly in the plot panels.
+    Treatment = factor(Treatment, levels = c(
+      "E. faecalis + Sucrose Water", "E. faecalis + Regular Water"
+    ))
+  ) %>%
+  # Remove any rows where time could not be parsed.
+  filter(!is.na(Time_h))
+
+median_data <- plot_data %>%
+  group_by(Treatment, Time_h) %>%
+  summarize(median_CFU = median(`CFUs_per_GramStool`, na.rm = TRUE), .groups = 'drop')
+
+# Create the improved plot.
+CFU <- ggplot() +
+  # Layer 1: Individual mouse trajectories (now thinner and more transparent).
+  geom_line(data = plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, group = `Mouse Group`, color = Treatment),
+            linewidth = 0.5, alpha = 0.4) +
+            
+  # Layer 2: Individual data points (now bigger).
+  geom_point(data = plot_data, aes(x = Time_h, y = `CFUs_per_GramStool`, color = Treatment),
+             size = 3.5, alpha = 0.6) +
+             
+  # Layer 3: The median line (thicker and dashed).
+  geom_line(data = median_data, aes(x = Time_h, y = median_CFU, color = Treatment),
+            linetype = "dashed", linewidth = 1.2) +
+            
+  # Facet_wrap creates separate panels for each treatment group.
+  facet_wrap(~Treatment) +
+  
+  # Set the Y axis to a log10 scale and format the labels as 10^x.
+  scale_y_log10(
+    breaks = trans_breaks("log10", function(x) 10^x),
+    labels = trans_format("log10", math_format(10^.x)),
+    limits = c(1, NA) # Start the axis at 1 (log10=0).
+  ) +
+  
+  # Manually set the colors to match the previous plot.
+  scale_color_manual(values = c(
+    "E. faecalis + Sucrose Water" = "#F8766D", # Reddish-Pink
+    "PBS + Sucrose Water" = "#F8766D",
+    "E. faecalis + Regular Water" = "#00BFC4", # Teal/Cyan
+    "PBS + Regular Water" = "#00BFC4"
+  )) +
+  #   scale_x_continuous(
+  #   breaks = c(0, 4, 8, 24, 48, 144),
+  #   labels = c("0", "4", "8", "24", "48", "144")
+  # ) +
+      scale_x_continuous(
+    breaks = c(0, 4, 8, 24, 48),
+    labels = c("0", "4", "8", "24", "48")
+  ) +
+  # Use a clean theme and add informative titles and labels.
+  theme_bw(base_size = 14) +
+  labs(
+    #title = "Bacterial Colonization Timeline in Germ-Free Mice",
+    #subtitle = "Individual mouse trajectories with group medians",
+    x = "Time Post-Gavage (Hours)",
+    y = "CFU / gram of feces"
+  ) +
+  
+  # Customize the plot's appearance.
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(size = 9),
+    strip.text = element_text(face = "bold", size = 12)
+  )
+
+ggsave('../data/R33_gf_full_course_with_median_REPEAT.jpg', width = 10, height = 7)
+```
+
+
 
 # assemble 
 
