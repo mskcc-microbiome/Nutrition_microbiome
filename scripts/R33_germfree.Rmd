@@ -196,10 +196,7 @@ all_raw <- bind_rows(
   repeat_data
 ) %>% 
   mutate(mouse_identifier = str_glue('E{experiment_no}__{`Mouse Group`}'))
-```
 
-
-```{r}
 # Clean and transform the data for plotting.
 plot_data <- all_raw %>%
   # Use mutate to create new, cleaner columns.
@@ -231,6 +228,50 @@ plot_data <- all_raw %>%
   filter(!is.na(Time_h))
 
 plot_data %>% write_csv('../data/R33_germ_free_data_for_plot.csv')
+```
+
+
+## test the slope
+
+```{r}
+library(lme4)
+library(lmerTest)
+# test the slope
+slope_df <- plot_data %>% 
+  select(mouse_identifier, Treatment, experiment_no, log10_CFUs_per_GramStool, Time_h) %>% 
+  drop_na() %>% 
+  mutate(Treatment = as.character(Treatment)) %>% 
+  filter(str_detect(Treatment, '^E. faecalis')) %>% 
+  mutate(Treatment = factor(Treatment, levels = c('E. faecalis + Regular Water','E. faecalis + Sucrose Water')))
+
+# Filter the data for the first 48 hours as requested.
+data_48h <- slope_df %>%
+  filter(Time_h <= 48)
+
+# Fit the linear mixed-effects model.
+# The formula `log10_CFUs_per_GramStool ~ Treatment * Time_h` tests for the main effects
+# of Treatment and Time, as well as their interaction. The interaction term is key.
+# `(1 | experiment_no)` accounts for baseline differences between experiments.
+# `(1 | mouse_identifier)` accounts for repeated measurements from the same mouse.
+mixed_model <- lmer(log10_CFUs_per_GramStool ~ Treatment * Time_h + 
+                      (1 | experiment_no) + (1 | mouse_identifier), 
+                    data = data_48h)
+
+# Get the summary of the model, which includes p-values for the fixed effects.
+model_summary <- summary(mixed_model)
+
+# Print the summary to the console.
+print(model_summary)
+
+### How to Interpret the Output:
+# In the printed summary, look for the "Fixed effects" table.
+# Find the row for the interaction term, which will be labeled something like:
+# `TreatmentE. faecalis + Sucrose Water:Time_h`
+# The p-value for this term (in the `Pr(>|t|)` column) is your answer.
+
+#
+# - If p > 0.05: This means you do not have enough evidence to conclude that the
+#   growth rates are different. p = 0.6476, during the initial 48-hour window, the growth patterns are statistically indistinguishable.
 ```
 
 ## CFU plot
