@@ -53,8 +53,8 @@ remove_highly_correlated <- function(df, threshold = 0.95){
 
 
 #Find the covariates of interest using phyloseq.  Will use all covariates in the sample_data of the phyloseq:
-find_covariates_using_phyloseq <- function(phyloseq_obj, perms = 10000, na_drop = T){
-  distance_mat <- as.matrix(vegdist(t(phyloseq_obj@otu_table), method = "bray"))
+find_covariates_using_phyloseq <- function(phyloseq_obj, perms = 10000, distance_metric = "bray", na_drop = T){
+  distance_mat <- as.matrix(vegdist(t(phyloseq_obj@otu_table), method = distance_metric))
 
   # cast as a tibble then dataframe to preserve types of columns (but lost rownames)
  cov_df <- sample_data(phyloseq_obj) %>% 
@@ -83,14 +83,11 @@ find_covariates_using_phyloseq <- function(phyloseq_obj, perms = 10000, na_drop 
                                   colnames(distance_mat ) %in% rownames(cov_df)]
   }
   
-  minimal_cov_df <- remove_highly_correlated(cov_df)
-
-  return(vegan::envfit(ord=as.data.frame(distance_mat), env=minimal_cov_df, permutation = perms))
+  return(find_covariates_using_covariates_matrix_and_dist_mat(distance_mat, cov_df, perms = perms))
 }
 
-#Find the covariates of interest using phyloseq and provided covariate dataframe.  Will use the phyloseq to generate dist matrix only:
-find_covariates_using_covariates_matrix <- function(phyloseq_obj, cov_df, perms = 10000, subset_to_match = F){
-  distance_mat <- as.matrix(vegdist(t(phyloseq_obj@otu_table), method = "bray"))
+#Find the covariates of interest using only distance matrix and provided covariate dataframe. 
+find_covariates_using_covariates_matrix_and_dist_mat <- function(distance_mat, cov_df, perms = 10000, subset_to_match = F){
   
   if (subset_to_match){
     distance_mat <- distance_mat [rownames(distance_mat ) %in% rownames(cov_df),
@@ -101,11 +98,20 @@ find_covariates_using_covariates_matrix <- function(phyloseq_obj, cov_df, perms 
     
   }
   if (!(nrow(distance_mat) == nrow(cov_df))){
-    stop("Distance mat and provided covariates don't have the same number of dimensions, fix cov mat, ensure row names are sample ids.  Can rerun with subset_to_match=T")
+    stop("Distance mat and provided covariates don't have the same number of dimensions, fix cov mat, ensure row names are sample ids.  Can rerun with subset_to_match=T to force cov_df and distance_mat to have same samples")
   }
   minimal_cov_df <- remove_highly_correlated(cov_df)
   
-  return(vegan::envfit(ord=as.data.frame(distance_mat), env=minimal_cov_df, permutation = perms))
+  cov <- vegan::envfit(ord=as.data.frame(distance_mat), env=minimal_cov_df, permutation = perms)
+  effect_size <- cov$vectors$r
+  pval <- cov$vectors$pval
+  
+  #Note you would want to change the code to add any category specific colors here:
+  return(data.frame(effect_size, pval) %>%
+    rownames_to_column("variable_name") %>%
+    mutate(variable_name = stringr::str_replace_all(variable_name, '_', ' ')) %>%
+    mutate(adjusted_pval = p.adjust(pval, method = "BH"),
+           significant = adjusted_pval < threshold))
 }
 
 
@@ -120,21 +126,11 @@ threshold = 0.05
 cov <- find_covariates_using_phyloseq(test_phyloseq, perms = 10000)
 
 # As an alternative this will only run on the covariates provided in your matrix.:
-cov <- find_covariates_using_covariates_matrix(test_phyloseq, test_covariates_of_interest, perms = 10000)
+cov <- find_covariates_using_covariates_matrix_and_dist_mat(
+  as.matrix(vegdist(t(phyloseq_obj@otu_table), method = "bray")),
+  test_covariates_of_interest, perms = 10000)
 
-effect_size <- cov$vectors$r
-pval <- cov$vectors$pval
 
-#Note you would want to change the code to add any category specific colors here:
-plotting_data_frame <- data.frame(effect_size, pval) %>%
-  rownames_to_column("variable_name") %>%
-  mutate(variable_name = stringr::str_replace_all(variable_name, '_', ' ')) %>%
-  mutate(adjusted_pval = p.adjust(pval, method = "BH"),
-         significant = adjusted_pval < threshold) %>%
-  mutate(variable_category = case_when(
-    variable_name %in% c("BMI", "Diabetes") ~ "Patient Level Disease Stats",
-    .default = "Other"
-  ))
 
 plotting_data_frame %>%
   filter(significant) %>%
@@ -154,4 +150,6 @@ plotting_data_frame %>%
     legend.title  = element_text(size = 20),
     strip.text.y = element_text(size = 20)
   ) 
+
+#-----------------------------------------------------------------------------------------------------------------
 
