@@ -124,17 +124,24 @@ test_phyloseq <- readRDS("your_path_to_your_phyloseq")
 test_covariates_of_interest <- readRDS("your_path_to_your_covaraites_dataframe")
 threshold = 0.05
 # This will run on all the covariates in the sample_data frame of the phyloseq provided:
-cov <- find_covariates_using_phyloseq(test_phyloseq, perms = 10000)
+plotting_data_frame <- find_covariates_using_phyloseq(test_phyloseq, perms = 10000)
 
 # As an alternative this will only run on the covariates provided in your matrix.:
-cov <- find_covariates_using_covariates_matrix_and_dist_mat(
-  as.matrix(vegdist(t(phyloseq_obj@otu_table), method = "bray")),
-  test_covariates_of_interest, perms = 10000)
+#plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(
+#  as.matrix(vegdist(t(phyloseq_obj@otu_table), method = "bray")),
+#  test_covariates_of_interest, perms = 10000)
 
 
 
 plotting_data_frame %>%
   filter(significant) %>%
+  mutate(  # Modify me to define your categories of interest! :) 
+    variable_category = case_when(
+      variable_name %in% c("BMI", "Cholesterol") ~ "Patient Health Stats",
+      variable_name %in% c("Bristol Score") ~ "Stool Specific Parameters",
+      .default = "Other"
+    )
+  ) %>%
   ggplot(aes(y = forcats::fct_reorder(variable_name, effect_size), x = effect_size, fill = variable_category)) +
   geom_col() + 
   theme_classic() +
