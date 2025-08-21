@@ -14,6 +14,9 @@ library(janitor)
 library(cowplot)
 library(patchwork)
 library(scales)
+library(lme4)
+library(lmerTest)
+library(ggeffects)
 ```
 ```{r}
 library(vdbR)
@@ -288,8 +291,6 @@ ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool, fill = diet
   ) +
   # Extend the plot margin to make room for the annotations.
   coord_cartesian( clip = "off")
-
-
 ```
 
 # weight data 
@@ -574,7 +575,7 @@ ggplot(processed_data, aes(x = plot_group, y = logCFU, fill = diet_treatment)) +
   # Extend the plot margin to make room for the annotations.
   coord_cartesian( clip = "off")
 ```
-# EM07
+# EM07: 7_25
 
 ```{r}
 experiment_data <- read_csv('../data/7_25_25_biapenem_rebuttal_EM07.xlsx - Sheet1.csv') %>%  
@@ -615,7 +616,10 @@ processed_data <- experiment_data %>%
       "biapenem_sucrose_0", "biapenem_sucrose_3", "biapenem_sucrose_6"
     ))
   )
+```
 
+
+```{r}
 ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool, fill = diet_treatment)) +
   
   # Add vertical lines to visually separate the main treatment blocks.
@@ -757,14 +761,12 @@ ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool)) +
   coord_cartesian( clip = "off")
 ```
 
-# sugar delayed 
+# Sugar delayed 
 
-## design
+## Design
 
 ```{r}
 # Define the experimental groups and their properties
-
-
 groups <- tibble(
   group_name = factor(
     c("Abx + Sucrose (Standard)", "Abx + Sucrose (Delay +1)", "Abx + Sucrose (Delay +2)", "PBS + Sucrose", "PBS + Water", "Abx + Water"),
@@ -784,7 +786,7 @@ treatment_rects <- groups %>%
   mutate(
     ymin = as.numeric(group_name) ,
     ymax = as.numeric(group_name) + 0.3,
-    xmin = treatment_start-0.1,
+    xmin = treatment_start+0.05,
     xmax = treatment_end+0.1  
   )
 
@@ -859,7 +861,7 @@ design <- ggplot() +
   ) +
   # Add titles and theme
   labs(
-    title = "Experimental Design for Sucrose Delay Study",
+   # title = "Experimental Design for Sucrose Delay Study",
     #subtitle = "Timeline of treatments and sample collections for each group",
     y = "Experimental Group"
   ) +
@@ -868,10 +870,10 @@ design <- ggplot() +
     plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
     plot.subtitle = element_text(hjust = 0.5, size = 11),
     axis.text = element_text(size = 10),
-    axis.title = element_text(size = 11, face = "bold"),
-    legend.position = "top"
+    axis.title = element_text(size = 11),
+    legend.position = "none"
   )
-ggsave('../data/R31_delay_design.jpg')
+ggsave('../data/R31_delay_design.pdf')
 ```
 ## CFU
 
@@ -892,7 +894,6 @@ exp2_data <- read_csv(file_exp2) %>%
   mutate(experiment_no = "Experiment_2",
          `Mice Weights` = as.numeric(`Mice Weights`)) # two mice died 
 
-
 # --- Combine the Data ---
 
 # The bind_rows() function stacks the two data frames on top of each other.
@@ -901,63 +902,22 @@ combined_data <- bind_rows(exp1_data, exp2_data) %>%
   mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
   clean_names() %>%
   mutate(log10_cf_us_per_gram_stool = log10(cf_us_per_gram_stool)) %>% 
+  mutate(mouse_identifier = str_glue('{experiment_no}_{mouse_identifier}')) %>% 
   mutate(
     # Create a unique ID for each mouse's trajectory within its specific treatment group.
     trajectory_group = paste(treatment, mouse_identifier, sep = "_")
   ) %>% 
-  relocate(log10_cf_us_per_gram_stool, .after = 'mice_weights') %>% 
-  relocate(experiment_no, .after = 'log10_cf_us_per_gram_stool') 
-```
+  relocate(log10_cf_us_per_gram_stool, .after = 'mice_weights')
 
-
-```{r}
-ggplot(combined_data, aes(x = factor(day), y = cf_us_per_gram_stool)) +
-  # Use a boxplot to show the distribution of CFU/g at each day.
-  # A small value (1) is added to cfu_per_gram to avoid issues with taking the log of zero.
-  geom_boxplot( outlier.shape = NA) +
-  # Add individual data points with some jitter to see the raw data.
-  geom_point( alpha = 0.6) +
-
-  # Facet the plot by the cleaned treatment names.
-  # `scales = "free_x"` allows each panel to have its own x-axis range if needed.
-  facet_grid(~treatment, scales = "free_x") +
-  # Add thin lines to track the trajectory of each individual mouse.
-  geom_line(aes(group = trajectory_group), color = "gray50", linewidth = 0.5, alpha = 0.5) +
-
-  # Use a log10 scale for the y-axis, which is standard for CFU data.
-  # The `label_log()` function from the 'scales' package creates nice labels (e.g., 10^6).
-  scale_y_log10(
-    breaks = trans_breaks("log10", function(x) 10^x),
-    labels = trans_format("log10", math_format(10^.x))
-  ) +
-  # Add minor tick marks for the log scale, which helps with readability.
-  #annotation_logticks(sides = "l") +
-
-  # Add labels and a title to make the plot informative.
-  labs(
-    #title = "Enterococcus Burden by Treatment Group and Day",
-    x = "Day of Experiment",
-    y = "Enterococcus (CFU / gram of feces)",
-    fill = "Treatment Group" # Title for the legend
-  ) +
-
-  # Use a clean, minimal theme and adjust some settings for clarity.
-  theme_light(base_size = 14) +
-  theme(
-    legend.position = "none", # The facets already label the groups, so no legend is needed.
-    strip.text = element_text(face = "bold"), # Make the facet titles bold.
-    axis.text.x = element_text(angle = 0, hjust = 1) # Rotate x-axis labels if they overlap.
-  )
-
-ggsave('../data/R31_sugar_delay.png', width = 12, height = 6)
-```
-
-## AUC vardi
-
-### vardi
-
-```{r}
-library(clinfun)
+# Define the desired order for the treatment groups on the plot
+treatment_order <- c(
+  "PBS + Sucrose", 
+  "PBS + Water", 
+  "Abx + Sucrose (Delay +2)", 
+  "Abx + Sucrose (Delay +1)", 
+  "Abx + Sucrose (Standard)", 
+  "Abx + Water"
+)
 
 # The recode step is done once here to prepare the full dataset.
 # This makes the names consistent for all subsequent tests.
@@ -969,22 +929,71 @@ prepared_data <- combined_data %>%
     "Biapenem_Sucrose_+2" = "Abx + Sucrose (Delay +2)",
     "PBS_Only" = "PBS + Water",
     "PBS_Sucrose" = "PBS + Sucrose"
-  ))
+  )) %>% 
+  mutate(treatment =  factor(treatment, levels = rev(treatment_order)))
 
-# --- 3. Run Vardi Test for Each Sucrose Group vs. Control ---
-
-# A list of the sucrose groups to compare against the control.
-sucrose_groups <- c(
-  "Abx + Sucrose (Standard)",
-  "Abx + Sucrose (Delay +1)",
-  "Abx + Sucrose (Delay +2)"
+# Define the new color palette for the groups
+color_palette <- c(
+  "PBS + Water" = "lightgray",
+  "PBS + Sucrose" = "lightpink",
+  "Abx + Water" = "gray32",
+  "Abx + Sucrose (Standard)" = "deeppink2",
+  "Abx + Sucrose (Delay +1)" = "deeppink2",
+  "Abx + Sucrose (Delay +2)" = "deeppink2"
 )
 ```
 
+### longitudinal_plot
 
 ```{r}
+longitudinal_plot <- ggplot(prepared_data, aes(x = factor(day), y = cf_us_per_gram_stool, color = treatment)) +
+  # Create separate panels for each treatment group
+  facet_wrap(~ treatment, ncol = 6) +
+  # Add boxplots for each time point, grouped correctly
+  geom_boxplot(outlier.shape = NA, aes(group = interaction(day, treatment))) +
+  # Connect the data points for each individual mouse with a thin gray line
+  geom_line(aes(group = mouse_identifier), color = "gray70", alpha = 0.4) +
+  # Add the individual data points
+  geom_point(size = 1.9) +
+  # Calculate and connect the median for each time point with a thick dashed line
+  stat_summary(
+    fun = median,
+    geom = "line",
+    aes(group = 1), # Connects medians across days within each facet
+    #linetype = "dashed",
+    linewidth = 1.8
+  ) +
+     # Apply the custom color palette
+  scale_color_manual(values = color_palette) +
+  # Use a logarithmic scale for the y-axis, which is standard for CFU data
+  scale_y_log10(
+    breaks = scales::trans_breaks("log10", function(x) 10^x),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
+  # Add labels and title
+  labs(
+   # title = "Enterococcus Burden Over Time by Treatment Group",
+    x = "Day of Experiment",
+    y = "Enterococcus (CFU / gram of feces)"
+  ) +
+  # Use a clean theme and remove the legend
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    strip.text = element_text( size = 7) # Make facet titles bold
+  )
+
+ggsave('../data/R31_sugar_delay.png', width = 12, height = 6, plot = longitudinal_plot)
+```
+
+## AUC stats
+
+### vardi
+
+```{r}
+library(clinfun)
+
 vardidf <- prepared_data %>% 
-  mutate(mouse_identifier = str_glue('{experiment_no}_{mouse_identifier}')) %>% 
   select(treatment:mouse_identifier, log10_cf_us_per_gram_stool) %>% 
   spread('day','log10_cf_us_per_gram_stool') 
 
@@ -1016,11 +1025,10 @@ stats.results$sig[stats.results$p.value > p.value.star] <- " "
 stats.results$sig[stats.results$p.value <= p.value.star] <- "*"
 stats.results$sig[stats.results$p.value <= p.value.double] <- "**"
 print(stats.results, row.names = F)
- stats.results %>% 
-   filter()
+
 ```
 
-
+### AUC
 
 ```{r}
 library(DescTools)
@@ -1036,9 +1044,7 @@ auc_data <- combined_data %>%
     auc = AUC(x = day, y = log10_cf_us_per_gram_stool, na.rm = TRUE),
     .groups = 'drop' # Ungroup the data after summarising
   )
-```
 
-```{r}
 # Perform a Kruskal-Wallis test, which is a non-parametric method
 # to see if there are significant differences in AUC among the treatment groups.
 # This is appropriate because the AUC values may not be normally distributed.
@@ -1047,9 +1053,7 @@ kruskal_test_result <- kruskal.test(auc ~ treatment , data = auc_data %>% filter
 # Print the results of the statistical test
 print("Kruskal-Wallis test for differences in AUC between treatment groups:")
 print(kruskal_test_result)
-```
 
-```{r}
 # --- Visualize AUC Data ---
 
 # Clean up treatment names for better plot labels
@@ -1063,28 +1067,10 @@ auc_data_viz <- auc_data %>%
     "PBS_Sucrose" = "PBS + Sucrose"
   ))
 
-# Define the desired order for the treatment groups on the plot
-treatment_order <- c(
-  "PBS + Sucrose", 
-  "PBS + Water", 
-  "Abx + Sucrose (Delay +2)", 
-  "Abx + Sucrose (Delay +1)", 
-  "Abx + Sucrose (Standard)", 
-  "Abx + Water"
-)
 
 # Set the treatment column as a factor with the specified order
 auc_data_viz$treatment <- factor(auc_data_viz$treatment, levels = treatment_order)
 
-# Define the new color palette for the groups
-color_palette <- c(
-  "PBS + Water" = "lightgray",
-  "PBS + Sucrose" = "lightpink",
-  "Abx + Water" = "gray32",
-  "Abx + Sucrose (Standard)" = "deeppink2",
-  "Abx + Sucrose (Delay +1)" = "deeppink2",
-  "Abx + Sucrose (Delay +2)" = "deeppink2"
-)
 
 # Define the specific comparisons for the p-values
 comparison_list <- list(
@@ -1112,8 +1098,8 @@ auc_plot <- ggplot(auc_data_viz, aes(x = treatment, y = auc, color = treatment))
   coord_flip(ylim = c(0, max(auc_data_viz$auc, na.rm = TRUE) * 1.23)) + # Adjust y-limit for p-values
   # Add labels and title
   labs(
-    title = "Total Enterococcus Burden (AUC) by Treatment Group",
-    subtitle = "Comparison of AUC across different treatment conditions",
+   # title = "Total Enterococcus Burden (AUC) by Treatment Group",
+    #subtitle = "Comparison of AUC across different treatment conditions",
     x = "Treatment Group",
     y = "Area Under the Curve (log10 CFU/gram * days)"
   ) +
@@ -1122,34 +1108,604 @@ auc_plot <- ggplot(auc_data_viz, aes(x = treatment, y = auc, color = treatment))
   theme(
     legend.position = "none", # Hide legend as colors are on the axis
     plot.title = element_text(hjust = 0.5, face = "bold"),
-    plot.subtitle = element_text(hjust = 0.5),
-    axis.text.y = element_text(face = "bold")
+    #axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    plot.subtitle = element_text(hjust = 0.5)
   )
 
 # Print the plot
 print(auc_plot)
-
-
 ```
 
+## day 6 and day 1 difference
+
 ```{r}
-final_plot <-  plot_grid(design, auc_plot, 
-                 label_size = 12, ncol = 1,labels = c('A','B'),
+# for the mice that we have data on day 6, calculate the difference of the log10 CFU  between day 6 and day 1
+# This section isolates data for Day 1 and Day 6, reshapes the data,
+# and calculates the difference for each mouse.
+log_diff_data <- prepared_data %>%
+  # Keep only the relevant days
+  filter(day %in% c(1, 6)) %>%
+  # Reshape the data so Day 1 and Day 6 values are in separate columns for each mouse
+  pivot_wider(
+    id_cols = c(mouse_identifier, treatment),
+    names_from = day,
+    values_from = log10_cf_us_per_gram_stool,
+    names_prefix = "Day"
+  ) %>%
+  # Remove mice that don't have data for both Day 1 AND Day 6
+  drop_na(Day1, Day6) %>%
+  # Calculate the log10 difference
+  mutate(log10_diff = Day6 - Day1) 
+
+# Set the treatment column as a factor with the specified order
+log_diff_data$treatment <- factor(log_diff_data$treatment, levels = treatment_order)
+
+# --- Visualize the Log10 Difference Data ---
+
+# Define the specific comparisons for the p-values on the plot
+comparison_list <- list(
+  c("Abx + Water", "Abx + Sucrose (Standard)"),
+  c("Abx + Water", "Abx + Sucrose (Delay +1)"),
+  c("Abx + Water", "Abx + Sucrose (Delay +2)")
+)
+
+# Create the boxplot
+log_diff_plot <- ggplot(log_diff_data, aes(x = treatment, y = log10_diff)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = treatment), width = 0.2, size = 2.5, show.legend = FALSE) +
+  # Add statistical comparisons
+  stat_compare_means(
+    comparisons = comparison_list,
+    method = "wilcox.test",
+    label = "p.format"
+  ) +
+  # Add a horizontal line at y=0 for reference (no change)
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+   # Apply the custom color palette
+  scale_color_manual(values = color_palette) +
+  # Flip coordinates for readability
+  coord_flip() +
+  # Add labels and title
+  labs(
+    #title = "Change in Enterococcus Burden (Day 6 vs. Day 1)",
+    #subtitle = "Difference in Log10 of CFU/gram of feces",
+    x = "Treatment Group",
+    y = "Log10(Day 6) - Log10(Day 1))"
+  ) +
+  # Use a clean theme
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+# Print the plot
+print(log_diff_plot)
+```
+## day 3 and day 1 difference  
+
+```{r}
+# now do the above for the day 3 - day 1
+# for the mice that we have data on day 3, calculate the difference of the log10 CFU  between day 3 and day 1
+# This section isolates data for Day 1 and Day 3, reshapes the data,
+# and calculates the difference for each mouse.
+log_diff_data_31 <- prepared_data %>%
+  # Keep only the relevant days
+  filter(day %in% c(1, 3)) %>%
+  pivot_wider(
+    id_cols = c(mouse_identifier, treatment),
+    names_from = day,
+    values_from = log10_cf_us_per_gram_stool,
+    names_prefix = "Day"
+  ) %>%
+  # Remove mice that don't have data for both Day 1 AND Day 6
+  drop_na(Day1, Day3) %>%
+  # Calculate the log10 difference
+  mutate(log10_diff = Day3 - Day1) 
+
+# Set the treatment column as a factor with the specified order
+log_diff_data_31$treatment <- factor(log_diff_data_31$treatment, levels = treatment_order)
+
+# --- Visualize the Log10 Difference Data ---
+
+# Define the specific comparisons for the p-values on the plot
+comparison_list <- list(
+  c("Abx + Water", "Abx + Sucrose (Standard)"),
+  c("Abx + Water", "Abx + Sucrose (Delay +1)"),
+  c("Abx + Water", "Abx + Sucrose (Delay +2)")
+)
+
+# Create the boxplot
+log_diff_plot_31 <- ggplot(log_diff_data_31, aes(x = treatment, y = log10_diff)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = treatment), width = 0.2, size = 2.5, show.legend = FALSE) +
+  # Add statistical comparisons
+  stat_compare_means(
+    comparisons = comparison_list,
+    method = "wilcox.test",
+    label = "p.format"
+  ) +
+  # Add a horizontal line at y=0 for reference (no change)
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+   # Apply the custom color palette
+  scale_color_manual(values = color_palette) +
+  # Flip coordinates for readability
+  coord_flip() +
+  # Add labels and title
+  labs(
+    #title = "Change in Enterococcus Burden (Day 3 vs. Day 1)",
+    #subtitle = "Difference in Log10 of CFU/gram of feces",
+    x = "Treatment Group",
+    y = "Log10(Day 3) - Log10(Day 1))"
+  ) +
+  # Use a clean theme
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+# Print the plot
+print(log_diff_plot_31)
+```
+
+
+## assemble
+
+```{r}
+top_row <- plot_grid(design, auc_plot, labels = c('A', 'B'), ncol = 2, rel_widths = c(.8,1))
+
+# Now, combine the top_row object with the longitudinal_plot
+# The longitudinal plot will be the third element and take the full width
+top_two <- plot_grid(
+  top_row,
+  longitudinal_plot,
+  labels = c('', 'C'), # Add label for the bottom plot
+  ncol = 1 # Arrange them in a single column
+)
+
+bottom_row <- plot_grid(log_diff_plot_31, log_diff_plot, labels = c('D', 'E'), ncol = 2, rel_widths = c(1.4,1))
+
+final_plot <-  plot_grid(top_two,
+                          bottom_row,
+                 label_size = 12, nrow  = 2,
+                 rel_heights = c(2,1),
                 align = 'vh', axis = 'lrtb')
 
 title <- ggdraw() + 
-  draw_label("Rebuttal Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  draw_label("Supplemental Fig X",fontface = 'bold',x = 0,hjust = 0) +
   theme(plot.margin = margin(0, 0, 0, 0))
 
 combined <- plot_grid(
   title, final_plot,
   ncol = 1,
   # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
+  rel_heights = c(0.07, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/R31_delayed_sugar.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300)  
+```
+
+# weight difference    
+
+```{r}
+w1 <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xlsx') %>% 
+  clean_names() %>% 
+  mutate(group = if_else(str_detect(treatment, 'PBS'), 'RB08', group)) %>% 
+  rename(room = group) %>% 
+  filter(room == 'RB08')  %>%  # this room has the all 4 groups
+  mutate(experiment_no = "survey_RB08")
+
+w2 <- read_csv('../data/7_25_25_biapenem_rebuttal_EM07.xlsx - Sheet1.csv') %>%  
+   filter(!is.na(Stool_weight_mg)) %>% clean_names() %>% 
+  mutate(experiment_no = "EM07_work")
+
+w3 <-  read_csv('../data/7_31_25_biapenem_rebuttal_RB08 - Sheet1.csv') %>%  
+   filter(CFUs_per_GramStool > 0) %>% clean_names() %>% 
+  select(group, treatment, day , mouse_identifier, cf_us_per_gram_stool, mice_weights) %>%
+  mutate(strata = case_when(
+    mouse_identifier %in% 1:20 ~ "Water",
+    mouse_identifier %in% 21:40 ~ "Plain Hydrogel",
+    TRUE ~ NA_character_ # This handles any mouse IDs outside the specified range
+  )) %>% 
+  filter(strata == 'Water') %>% 
+  mutate(experiment_no = "comparison_exp_water")
+
+# two sugar delay mouse experiments
+file_exp1 <- "../data/8_6_25_Biapenem_Sugar_Delay_1 - sheet1.csv"
+file_exp2 <- "../data/8_8_25_Biapenem_Sugar_Delay_2 - sheet1.csv"
+
+# Read the first CSV file into a data frame.
+# The mutate() function then adds a new column called 'experiment',
+# labeling all rows from this file as "Experiment 1".
+exp1_data <- read_csv(file_exp1) %>%
+  mutate(experiment_no = "sugarDelay_1")
+
+# Do the same for the second CSV file, labeling these rows as "Experiment 2".
+exp2_data <- read_csv(file_exp2) %>%
+  mutate(experiment_no = "sugarDelay_2",
+         `Mice Weights` = as.numeric(`Mice Weights`)) # two mice died 
+
+# --- Combine the Data ---
+
+# The bind_rows() function stacks the two data frames on top of each other.
+# It automatically matches columns by their names, which is perfect for this task.
+w4 <- bind_rows(exp1_data, exp2_data) %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
+  clean_names() %>%
+  mutate(log10_cf_us_per_gram_stool = log10(cf_us_per_gram_stool)) 
+
+weights <- bind_rows(
+  w1 %>%  select(experiment_no, group = room, day, mouse_identifier, mice_weights = weight, treatment),
+  w2 %>%  select(experiment_no, group, day, mouse_identifier, mice_weights , treatment, log10_cf_us_per_gram_stool) %>% mutate(mice_weights = as.numeric(mice_weights)),
+  w3 %>% mutate(log10_cf_us_per_gram_stool = log10(cf_us_per_gram_stool)) %>%  select(experiment_no, group, day, mouse_identifier, mice_weights , treatment, log10_cf_us_per_gram_stool),
+  w4 %>% select(experiment_no, group, day, mouse_identifier, mice_weights , treatment, log10_cf_us_per_gram_stool)
+) %>% 
+  filter(!treatment %in% c('Biapenem_Sucrose_+1','Biapenem_Sucrose_+2'))
+
+weights %>% count(treatment)
+```
+
+```{r}
+processed_weights <- weights %>%
+  # Create separate columns for 'antibiotic_treatment' and 'diet_treatment' from the 'group' column.
+  mutate(
+    antibiotic_treatment = case_when(
+      str_detect(treatment, "Biapenem") ~ "biapenem",
+      str_detect(treatment, "PBS") ~ "PBS",
+      str_detect(treatment, "^B\\+") ~ "biapenem",
+      treatment == 'S'~ "PBS",
+      treatment == 'W'~ "PBS",
+      TRUE ~ "Unknown"
+    ),
+    diet_treatment = case_when(
+      str_detect(treatment, "Sucrose") ~ "sucrose_water",
+      str_detect(treatment, "_Only$") ~ "regular_water",
+      str_detect(treatment, "S$")~ "sucrose_water",
+      str_detect(treatment, "W$")~ "regular_water",
+      TRUE ~ "Unknown"
+    ),
+    # Ensure the treatments are ordered correctly for the plot layout.
+    antibiotic_treatment = factor(antibiotic_treatment, levels = c("PBS", "biapenem")),
+    diet_treatment = factor(diet_treatment, levels = c("regular_water", "sucrose_water"))
+  ) %>%
+  # Create a single grouping variable for the x-axis by combining the treatment and day information.
+  mutate(
+    plot_group = paste(antibiotic_treatment, diet_treatment, day, sep = "_"),
+    # Create a unique ID for each mouse's trajectory within its specific treatment group.
+    trajectory_group = paste(experiment_no, antibiotic_treatment, diet_treatment, mouse_identifier, sep = "_")
+  ) %>% 
+  # Convert the new grouping variable to a factor and set the levels to enforce the desired plot order.
+  mutate(
+    plot_group = factor(plot_group, levels = c(
+      "PBS_regular_water_1", "PBS_regular_water_3", "PBS_regular_water_6",
+      "PBS_sucrose_water_1", "PBS_sucrose_water_3", "PBS_sucrose_water_6",
+      "biapenem_regular_water_1", "biapenem_regular_water_3", "biapenem_regular_water_6",
+      "biapenem_sucrose_water_1", "biapenem_sucrose_water_3", "biapenem_sucrose_water_6"
+    ))
+  ) %>%
+  mutate(
+    experiment_no = factor(experiment_no)
+  )
+```
+
+## weight longitudinal
+
+```{r}
+# Create the plot.
+ggplot(processed_weights, aes(x = plot_group, y = mice_weights)) +
+  # Add the boxplots. The 'outlier.shape = NA' hides the default outlier points
+  # since we'll be plotting all points ourselves.
+  geom_boxplot(outlier.shape = NA) +
+  # Add the individual data points as jittered shapes.
+  # 'shape' is mapped to the experiment number.
+  # 'alpha' adds some transparency to see overlapping points.
+  geom_jitter(aes(color = diet_treatment), width = 0.2, alpha = 0.8, size = 2) + 
+  
+  # Manually set the colors to match the publication figure (gray for vehicle, pink for sucrose).
+  scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
+  # Create separate panels for each treatment group defined in 'plot_group'.
+  #facet_wrap(~plot_group) +
+  # Add informative labels and a title.
+  labs(
+    title = "Mice Weight by Treatment and Day",
+    x = "Day",
+    y = "Mice Weight (g)",
+    shape = "Experiment No."
+  ) +
+  # Use a clean, black-and-white theme for clarity.
+  theme_bw() +
+  # Improve the readability of the theme.
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text.x = element_text(size = 10, vjust = 0, angle = 90), # Adjust position of day numbers
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+ggsave('../data/R31_few_weight_timeline.jpg', width = 7, height = 7)
+```
+
+```{r}
+
+# Step 1: Prepare the data.
+analysis_data <- processed_weights %>%
+  # Focus only on the antibiotic-treated group.
+  filter(antibiotic_treatment == 'biapenem') %>%
+  # It's good practice to arrange by mouse and day.
+  mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}')) %>%  
+  arrange(mouse_identifier, day) %>%
+  # For each mouse, calculate weight gain relative to their Day 1 weight.
+  group_by(mouse_identifier) %>%
+  mutate(
+    weight_change = mice_weights - first(mice_weights)
+  ) %>%
+  ungroup()
+
+# Step 2: Build and run the Linear Mixed-Effects Model.
+# We are modeling weight_change as a function of our main predictor (log_cfu),
+# while controlling for the effects of day and diet.
+# The (1 | mouse_identifier) term tells the model that measurements are
+# nested within each mouse, which is the key to handling repeated measures.
+model <- lmer(
+  weight_change ~ diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
+  data = analysis_data
+)
+
+# Step 3: Interpret the results.
+summary(model)
+```
+
+```{r}
+analysis_data_4 <- processed_weights %>%
+  # It's good practice to arrange by mouse and day.
+  mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}')) %>%  
+  arrange(mouse_identifier, day) %>%
+  # For each mouse, calculate weight gain relative to their Day 1 weight.
+  group_by(mouse_identifier) %>%
+  mutate(
+    weight_change = mice_weights - first(mice_weights)
+  ) %>%
+  ungroup()
+
+interaction_model <- lmer(
+  weight_change ~ antibiotic_treatment * diet_treatment + day +
+                (1 | mouse_identifier) + (1 | experiment_no),
+  data = analysis_data_4
+)
+
+# Get the summary of the model to see the results.
+summary(interaction_model)
+#  There is no significant interaction. The effect of the sucrose diet on weight gain is not statistically different between the antibiotic-treated group and the PBS-treated group.
+# maybe it is because they gained back the weight by day 6, what if I only test up until day 3
+
+```
+```{r}
+ggplot(processed_weights %>% filter(day < 6), aes(x = plot_group, y = mice_weights)) +
+  # Add the boxplots. The 'outlier.shape = NA' hides the default outlier points
+  # since we'll be plotting all points ourselves.
+  geom_boxplot(outlier.shape = NA) +
+  # Add the individual data points as jittered shapes.
+  # 'shape' is mapped to the experiment number.
+  # 'alpha' adds some transparency to see overlapping points.
+  geom_jitter(aes(color = diet_treatment), width = 0.2, alpha = 0.8, size = 2) + 
+  
+  # Manually set the colors to match the publication figure (gray for vehicle, pink for sucrose).
+  scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
+  # Create separate panels for each treatment group defined in 'plot_group'.
+  #facet_wrap(~plot_group) +
+  # Add informative labels and a title.
+  labs(
+    title = "Mice Weight by Treatment and Day",
+    x = "Day",
+    y = "Mice Weight (g)",
+    shape = "Experiment No."
+  ) +
+  # Use a clean, black-and-white theme for clarity.
+  theme_bw() +
+  # Improve the readability of the theme.
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text.x = element_text(size = 10, vjust = 0, angle = 90), # Adjust position of day numbers
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+ggsave('../data/R31_few_weight_timeline_to_day3.jpg', width = 7, height = 7)
+```
+```{r}
+analysis_data_4_to_day3 <- processed_weights %>%
+   filter(day < 6) %>% 
+  # It's good practice to arrange by mouse and day.
+  mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}')) %>%  
+  arrange(mouse_identifier, day) %>%
+  # For each mouse, calculate weight gain relative to their Day 1 weight.
+  group_by(mouse_identifier) %>%
+  mutate(
+    weight_gain = mice_weights - first(mice_weights)
+  ) %>%
+  ungroup()
+
+interaction_model_to_day3 <- lmer(
+  weight_gain ~ antibiotic_treatment * diet_treatment + day +
+                (1 | mouse_identifier) + (1 | experiment_no),
+  data = analysis_data_4_to_day3
+)
+
+# Get the summary of the model to see the results.
+summary(interaction_model_to_day3)
+```
+
+## test the logCFU cor with the weight change
+
+```{r}
+merged_data <- analysis_data %>% filter(!is.na(log10_cf_us_per_gram_stool)) %>% relocate(weight_change, .after = 'mice_weights') 
+  
+# plot the weight gain on each day of stool collection of those mice in those experiments
+ggplot(merged_data, aes(x = plot_group, y = weight_change)) +
+  geom_hline(yintercept = c(0), color = "black", linetype = "dashed", size = 2) +
+  # Add the boxplots. The 'outlier.shape = NA' hides the default outlier points
+  # since we'll be plotting all points ourselves.
+  geom_boxplot(outlier.shape = NA) +
+  # Add the individual data points as jittered shapes.
+  # 'shape' is mapped to the experiment number.
+  # 'alpha' adds some transparency to see overlapping points.
+  geom_jitter(aes(color = diet_treatment, shape = experiment_no), width = 0.2, alpha = 0.8, size = 2) + 
+  
+  # Manually set the colors to match the publication figure (gray for vehicle, pink for sucrose).
+  scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
+  
+  # Add informative labels and a title.
+  labs(
+    title = "Mice Weight change by Treatment and Day",
+    x = "Day",
+    y = "Mice Weight change(g)"
+  ) +
+  # Use a clean, black-and-white theme for clarity.
+  theme_bw() +
+  # Improve the readability of the theme.
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text.x = element_text(size = 10, vjust = 0, angle = 90), # Adjust position of day numbers
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+ggsave('../data/R31_weight_change.jpg', width = 8, height = 7)
+```
+
+
+```{r}
+# what if I just test whether log cfu is associated with weight loss
+model <- lmer(
+  weight_change ~ log10_cf_us_per_gram_stool + day + diet_treatment + (1 | mouse_identifier) + (1 | experiment_no),
+  data = merged_data
+)
+
+# Step 3: Interpret the results.
+summary(model)
+ 
+# This negative number means that for every 1-log increase in CFU, the mice's weight gain decreased by about 0.09 grams. 
+```
+
+```{r}
+plot_data <- merged_data %>%
+  # Filter to include only Day 3 and Day 6
+  filter(day %in% c(3, 6)) %>%
+  # Create a clearer diet_treatment column for the legend
+  mutate(
+    # Make 'day' a factor to get nice facet labels like "Day 3"
+    day = factor(paste("Day", day))
+  )
+
+# Create the scatter plot
+ggplot(plot_data, aes(x = log10_cf_us_per_gram_stool, y = weight_change, color = diet_treatment)) +
+  # Add the scatter plot points
+  geom_point(alpha = 0.8, size = 2.5) +
+  # Add the linear regression line for each diet group
+  geom_smooth(method = "lm", se = T) +
+  # Create separate panels for Day 3 and Day 6
+  facet_wrap(~day) +
+  # Use a nice color scheme
+  scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
+  # Add informative labels and a title
+  labs(
+    title = "Weight Change vs. Bacterial Load by Diet",
+    x = "Log10 CFU per Gram Stool",
+    y = "Weight Change (g)",
+    color = "Diet Treatment"
+  ) +
+  # Use a clean, professional theme
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+## original weight and catogorize time  
+
+since weight is not having linear change vs time
+
+```{r}
+weight_data <- merged_data %>% 
+  # For each mouse...
+  group_by(mouse_identifier) %>%
+  # Create a new column with the Day 1 weight for that mouse
+  mutate(baseline_weight = first(mice_weights[day == 1])) %>%
+  ungroup() %>%
+  # Now, filter out the Day 1 data so we only model post-treatment effects
+  filter(day > 1) %>% 
+  mutate(day = str_glue('day{day}'),
+         day = factor(day, levels = c('day3','day6')))
+
+# the question: "Does the relationship between bacterial load and weight depend on the diet?" yes def
+weight_model <- lmer(
+  mice_weights ~ baseline_weight + log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
+  data = weight_data
+)
+
+# Step 3: Interpret the results.
+summary(weight_model)
+# For the Regular Water group: A 10-fold increase in CFU is associated with a -0.22g change in weight.
+
+# For the Sucrose Water group: A 10-fold increase in CFU is associated with only a -0.047g change in weight.
+# 
+# The interaction's significance confirms that this difference between -0.22 and -0.047 is statistically real.
+```
+
+```{r}
+
+# Create the plot to visualize the interaction
+ggplot(weight_data, aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment)) +
+  # Add the individual data points with some transparency
+  geom_point(alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
+  # This is the key: it draws a separate linear regression line for each color/group
+  geom_smooth(method = "lm", se = TRUE) +
+  # Add clear labels that explain the plot
+  labs(
+    title = "Interaction of Diet and Bacterial Load on Mouse Weight",
+    subtitle = 'points represent mouse weight on day 3 and day 6',
+    x = "Log10 CFU per Gram Stool",
+    y = "Mouse Weight (g)",
+    color = "Diet Treatment"
+  ) +
+  # Use a clean theme
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "bottom"
+  )
+```
+```{r}
+# Use ggpredict() to get the predicted values from your model.
+# This calculates the predicted mouse weight across a range of CFU values
+# for each diet treatment, averaging over the effect of 'day'.
+predicted_effects <- ggpredict(weight_model, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
+
+# Now, plot these predictions
+ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
+  # Plot the predicted trend line
+  geom_line(linewidth = 1) +
+  # Add the confidence interval ribbon from the model
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, linetype = "dashed") +
+  # Add the original raw data points in the background for context
+  geom_point(
+    data = weight_data,
+    aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment),
+    alpha = 0.5,
+    inherit.aes = FALSE # Tells the points not to inherit the main aes
+  ) +
+  labs(
+    title = "Model-Predicted Effect of Bacterial Load on Mouse Weight by Diet",
+    x = "Log10 CFU per Gram Stool",
+    y = "Predicted Mouse Weight (g)",
+    color = "Diet Treatment",
+    fill = "Diet Treatment"
+  ) + 
+  theme_bw()
 ```
 
