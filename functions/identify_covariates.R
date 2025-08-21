@@ -2,7 +2,7 @@ library(vegan)
 library(tidyverse)
 library(stats)
 library(ggplot2)
-#Here we have a function which will remove any highly correlated variables from a covariate matrix.  
+
 
 #Helper Function that removes highly correlated variables first:
 remove_highly_correlated <- function(df, threshold = 0.95){
@@ -53,6 +53,7 @@ remove_highly_correlated <- function(df, threshold = 0.95){
 
 
 #Find the covariates of interest using phyloseq.  Will use all covariates in the sample_data of the phyloseq:
+# Essentially just a helper function to make the code work for a phyloseq object.
 find_covariates_using_phyloseq <- function(phyloseq_obj, perms = 10000, distance_metric = "bray", na_drop = T){
   distance_mat <- as.matrix(vegdist(t(phyloseq_obj@otu_table), method = distance_metric))
 
