@@ -1348,10 +1348,7 @@ weights <- bind_rows(
 ) %>% 
   filter(!treatment %in% c('Biapenem_Sucrose_+1','Biapenem_Sucrose_+2'))
 
-weights %>% count(treatment)
-```
 
-```{r}
 processed_weights <- weights %>%
   # Create separate columns for 'antibiotic_treatment' and 'diet_treatment' from the 'group' column.
   mutate(
@@ -1623,6 +1620,7 @@ ggplot(plot_data, aes(x = log10_cf_us_per_gram_stool, y = weight_change, color =
     plot.title = element_text(hjust = 0.5, face = "bold"),
     strip.text = element_text(face = "bold")
   )
+# when I break this down my day I reduce power and now the confidence interval band is wide 
 ```
 
 ## original weight and catogorize time  
@@ -1630,7 +1628,15 @@ ggplot(plot_data, aes(x = log10_cf_us_per_gram_stool, y = weight_change, color =
 since weight is not having linear change vs time
 
 ```{r}
-weight_data <- merged_data %>% 
+weight_data <- processed_weights %>%
+  filter(antibiotic_treatment == 'biapenem') %>%
+  filter(!is.na(log10_cf_us_per_gram_stool)) %>%
+  mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}'))
+```
+
+
+```{r}
+weight_data1 <- weight_data %>%  
   # For each mouse...
   group_by(mouse_identifier) %>%
   # Create a new column with the Day 1 weight for that mouse
@@ -1642,49 +1648,145 @@ weight_data <- merged_data %>%
          day = factor(day, levels = c('day3','day6')))
 
 # the question: "Does the relationship between bacterial load and weight depend on the diet?" yes def
-weight_model <- lmer(
+weight_model1 <- lmer(
   mice_weights ~ baseline_weight + log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
-  data = weight_data
+  data = weight_data1
 )
 
 # Step 3: Interpret the results.
-summary(weight_model)
+summary(weight_model1)
 # For the Regular Water group: A 10-fold increase in CFU is associated with a -0.22g change in weight.
 
 # For the Sucrose Water group: A 10-fold increase in CFU is associated with only a -0.047g change in weight.
 # 
 # The interaction's significance confirms that this difference between -0.22 and -0.047 is statistically real.
+# the above model has the day 3 has the reference level which is pretty weird
+```
+```{r}
+weight_data2 <- weight_data %>%  
+  mutate(day = str_glue('{day}'),
+         day = factor(day, levels = c('1','3','6')),
+         diet_treatment = factor(as.character(diet_treatment), levels = c('regular_water','sucrose_water')))
+
+# the question: "Does the relationship between bacterial load and weight depend on the diet?" yes def
+weight_model2 <- lmer(
+  mice_weights ~ log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
+  data = weight_data2
+)
+
+# Step 3: Interpret the results.
+summary(weight_model2)
+
+# even if I switch the factor levels of sucrose water and regular water and the log CFU is still significant 
+```
+
+
+```{r}
+# what if I remove all of the mice have died before day 6
+weight_data3 <- weight_data2 %>%
+  group_by( mouse_identifier) %>%
+  filter(n() == 3) %>%
+  ungroup()
+ 
+weight_model3 <- lmer(
+  mice_weights ~ log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
+  data = weight_data3
+)
+
+# Step 3: Interpret the results.
+summary(weight_model3)
+
+# how many mouse
+#weight_data3 %>% count(experiment_no, mouse_identifier) %>% count(experiment_no)
 ```
 
 ```{r}
-
-# Create the plot to visualize the interaction
-ggplot(weight_data, aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment)) +
-  # Add the individual data points with some transparency
-  geom_point(alpha = 0.7, size = 2) +
-  scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
-  # This is the key: it draws a separate linear regression line for each color/group
-  geom_smooth(method = "lm", se = TRUE) +
-  # Add clear labels that explain the plot
-  labs(
-    title = "Interaction of Diet and Bacterial Load on Mouse Weight",
-    subtitle = 'points represent mouse weight on day 3 and day 6',
-    x = "Log10 CFU per Gram Stool",
-    y = "Mouse Weight (g)",
-    color = "Diet Treatment"
-  ) +
-  # Use a clean theme
-  theme_bw() +
-  theme(
-    plot.title = element_text(hjust = 0.5, face = "bold"),
-    legend.position = "bottom"
-  )
+# this is a crude visualization , the lm line is not accurate since each mouse has two data points here 
+# # Create the plot to visualize the interaction
+# ggplot(weight_data, aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment)) +
+#   # Add the individual data points with some transparency
+#   geom_point(alpha = 0.7, size = 2) +
+#   scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
+#   # This is the key: it draws a separate linear regression line for each color/group
+#   geom_smooth(method = "lm", se = TRUE) +
+#   # Add clear labels that explain the plot
+#   labs(
+#     title = "Interaction of Diet and Bacterial Load on Mouse Weight",
+#     subtitle = 'points represent mouse weight on day 3 and day 6',
+#     x = "Log10 CFU per Gram Stool",
+#     y = "Mouse Weight (g)",
+#     color = "Diet Treatment"
+#   ) +
+#   # Use a clean theme
+#   theme_bw() +
+#   theme(
+#     plot.title = element_text(hjust = 0.5, face = "bold"),
+#     legend.position = "bottom"
+#   )
 ```
+
+### the weight trajectories of mice 
+
+```{r}
+# weight_data3 only has all mice that had all three data points. 
+
+# Define the new color palette for the groups
+color_palette <- c(
+
+  "regular_water" = "gray32",
+  "sucrose_water" = "deeppink2"
+)
+
+# a plot where the mouse weight are on the y, the day are on the x , and each mouse trajectory of weight on thin lines across the days, plot a point for each day's median, and a interval brackets and line that covers fr the 25% and 75% percentile , do this as the two facets , regular water and sucrose water. 
+ggplot(weight_data3, aes(x = day, y = mice_weights)) +
+  
+  # 1. Plot individual mouse trajectories as thin, semi-transparent lines.
+  # The 'group' aesthetic is essential to tell ggplot to draw a separate line for each mouse.
+  geom_line(aes(group = mouse_identifier), color = "grey70", alpha = 0.4, linewidth = 0.5) +
+  
+ stat_summary(
+    aes(color = diet_treatment), 
+    fun.data = "median_hilow", 
+    fun.args = list(conf.int = 0.5), # This is a shortcut for 25th-75th percentile
+    geom = "errorbar",
+    width = 0.2,
+    linewidth = 1
+  ) +
+
+  # Calculate and plot a line connecting the medians.
+  stat_summary(
+    aes(color = diet_treatment, group = diet_treatment),
+    fun = median,
+    geom = "line",
+    linewidth = 0.9
+  ) +
+  
+  # Calculate and plot the median as a point.
+  stat_summary(
+    aes(color = diet_treatment),
+    fun = median,
+    geom = "point",
+    size = 2
+  ) +
+  scale_color_manual(values = color_palette) +
+  # 4. Split the plot into two panels based on the diet treatment.
+  facet_wrap(~diet_treatment) +
+  
+  # Add informative labels and a clean theme.
+  labs(
+    title = "Antibiotics treated mice",
+    x = "Day",
+    y = "Mouse Weight (g)"
+  ) +
+  theme_bw()
+```
+
+
 ```{r}
 # Use ggpredict() to get the predicted values from your model.
 # This calculates the predicted mouse weight across a range of CFU values
 # for each diet treatment, averaging over the effect of 'day'.
-predicted_effects <- ggpredict(weight_model, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
+predicted_effects <- ggpredict(weight_model2, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
 
 # Now, plot these predictions
 ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
@@ -1694,8 +1796,8 @@ ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, linetype = "dashed") +
   # Add the original raw data points in the background for context
   geom_point(
-    data = weight_data,
-    aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment),
+    data = weight_data2,
+    aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment,shape =  day),
     alpha = 0.5,
     inherit.aes = FALSE # Tells the points not to inherit the main aes
   ) +
