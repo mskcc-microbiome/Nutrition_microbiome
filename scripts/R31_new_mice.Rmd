@@ -17,6 +17,8 @@ library(scales)
 library(lme4)
 library(lmerTest)
 library(ggeffects)
+library(gt)
+library(gtsummary)
 ```
 ```{r}
 library(vdbR)
@@ -1696,8 +1698,7 @@ weight_model3 <- lmer(
 # Step 3: Interpret the results.
 summary(weight_model3)
 
-# how many mouse
-#weight_data3 %>% count(experiment_no, mouse_identifier) %>% count(experiment_no)
+#
 ```
 
 ```{r}
@@ -1725,7 +1726,7 @@ summary(weight_model3)
 #   )
 ```
 
-### the weight trajectories of mice 
+### trajectories of mice 
 
 ```{r}
 # weight_data3 only has all mice that had all three data points. 
@@ -1738,7 +1739,7 @@ color_palette <- c(
 )
 
 # a plot where the mouse weight are on the y, the day are on the x , and each mouse trajectory of weight on thin lines across the days, plot a point for each day's median, and a interval brackets and line that covers fr the 25% and 75% percentile , do this as the two facets , regular water and sucrose water. 
-ggplot(weight_data3, aes(x = day, y = mice_weights)) +
+timeline <- ggplot(weight_data3, aes(x = day, y = mice_weights)) +
   
   # 1. Plot individual mouse trajectories as thin, semi-transparent lines.
   # The 'group' aesthetic is essential to tell ggplot to draw a separate line for each mouse.
@@ -1774,40 +1775,88 @@ ggplot(weight_data3, aes(x = day, y = mice_weights)) +
   
   # Add informative labels and a clean theme.
   labs(
-    title = "Antibiotics treated mice",
+    caption = "Antibiotics treated mice",
     x = "Day",
     y = "Mouse Weight (g)"
   ) +
-  theme_bw()
+  theme_bw()+ theme(legend.position = 'top', 
+        plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"))
 ```
 
+### scatter prediction
 
 ```{r}
 # Use ggpredict() to get the predicted values from your model.
 # This calculates the predicted mouse weight across a range of CFU values
 # for each diet treatment, averaging over the effect of 'day'.
-predicted_effects <- ggpredict(weight_model2, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
+predicted_effects <- ggpredict(weight_model3, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
 
 # Now, plot these predictions
-ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
+scatter <- ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
   # Plot the predicted trend line
   geom_line(linewidth = 1) +
   # Add the confidence interval ribbon from the model
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, linetype = "dashed") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, color = NA) +
   # Add the original raw data points in the background for context
   geom_point(
-    data = weight_data2,
-    aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment,shape =  day),
+    data = weight_data3,
+    aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment),
     alpha = 0.5,
     inherit.aes = FALSE # Tells the points not to inherit the main aes
   ) +
+  scale_color_manual(values = color_palette) +
+  scale_fill_manual(values = color_palette) +
   labs(
-    title = "Model-Predicted Effect of Bacterial Load on Mouse Weight by Diet",
-    x = "Log10 CFU per Gram Stool",
+    #title = "Model-Predicted Effect of Bacterial Load on Mouse Weight by Diet",
+    x = "Log10( CFU per Gram Stool)",
     y = "Predicted Mouse Weight (g)",
     color = "Diet Treatment",
     fill = "Diet Treatment"
   ) + 
-  theme_bw()
+  theme_bw() +
+  theme(legend.position = 'bottom', plot.title = element_blank(),
+        plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"))
+scatter
+```
+
+## assemble 
+
+### mice tally
+
+```{r}
+# add a table to show how many mice included
+weight_data3 %>% filter(day  == '1') %>% count(experiment_no, diet_treatment) %>% 
+  spread('diet_treatment','n') %>% 
+  mutate(experiment_no = seq(1, nrow(.)),
+        experiment_no= str_glue('Experiment_{experiment_no}') ) %>% 
+  gt()  %>% 
+  gt::gtsave(filename = "../data/R31_mice_tally.png")
+```
+
+
+```{r}
+tally <- ggdraw() + draw_image("../data/R31_mice_tally.png", scale =5.5)
+
+weight_plot <-  plot_grid(tally,
+                          timeline,
+                          scatter,
+                 label_size = 12, nrow  = 3,
+                 rel_heights = c(.5,.8,1),labels = "auto", 
+                align = 'vh', axis = 'lrtb')
+
+title <- ggdraw() + 
+  draw_label("Supplemental Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, weight_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.07, 1)
+) +theme(plot.margin = unit(c(1,8,1,2), "cm"))
+
+ggsave('../data/R31_mice_weight_reduction.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
 ```
 
