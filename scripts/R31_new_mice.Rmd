@@ -19,6 +19,8 @@ library(lmerTest)
 library(ggeffects)
 library(gt)
 library(gtsummary)
+library(ggpubr)
+library(broom)
 ```
 ```{r}
 library(vdbR)
@@ -792,6 +794,21 @@ treatment_rects <- groups %>%
     xmax = treatment_end+0.1  
   )
 
+# --- Create data for the initial water treatment in delayed groups ---
+# This new data frame defines the gray bands that appear before the sucrose.
+water_rects <- groups %>%
+  # Filter for only the groups that have a delayed start
+  filter(treatment_start > 1) %>%
+  mutate(
+    ymin = as.numeric(group_name),
+    ymax = as.numeric(group_name) + 0.3,
+    # The water period starts at Day 1 and ends when sucrose starts
+    xmin = 1 + 0.05,
+    xmax = treatment_start + 0.05,
+    # Explicitly set the treatment type for this period to "Regular_water"
+    treatment_type = "Regular_water"
+  )
+
 # Data for the stool collection points (triangles)
 stool_collection <- groups %>%
   select(group_name) %>%
@@ -808,6 +825,12 @@ injections <- groups %>%
 
 # --- Create the plot ---
 design <- ggplot() +
+  # ---  Add the gray rectangles for the initial water period ---
+  geom_rect(
+    data = water_rects,
+    aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = treatment_type),
+    alpha = 0.3
+  ) +
   # Add shaded rectangles for sucrose/water treatment periods
   geom_rect(
     data = treatment_rects,
@@ -873,7 +896,7 @@ design <- ggplot() +
     plot.subtitle = element_text(hjust = 0.5, size = 11),
     axis.text = element_text(size = 10),
     axis.title = element_text(size = 11),
-    legend.position = "none"
+    legend.position = "top"
   )
 ggsave('../data/R31_delay_design.pdf')
 ```
@@ -956,14 +979,15 @@ longitudinal_plot <- ggplot(prepared_data, aes(x = factor(day), y = cf_us_per_gr
   # Connect the data points for each individual mouse with a thin gray line
   geom_line(aes(group = mouse_identifier), color = "gray70", alpha = 0.4) +
   # Add the individual data points
-  geom_point(size = 1.9) +
+  geom_point(size = 1.3, aes(shape = experiment_no)) +
+  scale_shape_manual(values = c("Experiment_1" = 16, "Experiment_2" = 15)) +
   # Calculate and connect the median for each time point with a thick dashed line
   stat_summary(
     fun = median,
     geom = "line",
     aes(group = 1), # Connects medians across days within each facet
     #linetype = "dashed",
-    linewidth = 1.8
+    linewidth = 1
   ) +
      # Apply the custom color palette
   scale_color_manual(values = color_palette) +
@@ -1069,7 +1093,6 @@ auc_data_viz <- auc_data %>%
     "PBS_Sucrose" = "PBS + Sucrose"
   ))
 
-
 # Set the treatment column as a factor with the specified order
 auc_data_viz$treatment <- factor(auc_data_viz$treatment, levels = treatment_order)
 
@@ -1086,7 +1109,8 @@ auc_plot <- ggplot(auc_data_viz, aes(x = treatment, y = auc, color = treatment))
   # Boxplot now uses color for the outline and has no fill
   geom_boxplot(outlier.shape = NA, fill = NA, linewidth = 1) +
   # Overlay individual data points
-  geom_jitter(width = 0.2, size = 2.5) +
+  geom_jitter(width = 0.2, size = 1.5, aes(shape = experiment_no)) +
+  scale_shape_manual(values = c("Experiment_1" = 16, "Experiment_2" = 15)) +
   # Apply the custom color palette
   scale_color_manual(values = color_palette) +
   # Add statistical comparisons
@@ -1119,7 +1143,122 @@ auc_plot <- ggplot(auc_data_viz, aes(x = treatment, y = auc, color = treatment))
 print(auc_plot)
 ```
 
-## day 6 and day 1 difference
+### COR: AUC VS days of sugar exposure
+
+```{r}
+auc_data_with_exposure_sucrose <- auc_data %>%
+  filter(str_detect(treatment, "Biapenem_Sucrose")) %>% 
+  mutate(
+    sugar_exposure_days = case_when(
+      # str_detect() checks if the text contains a specific pattern.
+      # The backslashes are needed to treat "+" as a literal character.
+      str_detect(treatment, "Biapenem_Sucrose_reg") ~ 5,
+      str_detect(treatment, "Biapenem_Sucrose_\\+1") ~ 4,
+      str_detect(treatment, "Biapenem_Sucrose_\\+2") ~ 3
+    )
+  ) %>% 
+  # Make sure experiment_no is a factor for the model
+  mutate(experiment_no = as.factor(experiment_no))
+
+# Fit the two-way ANOVA model. it is for detecting difference between any groups with out making assumption of the relationship of the groups, and it is 
+# wrong in this situation, I do know 4 days of sugar exposure is more sugar than 3 days of exposure. 
+# The formula `AUC ~ sugar_exposure_days + experiment_no` tests for the main effects
+# of both sugar_exposure_days and Experiment number.
+# anova_model <- aov(auc ~ sugar_exposure_days + experiment_no, data = auc_data_with_exposure_sucrose)
+# # Get the summary of the model, which includes the p-values for each factor.
+# anova_summary <- summary(anova_model)
+# # Print the summary to the console.
+# print(anova_summary)
+
+
+# the question:"Is there a linear relationship between the number of days of sugar exposure and the AUC?" 
+lm_model <- lm(auc ~ sugar_exposure_days + experiment_no, data = auc_data_with_exposure_sucrose)
+
+# --- 2. Extract Model Coefficients and Statistics ---
+# Use the broom::tidy() function to get a clean data frame of model results.
+model_summary <- tidy(lm_model)
+
+# Isolate the slope and p-value for our variable of interest.
+slope <- model_summary %>%
+  filter(term == "sugar_exposure_days") %>%
+  pull(estimate)
+
+p_value <- model_summary %>%
+  filter(term == "sugar_exposure_days") %>%
+  pull(p.value)
+
+# Get the intercept for the reference level (Experiment_1).
+# We use this as the primary intercept for our line.
+intercept <- model_summary %>%
+  filter(term == "(Intercept)") %>%
+  pull(estimate)
+
+# --- 3. Create the Annotation Text ---
+# Format the slope and p-value for clean plotting.
+annotation_text <- paste(
+  "Slope =", round(slope, 2),
+  "\np-value =", format.pval(p_value, digits = 2)
+)
+
+my_yellow <- c('gold','goldenrod2','goldenrod4')
+
+# plot the scatter plot of auc and sugar exposure days
+exposure_plot <- auc_data_with_exposure_sucrose %>%
+  ggplot(aes(x = sugar_exposure_days, y = auc)) +
+  # Add the individual data points
+  geom_point(size = 2, alpha = 0.7, aes(color = factor(sugar_exposure_days), shape = experiment_no)) +
+  scale_color_manual(values = my_yellow) +
+  scale_shape_manual(values = c("Experiment_1" = 16, "Experiment_2" = 15)) +
+
+    # Add the regression line using the coefficients from our specific model.
+  geom_abline(intercept = intercept, slope = slope, color = "black", linewidth = 1.2) +
+
+  # Add the annotation text to the plot.
+  annotate(
+    "text", x = 3.5, y = 15, # Adjust x and y to position the text
+    label = annotation_text,
+    hjust = 0, size = 4
+  ) +
+
+  # Add labels, title, and the important footnote.
+  labs(
+    #title = "AUC vs. Duration of Sugar Exposure",
+    subtitle = "In antibiotic-treated mice",
+    x = "Days of Sugar Exposure",
+    y = "Area Under the Curve (AUC)",
+    shape = "Experiment",
+    caption = "*Slope and p-value are derived from a linear model accounting for experiment number."
+  ) +
+  theme_classic() +
+  # Use a clean theme
+   scale_x_continuous(
+    breaks = c(3, 4, 5),
+    labels = c("3\n(Standard)", "4\n(Delay + 1)", "5\n(Delay + 2)")
+  ) +
+  theme(
+    legend.position = "right",
+     plot.caption = element_text(hjust = 0, face = "italic") ,# Style the caption
+    aspect.ratio = 1,
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) + guides(color = 'none')
+
+# Print the plot
+print(exposure_plot) 
+```
+
+
+```{r}
+# Extract the p-value for the 'Treatment' effect from the summary table.
+# The [1, 5] index gets the value from the first row, fifth column (`Pr(>F)`).
+p_value <- anova_summary[[1]]$`Pr(>F)`[1]
+
+# Format the p-value text for plotting, adding the asterisk.
+p_label <- paste0("p = ", format(p_value, digits = 2, nsmall = 2), "*")
+```
+
+
+#### day 6 and day 1 difference
 
 ```{r}
 # for the mice that we have data on day 6, calculate the difference of the log10 CFU  between day 6 and day 1
@@ -1184,10 +1323,8 @@ log_diff_plot <- ggplot(log_diff_data, aes(x = treatment, y = log10_diff)) +
     plot.subtitle = element_text(hjust = 0.5)
   )
 
-# Print the plot
-print(log_diff_plot)
 ```
-## day 3 and day 1 difference  
+#### day 3 and day 1 difference  
 
 ```{r}
 # now do the above for the day 3 - day 1
@@ -1250,26 +1387,25 @@ log_diff_plot_31 <- ggplot(log_diff_data_31, aes(x = treatment, y = log10_diff))
     plot.subtitle = element_text(hjust = 0.5)
   )
 
-# Print the plot
-print(log_diff_plot_31)
+
 ```
 
-
+ 
 ## assemble
 
 ```{r}
-top_row <- plot_grid(design, auc_plot, labels = c('A', 'B'), ncol = 2, rel_widths = c(.8,1))
+top_row <- plot_grid(design, auc_plot, labels = c('a', 'b'), ncol = 2, rel_widths = c(.8,1))
 
 # Now, combine the top_row object with the longitudinal_plot
 # The longitudinal plot will be the third element and take the full width
 top_two <- plot_grid(
   top_row,
-  longitudinal_plot,
-  labels = c('', 'C'), # Add label for the bottom plot
-  ncol = 1 # Arrange them in a single column
+  exposure_plot,
+  labels = c(NA ,'c'), # Add label for the bottom plot
+  ncol = 1 # Arrange them in a single column, 
 )
 
-bottom_row <- plot_grid(log_diff_plot_31, log_diff_plot, labels = c('D', 'E'), ncol = 2, rel_widths = c(1.4,1))
+bottom_row <- plot_grid(longitudinal_plot, labels = c('d'), ncol = 1)
 
 final_plot <-  plot_grid(top_two,
                           bottom_row,
@@ -1293,7 +1429,7 @@ ggsave('../data/R31_delayed_sugar.pdf',
       dpi = 300)  
 ```
 
-# weight difference    
+# weight data    
 
 ```{r}
 w1 <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xlsx') %>% 
@@ -1625,7 +1761,7 @@ ggplot(plot_data, aes(x = log10_cf_us_per_gram_stool, y = weight_change, color =
 # when I break this down my day I reduce power and now the confidence interval band is wide 
 ```
 
-## original weight and catogorize time  
+# Original weight and catogorize time   
 
 since weight is not having linear change vs time
 
@@ -1853,7 +1989,7 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.07, 1)
-) +theme(plot.margin = unit(c(1,8,1,2), "cm"))
+) +theme(plot.margin = unit(c(1,10,1,2), "cm"))
 
 ggsave('../data/R31_mice_weight_reduction.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
