@@ -102,10 +102,11 @@ find_covariates_using_covariates_matrix_and_dist_mat <- function(distance_mat, c
     stop("Distance mat and provided covariates don't have the same number of dimensions, fix cov mat, ensure row names are sample ids.  Can rerun with subset_to_match=T to force cov_df and distance_mat to have same samples")
   }
   minimal_cov_df <- remove_highly_correlated(cov_df)
+
   
   cov <- vegan::envfit(ord=as.data.frame(distance_mat), env=minimal_cov_df, permutation = perms)
-  effect_size <- cov$vectors$r
-  pval <- cov$vectors$pval
+  effect_size <- c(cov$vectors$r, cov$factors$r)
+  pval <- c(cov$vectors$pval, cov$factors$pval)
   
   #Note you would want to change the code to add any category specific colors here:
   return(data.frame(effect_size, pval) %>%

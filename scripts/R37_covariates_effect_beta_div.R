@@ -30,7 +30,9 @@ otu_table[is.na(otu_table)] <- 0
 dist_mat <- as.matrix(vegdist(t(otu_table), method = "bray"))
 
 
-metadata <- read.csv(paste0(proj_home, "/data/153_combined_META.csv"))
+metadata <- read.csv(paste0(proj_home, "/data/153_combined_META.csv")) %>%
+  mutate(empirical = factor(empirical, levels = c(F, T))) %>%
+  mutate(intensity = factor(intensity, levels = c("nonablative", "reduced", "ablative")))
 
 # make sure sample order is the same:
 reorder_indices <- match(rownames(dist_mat), metadata$sampleid)
@@ -39,7 +41,8 @@ metadata <- metadata[reorder_indices,] %>%
   column_to_rownames("sampleid")
 
 threshold = 0.05
-plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(dist_mat, metadata, threshold = threshold, perms = 10000)
+factor_fit <- vegan::envfit(as.data.frame(dist_mat), metadata, perms=1000)
+plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(dist_mat, metadata, threshold = threshold, perms = 100)
 
 plotting_data_frame %>%
    filter(significant) %>%
