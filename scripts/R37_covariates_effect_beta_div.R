@@ -32,6 +32,12 @@ dist_mat <- as.matrix(vegdist(t(otu_table), method = "bray"))
 
 metadata <- read.csv(paste0(proj_home, "/data/153_combined_META.csv"))
 
+# make sure sample order is the same:
+reorder_indices <- match(rownames(dist_mat), metadata$sampleid)
+metadata <- metadata[reorder_indices,] %>%
+  remove_rownames() %>%
+  column_to_rownames("sampleid")
+
 threshold = 0.05
 plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(dist_mat, metadata, threshold = threshold, perms = 10000)
 
