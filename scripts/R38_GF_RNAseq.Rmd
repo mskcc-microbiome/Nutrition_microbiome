@@ -9,7 +9,122 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-
+library(tidyverse)
+library(ggpubr)
+library(edgeR)# For cpm() function
+library(DESeq2)
+library(ggrepel)
+library(cowplot)
 ```
 
-Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file.
+Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
+
+# making the sample meta data info table
+
+```{r}
+# Read the raw counts file to get the column names.
+counts_data <- read_tsv("../data/raw_counts_matrix.tsv")
+sample_names <- colnames(counts_data)[-1] # This gets all column names except the first one ('Geneid').
+
+# Now, build the metadata table.
+meta_table <- tibble(sample_id = sample_names) %>%
+  mutate(
+    # Pull out the mouse identifier from the start of the sample name.
+    mouse_id = str_extract(sample_id, "^\\d+_\\d+"),
+
+    # Create a 'gavage_treatment' column.
+    # If the mouse ID starts with '1_' or '2_', it's E. faecalis, otherwise it's PBS.
+    gavage_treatment = case_when(
+      str_starts(mouse_id, "1_") | str_starts(mouse_id, "2_") ~ "E. faecalis",
+      TRUE ~ "PBS"
+    ),
+
+    # Create a 'diet_treatment' column.
+    # If the mouse ID starts with '1_' or '3_', the diet is sucrose water.
+    diet_treatment = case_when(
+      str_starts(mouse_id, "1_") | str_starts(mouse_id, "3_") ~ "sucrose_water",
+      TRUE ~ "regular_water"
+    ),
+
+    # Create a 'tissue' column.
+    # If the sample name contains '_LI_', it's from the large intestine.
+    tissue = if_else(str_detect(sample_id, "_LI_"), "large_intestine", "small_intestine")
+  )
+
+# Display the first few rows of the new table to check the result.
+print(meta_table)
+```
+
+## normalization to cpm and filtering
+
+```{r}
+raw_counts_matrix <- counts_data %>% column_to_rownames('Geneid') %>% as.matrix()
+cpm_matrix <- cpm(raw_counts_matrix)
+
+# ---  Calculate Genes Kept at Different Thresholds ---
+# Define the range of CPM thresholds to test.
+cpm_thresholds <- seq(0.5, 10, by = 0.5)
+
+# This function will count how many genes pass the filter for a given threshold.
+# The rule is: at least 3 samples must be >= the threshold.
+count_genes_kept <- function(threshold, cpm_data) {
+  # 'apply' goes through each row (gene) of the matrix.
+  # For each row, it checks how many sample values are >= the threshold.
+  # The result is a vector of TRUE/FALSE for each gene.
+  genes_to_keep <- apply(cpm_data, 1, function(gene_row) {
+    sum(gene_row >= threshold) >= 3
+  })
+  # Finally, sum up the TRUE values to get the total number of genes kept.
+  return(sum(genes_to_keep))
+}
+
+# Apply the function to every threshold in our sequence.
+genes_left <- map_int(cpm_thresholds, ~count_genes_kept(., cpm_matrix))
+
+# Combine the thresholds and the gene counts into a results table.
+results_df <- tibble(
+  cpm_threshold = cpm_thresholds,
+  genes_remaining = genes_left
+)
+
+# Create the plot.
+ggplot(results_df, aes(x = cpm_threshold, y = genes_remaining)) +
+  geom_line(color = "dodgerblue", size = 1) +
+  geom_point(color = "dodgerblue", size = 2) +
+  labs(
+    title = "Effect of CPM Threshold on Gene Filtering",
+    x = "CPM Threshold (gene kept if expressed in at least 3 samples)",
+    y = "Number of Genes Remaining"
+  ) +
+  theme_minimal() +
+  # Add grid lines for easier reading of values.
+  theme(panel.grid.major = element_line(color = "grey85"),
+        panel.grid.minor = element_line(color = "grey90"))
+# 2.5 is a good elbow point
+```
+
+## CPM 2.5 filtering
+
+```{r}
+# --- 3. Define Filtering Thresholds ---
+cpm_threshold <- 2.5   
+min_samples <- 3       # Minimum number of samples that must meet the CPM threshold
+
+# --- 4. Apply the Filter ---
+
+# Create a logical matrix: TRUE if CPM > threshold, FALSE otherwise
+passes_cpm_threshold_matrix <- cpm_matrix > cpm_threshold
+
+# Count how many samples pass the threshold for each gene (summing TRUEs row-wise)
+samples_passing_per_gene <- rowSums(passes_cpm_threshold_matrix)
+
+# Identify genes that meet the criteria (TRUE if gene should be kept)
+genes_to_keep_logical <- samples_passing_per_gene >= min_samples
+cat(sprintf("\nNumber of genes to keep: %d (out of %d)\n", sum(genes_to_keep_logical), nrow(raw_counts_matrix)))
+
+
+# --- 5. Create the Filtered Raw Count Matrix ---
+# Use the logical vector to subset the original raw count matrix
+filtered_raw_counts_matrix <- raw_counts_matrix[genes_to_keep_logical, ]
+```
+
