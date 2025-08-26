@@ -54,7 +54,7 @@ remove_highly_correlated <- function(df, threshold = 0.95){
 
 #Find the covariates of interest using phyloseq.  Will use all covariates in the sample_data of the phyloseq:
 # Essentially just a helper function to make the code work for a phyloseq object.
-find_covariates_using_phyloseq <- function(phyloseq_obj, perms = 10000, distance_metric = "bray", na_drop = T){
+find_covariates_using_phyloseq <- function(phyloseq_obj, perms = 10000, distance_metric = "bray", na_drop = T, threshold = 0.05){
   distance_mat <- as.matrix(vegdist(t(phyloseq_obj@otu_table), method = distance_metric))
 
   # cast as a tibble then dataframe to preserve types of columns (but lost rownames)
@@ -84,11 +84,11 @@ find_covariates_using_phyloseq <- function(phyloseq_obj, perms = 10000, distance
                                   colnames(distance_mat ) %in% rownames(cov_df)]
   }
   
-  return(find_covariates_using_covariates_matrix_and_dist_mat(distance_mat, cov_df, perms = perms))
+  return(find_covariates_using_covariates_matrix_and_dist_mat(distance_mat, cov_df, perms = perms, threshold = threshold))
 }
 
 #Find the covariates of interest using only distance matrix and provided covariate dataframe. 
-find_covariates_using_covariates_matrix_and_dist_mat <- function(distance_mat, cov_df, perms = 10000, subset_to_match = F){
+find_covariates_using_covariates_matrix_and_dist_mat <- function(distance_mat, cov_df, perms = 10000, subset_to_match = F, threshold = 0.05){
   
   if (subset_to_match){
     distance_mat <- distance_mat [rownames(distance_mat ) %in% rownames(cov_df),
@@ -120,44 +120,44 @@ find_covariates_using_covariates_matrix_and_dist_mat <- function(distance_mat, c
 # Examples of how to use:
 
 
-test_phyloseq <- readRDS("your_path_to_your_phyloseq")
-test_covariates_of_interest <- readRDS("your_path_to_your_covaraites_dataframe")
-threshold = 0.05
-# This will run on all the covariates in the sample_data frame of the phyloseq provided:
-plotting_data_frame <- find_covariates_using_phyloseq(test_phyloseq, perms = 10000)
+# test_phyloseq <- readRDS("your_path_to_your_phyloseq")
+# test_covariates_of_interest <- readRDS("your_path_to_your_covaraites_dataframe")
+# threshold = 0.05
+# # This will run on all the covariates in the sample_data frame of the phyloseq provided:
+# plotting_data_frame <- find_covariates_using_phyloseq(test_phyloseq, perms = 10000)
 
-# As an alternative this will only run on the covariates provided in your matrix.:
-#plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(
-#  as.matrix(vegdist(t(phyloseq_obj@otu_table), method = "bray")),
-#  test_covariates_of_interest, perms = 10000)
+# # As an alternative this will only run on the covariates provided in your matrix.:
+# #plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(
+# #  as.matrix(vegdist(t(phyloseq_obj@otu_table), method = "bray")),
+# #  test_covariates_of_interest, perms = 10000)
 
 
 
-plotting_data_frame %>%
-  filter(significant) %>%
-  mutate(  # Modify me to define your categories of interest! :) 
-    variable_category = case_when(
-      variable_name %in% c("BMI", "Cholesterol") ~ "Patient Health Stats",
-      variable_name %in% c("Bristol Score") ~ "Stool Specific Parameters",
-      .default = "Other"
-    )
-  ) %>%
-  ggplot(aes(y = forcats::fct_reorder(variable_name, effect_size), x = effect_size, fill = variable_category)) +
-  geom_col() + 
-  theme_classic() +
-  labs(title = "",
-       x = "Effect Size",
-       y = paste0("FDR Signficant Covariate, p < ", threshold),
-       fill = "Covariate\nCategory")+
-  theme(
-    axis.text = element_text(size = 24), # Adjust axis labels
-    axis.title = element_text(size = 24), # Adjust axis titles
-    plot.title = element_text(size = 24),  # Adjust plot title
-    strip.text.x = element_text(size = 20),
-    legend.text = element_text(size = 15),
-    legend.title  = element_text(size = 20),
-    strip.text.y = element_text(size = 20)
-  ) 
+# plotting_data_frame %>%
+#   filter(significant) %>%
+#   mutate(  # Modify me to define your categories of interest! :) 
+#     variable_category = case_when(
+#       variable_name %in% c("BMI", "Cholesterol") ~ "Patient Health Stats",
+#       variable_name %in% c("Bristol Score") ~ "Stool Specific Parameters",
+#       .default = "Other"
+#     )
+#   ) %>%
+#   ggplot(aes(y = forcats::fct_reorder(variable_name, effect_size), x = effect_size, fill = variable_category)) +
+#   geom_col() + 
+#   theme_classic() +
+#   labs(title = "",
+#        x = "Effect Size",
+#        y = paste0("FDR Signficant Covariate, p < ", threshold),
+#        fill = "Covariate\nCategory")+
+#   theme(
+#     axis.text = element_text(size = 24), # Adjust axis labels
+#     axis.title = element_text(size = 24), # Adjust axis titles
+#     plot.title = element_text(size = 24),  # Adjust plot title
+#     strip.text.x = element_text(size = 20),
+#     legend.text = element_text(size = 15),
+#     legend.title  = element_text(size = 20),
+#     strip.text.y = element_text(size = 20)
+#   ) 
 
 #-----------------------------------------------------------------------------------------------------------------
 
