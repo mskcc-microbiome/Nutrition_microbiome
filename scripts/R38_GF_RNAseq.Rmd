@@ -1,0 +1,15 @@
+---
+title: "GF mouse RNA-seq"
+output: html_document
+date: "2025-08-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+```
+
+Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file.
