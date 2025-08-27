@@ -17,6 +17,7 @@ library(ggrepel)
 library(cowplot)
 library(patchwork)
 library(ashr)
+library(apeglm)
 ```
 
 Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
@@ -118,7 +119,7 @@ ggplot(results_df, aes(x = cpm_threshold, y = genes_remaining)) +
 ## CPM 2.5 filtering
 
 ```{r}
-# --- 3. Define Filtering Thresholds ---
+# --- 3. Define Filtering Thresholds --- 
 cpm_threshold <- 2.5   
 min_samples <- 3       # Minimum number of samples that must meet the CPM threshold
 
@@ -342,7 +343,6 @@ print(paste("Found", nrow(sig_li_contrast2), "significant genes."))
 print(table(sig_li_contrast2$log2FoldChange > 0))
 ```
 
-
 ```{r}
 # ==============================================================================
 #  ANALYSIS FOR SMALL INTESTINE (SI)
@@ -354,21 +354,25 @@ dds_si <- DESeq(dds_si)
 
 # Contrast 1: E. faecalis effect
 print("--- SI Contrast 1: PBS_regular_water vs E. faecalis_regular_water ---")
-results_si_contrast1 <- results(dds_si, contrast = c("treatment", "PBS_regular_water", "E. faecalis_regular_water"), alpha = 0.05)
-shrunken_si_contrast1 <- lfcShrink(dds_si, contrast = c("treatment", "PBS_regular_water", "E. faecalis_regular_water"), res = results_si_contrast1, type = "apeglm")
+results_si_contrast1 <- results(dds_si, contrast = c("treatment",  "E. faecalis__regular_water", "PBS__regular_water"), alpha = 0.05)
+shrunken_si_contrast1 <- lfcShrink(dds_si, contrast = c("treatment", "E. faecalis__regular_water", "PBS__regular_water"), res = results_si_contrast1, type = "ashr")
 sig_si_contrast1 <- as.data.frame(shrunken_si_contrast1) %>%
   rownames_to_column("gene") %>%
-  filter(padj < 0.05 & abs(log2FoldChange) > 1.5)
+  filter(padj < 0.05 )
 print(paste("Found", nrow(sig_si_contrast1), "significant genes."))
 print(table(sig_si_contrast1$log2FoldChange > 0))
+```
+
+
+```{r}
 
 # Contrast 2: Sucrose effect
 print("--- SI Contrast 2: E. faecalis_sucrose_water vs E. faecalis_regular_water ---")
-results_si_contrast2 <- results(dds_si, contrast = c("treatment", "E. faecalis_sucrose_water", "E. faecalis_regular_water"), alpha = 0.05)
-shrunken_si_contrast2 <- lfcShrink(dds_si, contrast = c("treatment", "E. faecalis_sucrose_water", "E. faecalis_regular_water"), res = results_si_contrast2, type = "apeglm")
+results_si_contrast2 <- results(dds_si, contrast = c("treatment", "E. faecalis__sucrose_water", "E. faecalis__regular_water"), alpha = 0.05)
+shrunken_si_contrast2 <- lfcShrink(dds_si, contrast = c("treatment", "E. faecalis__sucrose_water", "E. faecalis__regular_water"), res = results_si_contrast2, type = "ashr")
 sig_si_contrast2 <- as.data.frame(shrunken_si_contrast2) %>%
   rownames_to_column("gene") %>%
-  filter(padj < 0.05 & abs(log2FoldChange) > 1.5)
+  filter(padj < 0.05 )
 print(paste("Found", nrow(sig_si_contrast2), "significant genes."))
 print(table(sig_si_contrast2$log2FoldChange > 0))
 ```
