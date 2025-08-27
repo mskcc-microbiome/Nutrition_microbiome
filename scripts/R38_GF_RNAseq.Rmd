@@ -438,17 +438,172 @@ create_volcano_plot <- function(shrunken_results, plot_title) {
 # --- 4. Generate Each of the Four Plots ---
 # Create each volcano plot by calling the function with the corresponding results.
 # Small Intestine Plots
-p_si_contrast1 <- create_volcano_plot(shrunken_si_contrast1, "SI: PBS vs E. faecalis (Regular Water)")
+p_si_contrast1 <- create_volcano_plot(shrunken_si_contrast1, "SI: E. faecalis vs PBS (Regular Water)") 
 p_si_contrast2 <- create_volcano_plot(shrunken_si_contrast2, "SI: E. faecalis (Sucrose vs Regular Water)")
 
 # Large Intestine Plots
-p_li_contrast1 <- create_volcano_plot(shrunken_li_contrast1, "LI: PBS vs E. faecalis (Regular Water)")
+p_li_contrast1 <- create_volcano_plot(shrunken_li_contrast1, "LI: E. faecalis vs PBS (Regular Water)")    
 p_li_contrast2 <- create_volcano_plot(shrunken_li_contrast2, "LI: E. faecalis (Sucrose vs Regular Water)")
 
 # --- 5. Arrange Plots into a 2x2 Grid ---
 # Use patchwork to combine the plots. The '/' operator stacks plots vertically.
 (p_si_contrast1 + p_si_contrast2) / (p_li_contrast1 + p_li_contrast2)
 ggsave('../data/R38_DEG_volcano.png', width = 15, height = 9)
+```
+## plot gene counts
+
+```{r}
+# --- Step 1: Identify the Top Two Most Downregulated Genes ---
+
+# Convert results to a dataframe for easier manipulation
+results_df_li2 <- as.data.frame(shrunken_li_contrast2) %>%
+  rownames_to_column("ensembl_version")
+
+# Find the top 2 downregulated genes (negative log2FoldChange, sorted by p-value)
+top_downregulated_genes <- results_df_li2 %>%
+  filter(log2FoldChange < 0) %>%
+  arrange(log2FoldChange) %>%
+  head(2)
+
+# Extract the Ensembl IDs (with version) of these top genes
+top_gene_ids <- top_downregulated_genes$ensembl_version
+
+# --- Step 2: Prepare Data for Plotting ---
+
+# Get the normalized counts for all genes
+normalized_counts <- counts(dds_li, normalized = TRUE)
+
+# Get the sample metadata (e.g., conditions)
+sample_info <- as.data.frame(colData(dds_li))
+
+# Filter the normalized counts to just our top genes and format for ggplot
+plot_data <- normalized_counts[top_gene_ids, ] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sample_name") %>%
+  # Join with the sample metadata to get the experimental conditions
+  left_join(sample_info %>% rownames_to_column("sample_name"), by = "sample_name") %>%
+  # Convert from wide to long format for plotting
+  pivot_longer(cols = all_of(top_gene_ids), names_to = "ensembl_version", values_to = "normalized_count")
+
+# --- Step 3: Add Gene Symbols for Clearer Labels ---
+
+# Create a clean Ensembl ID without the version number
+plot_data <- plot_data %>%
+  mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
+
+# Map the clean Ensembl IDs to gene symbols
+gene_symbols <- mapIds(org.Mm.eg.db,
+                       keys = unique(plot_data$ensembl_id),
+                       column = "SYMBOL",
+                       keytype = "ENSEMBL",
+                       multiVals = "first")
+
+# Add the gene symbols to our plotting data
+plot_data$symbol <- gene_symbols[plot_data$ensembl_id]
+
+# --- Step 4: Generate the Boxplots ---
+
+# Create a plot for each gene using facet_wrap
+ggplot(plot_data, aes(x = treatment, y = normalized_count, fill = treatment)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.8) + # Overlay individual data points
+  facet_wrap(~symbol, scales = "free_y") + # Create a separate plot for each gene
+  #scale_fill_manual(values = c("Sucrose" = "#F8766D", "Regular" = "#00BFC4")) +
+  labs(
+    title = "Abundance of Top 2 Downregulated Genes",
+    subtitle = "LI: E. faecalis (Sucrose vs Regular Water)",
+    x = "Treatment",
+    y = "Normalized Gene Count"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_y_sqrt() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45,  hjust=1),
+    strip.text = element_text(face = "bold.italic") # Style the gene names
+  )
+
+
+```
+
+## Serpina10
+
+```{r}
+get_gene_counts <- function(dds_object, gene_symbol, tissue_name) {
+  
+  # Create a mapping from clean Ensembl IDs to the versioned IDs in the DDS object
+  ensembl_map <- data.frame(
+    ensembl_version = rownames(dds_object)
+  ) %>%
+    mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
+  
+  # Find the clean Ensembl ID for our target gene symbol
+  target_ensembl_id <- mapIds(org.Mm.eg.db,
+                              keys = gene_symbol,
+                              column = "ENSEMBL",
+                              keytype = "SYMBOL",
+                              multiVals = "first")
+  
+  # Check if the gene symbol was found
+  if (is.na(target_ensembl_id)) {
+    stop(paste("Gene symbol", gene_symbol, "not found in org.Mm.eg.db."))
+  }
+  
+  # Find the full, versioned Ensembl ID corresponding to our clean ID
+  target_ensembl_version <- ensembl_map %>%
+    filter(ensembl_id == target_ensembl_id) %>%
+    pull(ensembl_version) %>%
+    unique()
+    
+  # Check if the gene was found in the DDS object
+  if (length(target_ensembl_version) == 0) {
+    stop(paste(gene_symbol, "not found in the provided DESeqDataSet object."))
+  }
+  
+  # Use plotCounts to extract normalized data for the gene
+  plot_df <- plotCounts(dds_object, 
+                        gene = target_ensembl_version[1], # Use the first match if multiple exist
+                        intgroup = "treatment", 
+                        returnData = TRUE) %>%
+    rownames_to_column("sample_name") %>%
+    mutate(tissue = tissue_name) # Add the tissue label
+    
+  return(plot_df)
+}
+
+# --- Step 1: Extract Serpina10 counts from both dds objects ---
+# This assumes 'dds_li' and 'dds_si' are your DESeqDataSet objects.
+li_counts <- get_gene_counts(dds_li, "Serpina10", "Large Intestine")
+si_counts <- get_gene_counts(dds_si, "Serpina10", "Small Intestine")
+
+# --- Step 2: Combine the data from both tissues ---
+combined_counts <- rbind(li_counts, si_counts)
+```
+
+
+```{r}
+# --- Step 3: Generate the boxplots ---
+ggplot(combined_counts, aes(x = treatment, y = count, fill = treatment)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.8, height = 0) + # Overlay individual data points
+  facet_wrap(~tissue, scales = "free_y") + # Create separate plots for LI and SI
+  
+  # Use the same colors as the previous plot for consistency
+  #scale_fill_manual(values = c("Sucrose" = "#F8766D", "Regular" = "#00BFC4", "PBS" = "grey")) +
+  
+  labs(
+    title = "Normalized Abundance of Serpina10",
+    x = "Treatment",
+    y = "Normalized Gene Count"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 12), # Style the facet titles
+    axis.text.x = element_text(angle = 45,  hjust=1),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  ) 
 ```
 
 
