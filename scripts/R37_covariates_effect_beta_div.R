@@ -66,8 +66,9 @@ plotting_data_frame %>%
   ) %>%
    mutate(  # Modify me to define your categories of interest! :) 
      variable_category = case_when(
-       grepl("fg", variable_name) ~ "Dietary Data",
-       variable_name %in% c("Dietary Pattern", "Enteral Nutrition", "Total Parenteral Nutrition") ~ "Dietary Data",
+       grepl("fg", variable_name) ~ "Sample Level Dietary Data",
+       variable_name %in% c("Enteral Nutrition", "Total Parenteral Nutrition") ~ "Sample Level Dietary Data",
+       variable_name == "Dietary Pattern" ~ "Patient Level Dietary Data",
        variable_name %in% c("ABX exposure (last 2 days)", "Week Relative to Transplant") ~ "Sample Level Data",
        variable_name %in% c("Graft Source", "Conditioning Intensity", "Disease (Broad Category)", "Sex", "Age") ~ "Patient Clinical Cov",
        .default = "Other"
