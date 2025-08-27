@@ -11,10 +11,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(ggpubr)
-library(edgeR)# For cpm() function
+library(edgeR)
 library(DESeq2)
 library(ggrepel)
 library(cowplot)
+library(patchwork)
+library(ashr)
 ```
 
 Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
@@ -23,7 +25,9 @@ Basic gene annotation is the main annotation file for most users. To ensure that
 
 ```{r}
 # Read the raw counts file to get the column names.
-counts_data <- read_tsv("../data/raw_counts_matrix.tsv")
+counts_data <- read_tsv("../data/raw_counts_matrix.tsv") %>%
+  rename_with(.fn = ~ str_remove(.,"_IGO_\\d+.+$"), .cols = 2:dplyr::last_col())
+
 sample_names <- colnames(counts_data)[-1] # This gets all column names except the first one ('Geneid').
 
 # Now, build the metadata table.
@@ -48,11 +52,19 @@ meta_table <- tibble(sample_id = sample_names) %>%
 
     # Create a 'tissue' column.
     # If the sample name contains '_LI_', it's from the large intestine.
-    tissue = if_else(str_detect(sample_id, "_LI_"), "large_intestine", "small_intestine")
+    tissue = if_else(str_detect(sample_id, "_LI"), "large_intestine", "small_intestine")
+  ) %>% 
+  mutate(
+    # Use 'across()' to apply the as.factor function to all these columns at once
+    across(c(mouse_id, diet_treatment), as.factor),
+    gavage_treatment = factor(gavage_treatment, levels = c('PBS','E. faecalis')),
+    treatment = str_glue('{gavage_treatment}__{diet_treatment}'),   
+    treatment = factor(treatment, levels = c('E. faecalis__regular_water','E. faecalis__sucrose_water','PBS__regular_water','PBS__sucrose_water')),
   )
 
 # Display the first few rows of the new table to check the result.
 print(meta_table)
+levels(meta_table$treatment)
 ```
 
 ## normalization to cpm and filtering
@@ -126,5 +138,238 @@ cat(sprintf("\nNumber of genes to keep: %d (out of %d)\n", sum(genes_to_keep_log
 # --- 5. Create the Filtered Raw Count Matrix ---
 # Use the logical vector to subset the original raw count matrix
 filtered_raw_counts_matrix <- raw_counts_matrix[genes_to_keep_logical, ]
+```
+
+## PCA to visualize the expression profiles between differnt treatment conditions
+
+```{r}
+# --- 1. Data Transformation ---
+# Raw counts are not ideal for PCA. We need to transform them to stabilize variance.
+# Variance Stabilizing Transformation (VST) or regularized log (rlog) from DESeq2 are good choices.
+
+# Create a DESeqDataSet object.
+# For VST/rlog, the design formula can be simple if you're just transforming for PCA,
+# e.g., ~1, or you can use your main experimental design like ~condition.
+# Using the main design can sometimes help stabilize variance better with respect to known factors.
+colData <- meta_table %>% column_to_rownames('sample_id')
+```
+
+
+```{r}
+dds <- DESeqDataSetFromMatrix(
+  countData = round(filtered_raw_counts_matrix), # DESeq2 expects integer counts
+  colData = colData,
+  design = ~ tissue + treatment # This model will still account for the large differences between tissues while looking for the effects of diet and gavage. You lose the ability to explicitly model the paired nature of the samples, but it's the necessary trade-off to make the model work with this experimental design.
+)
+
+# Apply Variance Stabilizing Transformation  
+# For very small datasets (e.g. < 10-12 samples per group), rlog might be preferred by some.
+rld <- rlog(dds, blind = TRUE) # blind=TRUE: transform agnostic to the design (good for QC/PCA)
+transformed_counts <- assay(rld)
+
+# --- 2. Select Most Variable Genes (Optional, but often recommended for PCA) ---
+# PCA works best when performed on genes that show the most variation across samples.
+num_top_genes <- 500 # You can adjust this number
+
+# Calculate row variances
+rv <- rowVars(transformed_counts)
+
+# Select the N most variable genes
+select <- order(rv, decreasing = TRUE)[seq_len(min(num_top_genes, length(rv)))]
+top_variable_transformed_counts <- transformed_counts[select, ]
+
+cat(sprintf("\nPerforming PCA on the top %d most variable genes.\n", num_top_genes))
+cat("Dimensions of matrix for PCA (genes x samples):\n")
+print(dim(top_variable_transformed_counts))
+
+# --- 3. Perform PCA ---
+# prcomp expects samples as rows and variables (genes) as columns.
+# So, we need to transpose our matrix.
+pca_input <- t(top_variable_transformed_counts)
+pca_results <- prcomp(pca_input, scale. = FALSE, center = TRUE) # VST/rlog are already roughly on the same scale
+
+# Summary of PCA
+# print(summary(pca_results))
+
+# Extract PCA scores for plotting
+pca_data <- as.data.frame(pca_results$x)
+pca_data$sample <- rownames(pca_data) # Add sample names
+
+# Merge with sample conditions for coloring points
+pca_data <- merge(pca_data, meta_table, by.x = "sample", by.y = "sample_id")
+
+# Calculate percentage of variance explained by each PC
+percent_variance <- round(100 * pca_results$sdev^2 / sum(pca_results$sdev^2), 1)
+
+cat("\nFirst few rows of data prepared for PCA plotting:\n")
+print(head(pca_data))
+
+# --- 4. Plot PCA Results using ggplot2 ---
+pca_plot <- ggplot(pca_data, aes(x = PC1, y = PC2, color = treatment, shape = tissue)) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1: ", percent_variance[1], "% variance")) +
+  ylab(paste0("PC2: ", percent_variance[2], "% variance")) +
+  ggtitle("PCA of Samples") +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "right") +
+  coord_fixed() # Ensures PC1 and PC2 are on the same scale visually
+
+# Optional: Add sample labels (can be crowded)
+#pca_plot <- pca_plot + geom_text_repel(aes(label = sample), size = 2)
+
+print(pca_plot)
+ggsave('../data/R38_pca_gf.png', width = 10)
+# given the massive tissue effect shown in the PCA, splitting the data by tissue and analyzing them separately is the best path forward.
+```
+
+# split by tissue PCA   
+
+```{r}
+# --- 2. Split Data by Tissue ---
+# Create metadata for the Small Intestine (SI)
+meta_si <- meta_table %>% filter(tissue == "small_intestine")
+# Create metadata for the Large Intestine (LI)
+meta_li <- meta_table %>% filter(tissue == "large_intestine")
+
+# Subset the counts matrix for each tissue based on the sample IDs in the new metadata
+counts_si <- filtered_raw_counts_matrix[,meta_si$sample_id]
+counts_li <- filtered_raw_counts_matrix[,meta_li$sample_id]
+
+# --- 3. PCA for Small Intestine ---
+# Create the DESeq2 object for the SI
+dds_si <- DESeqDataSetFromMatrix(
+  countData = counts_si,
+  colData = meta_si,
+  design = ~ treatment
+)
+
+# Apply the variance stabilizing transformation, which is great for visualizations like PCA
+vst_si <- vst(dds_si, blind = TRUE)
+
+# Generate the PCA plot for the SI using ggplot2
+pca_plot_si <- plotPCA(vst_si, intgroup = "treatment") +
+  ggtitle("PCA of Small Intestine Samples") +
+  theme_minimal() +
+  # Make the points a bit larger for clarity
+  geom_point(size = 4) +
+  coord_fixed()
+
+# --- 4. PCA for Large Intestine ---
+# Now, do the exact same process for the LI
+dds_li <- DESeqDataSetFromMatrix(
+  countData = counts_li,
+  colData = meta_li,
+  design = ~ treatment
+)
+vst_li <- vst(dds_li, blind = TRUE)
+
+pca_plot_li <- plotPCA(vst_li, intgroup = "treatment") +
+  ggtitle("PCA of Large Intestine Samples") +
+  theme_minimal() +
+  geom_point(size = 4) +
+  coord_fixed()+
+  theme(legend.position = "right")
+
+# --- 5. Combine and Display the Plots ---
+# Use the 'patchwork' library to combine the two plots into one figure
+combined_pca_plot <- pca_plot_si + pca_plot_li+
+  plot_layout(guides = 'collect')
+
+# Display the final figure
+print(combined_pca_plot)
+ggsave('../data/R38_pca_gf_split.png', width = 10)
+```
+
+# Differential gene expression analysis
+
+```{r}
+# ==============================================================================
+#  ANALYSIS FOR LARGE INTESTINE (LI)
+# ==============================================================================
+print("--- Starting DGE Analysis for Large Intestine ---")
+
+# --- 2. Run the main DESeq2 function ---
+# This step performs differential expression analysis on all groups.
+dds_li <- DESeq(dds_li)
+
+# --- 3. Extract and filter Contrast 1: E. faecalis effect ---
+# We are comparing PBS vs. E. faecalis in mice given regular water.
+
+#Think of the contrast argument in DESeq2 like this:
+# c("variable", "numerator", "denominator")
+# The function calculates the log2 fold change as log2(numerator / denominator).
+
+print("--- LI Contrast 1: PBS_regular_water vs E. faecalis_regular_water ---")
+results_li_contrast1 <- results(dds_li,
+                                contrast = c("treatment",  "E. faecalis__regular_water", "PBS__regular_water"),
+                                alpha = 0.05) # Set our significance cutoff
+
+# Apply LFC shrinkage to get more accurate fold change estimates.
+shrunken_li_contrast1 <- lfcShrink(dds_li,
+                                   contrast = c("treatment",  "E. faecalis__regular_water", "PBS__regular_water"),
+                                   res = results_li_contrast1,
+                                   type = "ashr")
+
+# Filter the shrunken results for significance.
+sig_li_contrast1 <- as.data.frame(shrunken_li_contrast1) %>%
+  rownames_to_column("gene") %>%
+  filter(padj < 0.05)
+
+# Summarize the findings
+print(paste("Found", nrow(sig_li_contrast1), "significant genes."))
+print(table(sig_li_contrast1$log2FoldChange > 0))
+# and the log2fc is really small...basically there isn't much change
+```
+
+```{r}
+# --- 4. Extract and filter Contrast 2: Sucrose effect ---
+# We are comparing sucrose vs. regular water in mice given E. faecalis.
+print("--- LI Contrast 2: E. faecalis_sucrose_water vs E. faecalis_regular_water ---")
+results_li_contrast2 <- results(dds_li,
+                                contrast = c("treatment", "E. faecalis__sucrose_water", "E. faecalis__regular_water"),
+                                alpha = 0.05)
+
+shrunken_li_contrast2 <- lfcShrink(dds_li,
+                                   contrast = c("treatment", "E. faecalis__sucrose_water", "E. faecalis__regular_water"),
+                                   res = results_li_contrast2,
+                                   type = "ashr")
+
+sig_li_contrast2 <- as.data.frame(shrunken_li_contrast2) %>%
+  rownames_to_column("gene") %>%
+  filter(padj < 0.05)
+
+print(paste("Found", nrow(sig_li_contrast2), "significant genes."))
+print(table(sig_li_contrast2$log2FoldChange > 0))
+```
+
+
+```{r}
+# ==============================================================================
+#  ANALYSIS FOR SMALL INTESTINE (SI)
+# ==============================================================================
+print("--- Starting DGE Analysis for Small Intestine ---")
+
+# --- 5. Repeat the entire process for the SI dataset ---
+dds_si <- DESeq(dds_si)
+
+# Contrast 1: E. faecalis effect
+print("--- SI Contrast 1: PBS_regular_water vs E. faecalis_regular_water ---")
+results_si_contrast1 <- results(dds_si, contrast = c("treatment", "PBS_regular_water", "E. faecalis_regular_water"), alpha = 0.05)
+shrunken_si_contrast1 <- lfcShrink(dds_si, contrast = c("treatment", "PBS_regular_water", "E. faecalis_regular_water"), res = results_si_contrast1, type = "apeglm")
+sig_si_contrast1 <- as.data.frame(shrunken_si_contrast1) %>%
+  rownames_to_column("gene") %>%
+  filter(padj < 0.05 & abs(log2FoldChange) > 1.5)
+print(paste("Found", nrow(sig_si_contrast1), "significant genes."))
+print(table(sig_si_contrast1$log2FoldChange > 0))
+
+# Contrast 2: Sucrose effect
+print("--- SI Contrast 2: E. faecalis_sucrose_water vs E. faecalis_regular_water ---")
+results_si_contrast2 <- results(dds_si, contrast = c("treatment", "E. faecalis_sucrose_water", "E. faecalis_regular_water"), alpha = 0.05)
+shrunken_si_contrast2 <- lfcShrink(dds_si, contrast = c("treatment", "E. faecalis_sucrose_water", "E. faecalis_regular_water"), res = results_si_contrast2, type = "apeglm")
+sig_si_contrast2 <- as.data.frame(shrunken_si_contrast2) %>%
+  rownames_to_column("gene") %>%
+  filter(padj < 0.05 & abs(log2FoldChange) > 1.5)
+print(paste("Found", nrow(sig_si_contrast2), "significant genes."))
+print(table(sig_si_contrast2$log2FoldChange > 0))
 ```
 
