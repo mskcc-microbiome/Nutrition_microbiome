@@ -17,7 +17,8 @@ library(ggrepel)
 library(cowplot)
 library(patchwork)
 library(ashr)
-library(apeglm)
+library(fgsea)       # For GSEA
+library(msigdbr)     # To get MSigDB gene sets
 ```
 
 Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
@@ -283,6 +284,8 @@ ggsave('../data/R38_pca_gf_split.png', width = 10)
 
 # Differential gene expression analysis
 
+## LI
+
 ```{r}
 # ==============================================================================
 #  ANALYSIS FOR LARGE INTESTINE (LI)
@@ -314,7 +317,7 @@ shrunken_li_contrast1 <- lfcShrink(dds_li,
 # Filter the shrunken results for significance.
 sig_li_contrast1 <- as.data.frame(shrunken_li_contrast1) %>%
   rownames_to_column("gene") %>%
-  filter(padj < 0.05)
+  filter(padj < 0.05 & abs(log2FoldChange) > 1)
 
 # Summarize the findings
 print(paste("Found", nrow(sig_li_contrast1), "significant genes."))
@@ -337,11 +340,13 @@ shrunken_li_contrast2 <- lfcShrink(dds_li,
 
 sig_li_contrast2 <- as.data.frame(shrunken_li_contrast2) %>%
   rownames_to_column("gene") %>%
-  filter(padj < 0.05)
+  filter(padj < 0.05 & abs(log2FoldChange) > 1)
 
 print(paste("Found", nrow(sig_li_contrast2), "significant genes."))
 print(table(sig_li_contrast2$log2FoldChange > 0))
 ```
+
+## SI
 
 ```{r}
 # ==============================================================================
@@ -358,22 +363,92 @@ results_si_contrast1 <- results(dds_si, contrast = c("treatment",  "E. faecalis_
 shrunken_si_contrast1 <- lfcShrink(dds_si, contrast = c("treatment", "E. faecalis__regular_water", "PBS__regular_water"), res = results_si_contrast1, type = "ashr")
 sig_si_contrast1 <- as.data.frame(shrunken_si_contrast1) %>%
   rownames_to_column("gene") %>%
-  filter(padj < 0.05 )
+  filter(padj < 0.05 & abs(log2FoldChange) > 1)
 print(paste("Found", nrow(sig_si_contrast1), "significant genes."))
 print(table(sig_si_contrast1$log2FoldChange > 0))
 ```
 
-
 ```{r}
-
 # Contrast 2: Sucrose effect
 print("--- SI Contrast 2: E. faecalis_sucrose_water vs E. faecalis_regular_water ---")
 results_si_contrast2 <- results(dds_si, contrast = c("treatment", "E. faecalis__sucrose_water", "E. faecalis__regular_water"), alpha = 0.05)
 shrunken_si_contrast2 <- lfcShrink(dds_si, contrast = c("treatment", "E. faecalis__sucrose_water", "E. faecalis__regular_water"), res = results_si_contrast2, type = "ashr")
 sig_si_contrast2 <- as.data.frame(shrunken_si_contrast2) %>%
   rownames_to_column("gene") %>%
-  filter(padj < 0.05 )
+  filter(padj < 0.05 & abs(log2FoldChange) > 1 )
 print(paste("Found", nrow(sig_si_contrast2), "significant genes."))
 print(table(sig_si_contrast2$log2FoldChange > 0))
 ```
+
+
+## volcano plots
+
+```{r}
+# --- 2. Set up Gene Symbol Annotation ---
+# We need an annotation database to map Ensembl IDs to gene symbols in a mouse experiment. 
+library(org.Mm.eg.db)
+library(AnnotationDbi)
+
+# --- 3. Create a Reusable Plotting Function ---
+# Since we are making four similar plots, a function is the cleanest approach.
+create_volcano_plot <- function(shrunken_results, plot_title) {
+
+  # Convert the results to a data frame and remove Ensembl versions for mapping
+  results_df <- as.data.frame(shrunken_results) %>%
+    rownames_to_column("ensembl_version") %>%
+    mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
+
+  # Map Ensembl IDs to gene symbols. 'mapIds' will return NA for any ID it can't find.
+  results_df$symbol <- mapIds(org.Mm.eg.db,
+                              keys = results_df$ensembl_id,
+                              column = "SYMBOL",
+                              keytype = "ENSEMBL",
+                              multiVals = "first")
+
+  # Create a column to identify significant genes for coloring and labeling
+  results_df <- results_df %>%
+    mutate(significant = ifelse(padj < 0.05 & abs(log2FoldChange) > 1, "Yes", "No"))
+
+  # Generate the plot
+  ggplot(results_df, aes(x = log2FoldChange, y = -log10(padj))) +
+    # Add points, colored by significance
+    geom_point(aes(color = significant), alpha = 0.6) +
+    scale_color_manual(values = c("No" = "grey", "Yes" = "red"), name = "") +
+    
+    # Add the dashed line for the FDR 0.05 cutoff
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+    
+    # Add vertical dashed lines for the log2FoldChange threshold
+    geom_vline(xintercept = -1, linetype = "dashed", color = "black") +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "black") +
+    
+    # Add gene symbols for significant genes using ggrepel
+    geom_text_repel(aes(label = symbol),
+                    data = subset(results_df, padj < 0.05 & abs(log2FoldChange) > 1),
+                    max.overlaps = 15, # Increase to allow more labels
+                    box.padding = 0.5) +
+    
+    labs(title = plot_title,
+         x = "Log2 Fold Change",
+         y = "-log10(Adjusted P-value)") +
+    theme_minimal() +
+    theme(legend.position = "none") # Hide the individual legends
+}
+
+# --- 4. Generate Each of the Four Plots ---
+# Create each volcano plot by calling the function with the corresponding results.
+# Small Intestine Plots
+p_si_contrast1 <- create_volcano_plot(shrunken_si_contrast1, "SI: PBS vs E. faecalis (Regular Water)")
+p_si_contrast2 <- create_volcano_plot(shrunken_si_contrast2, "SI: E. faecalis (Sucrose vs Regular Water)")
+
+# Large Intestine Plots
+p_li_contrast1 <- create_volcano_plot(shrunken_li_contrast1, "LI: PBS vs E. faecalis (Regular Water)")
+p_li_contrast2 <- create_volcano_plot(shrunken_li_contrast2, "LI: E. faecalis (Sucrose vs Regular Water)")
+
+# --- 5. Arrange Plots into a 2x2 Grid ---
+# Use patchwork to combine the plots. The '/' operator stacks plots vertically.
+(p_si_contrast1 + p_si_contrast2) / (p_li_contrast1 + p_li_contrast2)
+ggsave('../data/R38_DEG_volcano.png', width = 15, height = 9)
+```
+
 
