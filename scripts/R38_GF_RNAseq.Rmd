@@ -117,7 +117,7 @@ ggplot(results_df, aes(x = cpm_threshold, y = genes_remaining)) +
 # 2.5 is a good elbow point
 ```
 
-## CPM 2.5 filtering
+## filtering with CPM 2.5 
 
 ```{r}
 # --- 3. Define Filtering Thresholds --- 
@@ -452,6 +452,8 @@ ggsave('../data/R38_DEG_volcano.png', width = 15, height = 9)
 ```
 ## plot gene counts
 
+### Defa2 and Defa22
+
 ```{r}
 # --- Step 1: Identify the Top Two Most Downregulated Genes ---
 
@@ -527,7 +529,7 @@ ggplot(plot_data, aes(x = treatment, y = normalized_count, fill = treatment)) +
 
 ```
 
-## Serpina10
+### Serpina10
 
 ```{r}
 get_gene_counts <- function(dds_object, gene_symbol, tissue_name) {
@@ -606,4 +608,221 @@ ggplot(combined_counts, aes(x = treatment, y = count, fill = treatment)) +
   ) 
 ```
 
+# GSEA
+
+```{r}
+# --- Step 1: Prepare the Ranked Gene List ---
+# GSEA requires a list of all detected genes, ranked by a metric.
+# The 'stat' column from DESeq2 is perfect for this, as it considers
+# both fold change and variance.
+
+# This function takes a DESeq2 results object and prepares the ranked list.
+prepare_ranked_list <- function(deseq_results) {
+  
+  # Convert to a dataframe and get gene symbols
+  results_df <- as.data.frame(deseq_results) %>%
+    rownames_to_column("ensembl_version") %>%
+   # Ensure pvalue and log2FoldChange are not NA
+    filter(!is.na(pvalue) & !is.na(log2FoldChange)) %>%
+    
+    # ***  Create a custom ranking metric since 'stat' is not available ***
+    # This metric combines the direction (sign of LFC) and significance (-log10 of p-value)
+    mutate(rank_metric = sign(log2FoldChange) * -log10(pvalue)) %>%
+    mutate(ensembl_id = str_remove(ensembl_version, "\\..*")) %>%
+    # Add gene symbols
+    mutate(symbol = mapIds(org.Mm.eg.db,
+                           keys = ensembl_id,
+                           column = "SYMBOL",
+                           keytype = "ENSEMBL",
+                           multiVals = "first")) %>%
+    # Remove genes that didn't map to a symbol
+    filter(!is.na(symbol))
+
+  # Handle cases where one gene symbol maps to multiple Ensembl IDs.
+  # We'll keep the one with the largest absolute rank_metric value.
+  results_df <- results_df %>%
+    group_by(symbol) %>%
+    filter(abs(rank_metric) == max(abs(rank_metric))) %>%
+    ungroup()
+
+  # Create the final ranked list: a named vector
+  ranked_list <- results_df$rank_metric
+  names(ranked_list) <- results_df$symbol
+  
+  # Sort the list in descending order
+  ranked_list <- sort(ranked_list, decreasing = TRUE)
+  
+  # Remove any NA values from the ranking metric
+  ranked_list <- ranked_list[!is.na(ranked_list)]
+  
+  return(ranked_list)
+}
+```
+
+## LI
+
+```{r}
+# Replace 'shrunken_li_contrast2' with the results you want to analyze.
+ranked_genes_li2 <- prepare_ranked_list(shrunken_li_contrast2)
+head(ranked_genes_li2)
+```
+
+```{r}
+# --- Step 2: Get Gene Sets ---
+# We'll use the msigdbr package to fetch gene sets. The Gene Ontology (GO)
+# "Biological Process" (BP) collection is a great place to start.
+
+# Fetch all GO:BP gene sets for mouse ("Mus musculus")
+go_bp_sets <- msigdbr(species = "Mus musculus", category = "C5", subcategory = "GO:BP")
+
+# fgsea requires the gene sets in a specific list format.
+# We'll convert the dataframe from msigdbr into that format.
+go_pathways <- go_bp_sets %>%
+  split(x = .$gene_symbol, f = .$gs_name)
+
+# Fetch the 50 Hallmark gene sets for mouse
+hallmark_sets <- msigdbr(species = "Mus musculus", category = "H")
+hallmark_pathways <- hallmark_sets %>%
+  split(x = .$gene_symbol, f = .$gs_name)
+
+# Combine both lists of pathways for a comprehensive analysis
+combined_pathways <- c(go_pathways, hallmark_pathways)
+```
+
+
+```{r}
+# --- Step 3: Run fgsea ---
+# Now we run the analysis with our ranked genes and the GO pathways.
+
+set.seed(42) # for reproducibility
+fgsea_results <- fgsea(
+  pathways = hallmark_pathways,
+  stats = ranked_genes_li2,
+  minSize = 15,   # Minimum size of a gene set to be tested
+  maxSize = 500,  # Maximum size of a gene set to be tested
+  nPermSimple = 10000 # Number of permutations
+)
+
+
+# --- Step 4: Explore and Visualize the Results ---
+
+# View the top enriched pathways
+top_pathways <- fgsea_results %>%
+  as_tibble() %>%
+  arrange(desc(NES)) # NES = Normalized Enrichment Score
+
+
+# --- Searching for Specific Pathways (e.g., Gut Barrier) ---
+# You can search the results for terms of interest.
+
+filtered_pathways <- fgsea_results %>%
+  as_tibble() %>%
+  filter(str_detect(pathway, "INTESTINAL|BARRIER|EPITHELIUM")) %>%
+  arrange(padj)
+
+print(filtered_pathways)
+```
+
+
+```{r}
+# --- Plotting an Enrichment Plot ---
+# This plot shows how the genes in a specific set are distributed in your ranked list.
+
+plotEnrichment(go_pathways[["GOBP_INTESTINAL_EPITHELIAL_CELL_DIFFERENTIATION"]], ranked_genes_li2) +
+  labs(title = "Intestinal Epithelial Cell Differentiation")
+```
+
+
+```{r}
+# --- Plotting a Table of Top Pathways with NES ---
+# Process and plot the data.
+sig_pw_bar_LI <- top_pathways %>%
+  # Keep only the pathways that are statistically significant.
+  filter(padj < 0.05) %>%
+  # Create a new, cleaner pathway name for the plot labels.
+  mutate(
+    pathway_clean = pathway %>%
+      str_replace("GOBP_", "") %>%       # Remove the "GOBP_" prefix.
+      str_to_lower() %>%                # Convert the entire name to lowercase.
+      str_replace_all("_", " ")         # Replace underscores with spaces for readability.
+  ) %>%
+  # Create the plot.
+  ggplot(aes(x = NES, y = fct_reorder(pathway_clean, NES))) +
+  # Add the bars. The fill color is determined by whether the NES is positive.
+  geom_col(aes(fill = NES > 0)) +
+  # Manually set the colors for positive (red) and negative (blue) NES values.
+  # The `guide = "none"` part hides the unnecessary fill legend.
+  scale_fill_manual(values = c(`TRUE` = "red", `FALSE` = "blue"), guide = "none") +
+  # Set the labels for the axes and the title.
+  labs(
+    title = "Significant Hallmark Pathways by Normalized Enrichment Score\nin LI samples",
+    x = "Normalized Enrichment Score (NES)",
+    y = "Pathway"
+  ) +
+  # Apply a clean, minimal theme to the plot.
+  theme_minimal()
+
+ggsave('../data/R38_sig_pathway_li_contrast2.pdf', height = 8, width = 6)
+# The sucrose water is likely inducing a state of high stress and rapid repair in the large intestine. The gut lining is undergoing massive proliferation, supported by a fundamental shift in cell metabolism to prioritize growth over efficient energy production. However, this comes at a cost: the downregulation of key immune and structural pathways suggests the resulting gut barrier might be weaker and less immunologically prepared.
+
+# The Hallmark sets confirm that sucrose acts as a powerful growth signal. It activates the master control switches for cell division (MYC, E2F, MTORC1), forcing the gut lining into a state of hyper-proliferation. This is fueled by a metabolic shift away from efficient energy production. The new data also reveals this comes at the cost of weakened detoxification and antiviral defense systems, making the gut potentially more vulnerable.
+```
+
+## SI
+
+```{r}
+ranked_genes_si2 <- prepare_ranked_list(shrunken_si_contrast2)
+
+set.seed(42) # for reproducibility
+fgsea_results_SI <- fgsea(
+  pathways = hallmark_pathways,
+  stats = ranked_genes_si2,
+  minSize = 15,   # Minimum size of a gene set to be tested
+  maxSize = 500,  # Maximum size of a gene set to be tested
+  nPermSimple = 10000 # Number of permutations
+)
+
+
+# --- Step 4: Explore and Visualize the Results ---
+
+# View the top enriched pathways
+top_pathways_SI <- fgsea_results_SI %>%
+  as_tibble() %>%
+  arrange(desc(NES)) # NES = Normalized Enrichment Score
+```
+
+```{r}
+sig_pw_bar_SI <- top_pathways_SI %>%
+  # Keep only the pathways that are statistically significant.
+  filter(padj < 0.05) %>%
+  # Create a new, cleaner pathway name for the plot labels.
+  mutate(
+    pathway_clean = pathway %>%
+      str_replace("GOBP_", "") %>%       # Remove the "GOBP_" prefix.
+      str_to_lower() %>%                # Convert the entire name to lowercase.
+      str_replace_all("_", " ")         # Replace underscores with spaces for readability.
+  ) %>%
+  # Create the plot.
+  ggplot(aes(x = NES, y = fct_reorder(pathway_clean, NES))) +
+  # Add the bars. The fill color is determined by whether the NES is positive.
+  geom_col(aes(fill = NES > 0)) +
+  # Manually set the colors for positive (red) and negative (blue) NES values.
+  # The `guide = "none"` part hides the unnecessary fill legend.
+  scale_fill_manual(values = c(`TRUE` = "red", `FALSE` = "blue"), guide = "none") +
+  # Set the labels for the axes and the title.
+  labs(
+    title = "Significant Hallmark Pathways by Normalized Enrichment Score\nin SI samples",
+    x = "Normalized Enrichment Score (NES)",
+    y = "Pathway"
+  ) +
+  # Apply a clean, minimal theme to the plot.
+  theme_minimal()
+
+ggsave('../data/R38_sig_pathway_si_contrast2.pdf', height = 6, width = 8)
+```
+
+```{r}
+sig_pw_bar_SI + sig_pw_bar_LI
+ggsave('../data/R38_sig_pw_bar.png', width = 11, height = 5)
+```
 
