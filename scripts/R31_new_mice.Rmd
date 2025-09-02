@@ -21,6 +21,7 @@ library(gt)
 library(gtsummary)
 library(ggpubr)
 library(broom)
+library(rstatix)
 ```
 ```{r}
 library(vdbR)
@@ -1013,6 +1014,69 @@ longitudinal_plot <- ggplot(prepared_data, aes(x = factor(day), y = cf_us_per_gr
 ggsave('../data/R31_sugar_delay.png', width = 12, height = 6, plot = longitudinal_plot)
 ```
 
+### day 6 only
+
+```{r}
+# is there a difference comparing day 6 from abx-only vs each of the sugar conditions
+# Clean the data: remove rows with NA values and set the desired order for plotting.
+day6_data <- prepared_data %>% filter(day  == 6 & str_detect(treatment, '^Abx')) %>%
+  # Remove any rows where the log10 CFU is not available
+  filter(!is.na(log10_cf_us_per_gram_stool))
+
+
+
+# --- 2. Define Comparisons and Colors ---
+
+# Specify which groups to compare for the statistical test
+my_comparisons <- list(
+  c("Abx + Water", "Abx + Sucrose (Standard)"),
+  c("Abx + Water", "Abx + Sucrose (Delay +1)"),
+  c("Abx + Water", "Abx + Sucrose (Delay +2)")
+)
+
+# Define the color palette for the groups
+color_palette <- c(
+  "Abx + Water" = "darkgrey",
+  "Abx + Sucrose (Standard)" = "deeppink",
+  "Abx + Sucrose (Delay +1)" = "deeppink",
+  "Abx + Sucrose (Delay +2)" = "deeppink"
+)
+
+# --- 3. Create the Plot ---
+day6_plot <- ggplot(day6_data, aes(x = treatment, y = log10_cf_us_per_gram_stool, fill = treatment)) +
+  # Add the boxplots. outlier.shape = NA prevents plotting outliers twice.
+  geom_boxplot(outlier.shape = NA) +
+  # Add the individual data points with jitter for better visibility
+  geom_jitter(shape = 21, width = 0.2, color = "black") +
+  # Apply the custom color palette
+  scale_fill_manual(values = color_palette) +
+  # Perform Wilcoxon tests and add the p-values to the plot
+  stat_compare_means(
+    comparisons = my_comparisons,
+    method = "wilcox.test",
+    label = "p.format" # Formats the p-value nicely
+  ) +
+  # Flip coordinates to make treatment labels easier to read
+  coord_flip() +
+  # Add informative labels
+  labs(
+    title = "delay sugar: Enterococcus Burden at Day 6",
+    x = "",
+    y = "log10(CFU / gram of stool)"
+  ) +
+  # Use a clean theme and remove the legend as colors are self-explanatory
+  theme_classic() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# Print the final plot
+print(day6_plot)
+
+```
+
+
 ## AUC stats
 
 ### vardi
@@ -1835,7 +1899,6 @@ weight_model3 <- lmer(
 # Step 3: Interpret the results.
 summary(weight_model3)
 
-#
 ```
 
 ```{r}
@@ -1918,6 +1981,8 @@ timeline <- ggplot(weight_data3, aes(x = day, y = mice_weights)) +
   ) +
   theme_bw()+ theme(legend.position = 'top', 
         plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"))
+
+timeline
 ```
 
 ### scatter prediction
@@ -1954,6 +2019,161 @@ scatter <- ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
   theme(legend.position = 'bottom', plot.title = element_blank(),
         plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"))
 scatter
+```
+
+### % change from baseline
+
+```{r}
+# for the weights:
+# replot timecourses & analyze as fold-change (or percent) from baseline (happy to discuss the merits with Teng as well)
+
+
+# 1. Prepare the data by calculating percent change from baseline
+plot_data_percent <- processed_weights %>%
+  filter(antibiotic_treatment == 'biapenem') %>% 
+  mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}'), day = factor(day)) %>% 
+  # Make sure data is ordered correctly to find the first day's weight
+  arrange(experiment_no, mouse_identifier, day) %>%
+  # Group by each unique mouse
+  group_by(experiment_no, mouse_identifier) %>%
+  # Calculate percent change relative to the first measurement
+  mutate(
+    baseline_weight = first(mice_weights),
+    percent_change = ((mice_weights - baseline_weight) / baseline_weight) * 100
+  ) %>%
+  ungroup() 
+
+# 2. Create the plot
+ggplot(plot_data_percent, aes(x = day, y = percent_change)) +
+  
+  # Add a horizontal dashed line at y=0 to represent the baseline
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  
+  # Plot individual mouse trajectories as thin, semi-transparent lines
+  geom_line(aes(group = mouse_identifier), color = "grey70", alpha = 0.6) +
+  
+ stat_summary(
+    aes(color = diet_treatment), 
+    fun.data = "median_hilow", 
+    fun.args = list(conf.int = 0.5), # This is a shortcut for 25th-75th percentile
+    geom = "errorbar",
+    width = 0.2,
+    linewidth = 1
+  ) +
+  
+ # Calculate and plot a line connecting the medians.
+  stat_summary(
+    aes(color = diet_treatment, group = diet_treatment),
+    fun = median,
+    geom = "line",
+    linewidth = 0.9
+  ) +
+  
+  # Calculate and plot the median as a point.
+  stat_summary(
+    aes(color = diet_treatment),
+    fun = median,
+    geom = "point",
+    size = 2
+  ) +
+  scale_color_manual(values = color_palette) +
+  # 4. Split the plot into two panels based on the diet treatment.
+  facet_wrap(~diet_treatment) +
+  # Add informative labels and a clean theme
+  labs(
+    title = "Mouse Weight Percent Change from Baseline by Diet",
+    x = "Day",
+    y = "Weight Change from Baseline (%)"
+  ) +
+  theme_bw()
+
+```
+
+```{r}
+# a subset of the above that I exclude the survey_RB08 experiment since I don't have the CFU
+plot_data_percent_subset <- plot_data_percent %>% 
+  filter(experiment_no != 'survey_RB08')
+  
+# 2. Create the plot
+ggplot(plot_data_percent_subset, aes(x = day, y = percent_change)) +
+  
+  # Add a horizontal dashed line at y=0 to represent the baseline
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  
+  # Plot individual mouse trajectories as thin, semi-transparent lines
+  geom_line(aes(group = mouse_identifier), color = "grey70", alpha = 0.6) +
+  
+ stat_summary(
+    aes(color = diet_treatment), 
+    fun.data = "median_hilow", 
+    fun.args = list(conf.int = 0.5), # This is a shortcut for 25th-75th percentile
+    geom = "errorbar",
+    width = 0.2,
+    linewidth = 1
+  ) +
+  
+ # Calculate and plot a line connecting the medians.
+  stat_summary(
+    aes(color = diet_treatment, group = diet_treatment),
+    fun = median,
+    geom = "line",
+    linewidth = 0.9
+  ) +
+  
+  # Calculate and plot the median as a point.
+  stat_summary(
+    aes(color = diet_treatment),
+    fun = median,
+    geom = "point",
+    size = 2
+  ) +
+  scale_color_manual(values = color_palette) +
+  # 4. Split the plot into two panels based on the diet treatment.
+  facet_wrap(~diet_treatment) +
+  # Add informative labels and a clean theme
+  labs(
+    title = "Mouse Weight Percent Change from Baseline by Diet\nexcluding the survey_RB08 experiment",
+    x = "Day",
+    y = "Weight Change from Baseline (%)"
+  ) +
+  theme_bw()
+```
+```{r}
+# I'm curious if there is a simple difference at day 3 or day 6 just with plain old wilcox tests.  (which I understand would not address repeated measures and would not address the deaths and would not address the two separate experiments).  I suspect there will not be
+# 2. Perform Wilcoxon tests for Raw Mouse Weights
+weights_test_results <- plot_data_percent %>%
+  filter(day %in% c(3, 6)) %>% # Focus only on days 3 and 6
+  group_by(day) %>%            # Perform a separate test for each day
+  wilcox_test(mice_weights ~ diet_treatment) %>%
+  add_significance()
+
+# 3. Perform Wilcoxon tests for Percent Change
+percent_change_test_results <- plot_data_percent %>%
+  filter(day %in% c(3, 6)) %>%
+  group_by(day) %>%
+  wilcox_test(percent_change ~ diet_treatment) %>%
+  add_significance()
+
+# 4. View the results
+print("Wilcoxon Test Results for Raw Mouse Weights")
+print(weights_test_results)
+
+print("--------------------------------------------------")
+
+print("Wilcoxon Test Results for Percent Change from Baseline")
+print(percent_change_test_results)
+```
+### per% change model
+
+```{r}
+# do the model between the CFU and the % change
+percent_change_model <- lmer(
+  percent_change ~ log10_cf_us_per_gram_stool * diet_treatment +
+                   day + (1 | mouse_identifier) + (1 | experiment_no),
+  data = plot_data_percent_subset %>% filter(day != '1')
+)
+
+summary(percent_change_model)
 ```
 
 ## assemble 
