@@ -900,6 +900,7 @@ design <- ggplot() +
   )
 ggsave('../data/R31_delay_design.pdf')
 ```
+
 ## CFU
 
 ```{r}
@@ -1233,7 +1234,7 @@ exposure_plot <- auc_data_with_exposure_sucrose %>%
   # Use a clean theme
    scale_x_continuous(
     breaks = c(3, 4, 5),
-    labels = c("3\n(Standard)", "4\n(Delay + 1)", "5\n(Delay + 2)")
+    labels = c("3\n(Delay + 2)", "4\n(Delay + 1)", "5\n(Standard)")
   ) +
   theme(
     legend.position = "right",
