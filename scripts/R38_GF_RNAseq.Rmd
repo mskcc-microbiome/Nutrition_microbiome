@@ -19,6 +19,12 @@ library(patchwork)
 library(ashr)
 library(fgsea)       # For GSEA
 library(msigdbr)     # To get MSigDB gene sets
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(ggupset)
+library(pheatmap)      # For creating the heatmap
+library(viridis)  
+library(RColorBrewer) 
 ```
 
 Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
@@ -154,6 +160,14 @@ filtered_raw_counts_matrix <- raw_counts_matrix[genes_to_keep_logical, ]
 # e.g., ~1, or you can use your main experimental design like ~condition.
 # Using the main design can sometimes help stabilize variance better with respect to known factors.
 colData <- meta_table %>% column_to_rownames('sample_id')
+
+
+color_palette <- c(
+  "PBS__regular_water" = "#A2E8E6",
+  "PBS__sucrose_water" = "#FAD5D2",
+  "E. faecalis__regular_water" = "#00BFC4",
+  "E. faecalis__sucrose_water" = "#F8766D"
+)
 ```
 
 
@@ -213,6 +227,7 @@ pca_plot <- ggplot(pca_data, aes(x = PC1, y = PC2, color = treatment, shape = ti
   ylab(paste0("PC2: ", percent_variance[2], "% variance")) +
   ggtitle("PCA of Samples") +
   theme_bw(base_size = 14) +
+  scale_color_manual(values = color_palette) +
   theme(legend.position = "right") +
   coord_fixed() # Ensures PC1 and PC2 are on the same scale visually
 
@@ -252,6 +267,7 @@ vst_si <- vst(dds_si, blind = TRUE)
 pca_plot_si <- plotPCA(vst_si, intgroup = "treatment") +
   ggtitle("PCA of Small Intestine Samples") +
   theme_minimal() +
+  scale_color_manual(values = color_palette) +
   # Make the points a bit larger for clarity
   geom_point(size = 4) +
   coord_fixed()
@@ -269,6 +285,7 @@ pca_plot_li <- plotPCA(vst_li, intgroup = "treatment") +
   ggtitle("PCA of Large Intestine Samples") +
   theme_minimal() +
   geom_point(size = 4) +
+  scale_color_manual(values = color_palette) +
   coord_fixed()+
   theme(legend.position = "right")
 
@@ -379,9 +396,156 @@ sig_si_contrast2 <- as.data.frame(shrunken_si_contrast2) %>%
 print(paste("Found", nrow(sig_si_contrast2), "significant genes."))
 print(table(sig_si_contrast2$log2FoldChange > 0))
 ```
+```{r}
+# Convert results to a dataframe for easier manipulation
+results_df_si2 <- as.data.frame(shrunken_si_contrast2) %>%
+  rownames_to_column("ensembl_version")
 
+# Find the top 20 most abundant genes
+top_abundant_genes <- results_df_si2 %>%
+  arrange(desc(baseMean)) %>%
+  head(20)
 
-## volcano plots
+# Extract the Ensembl IDs (with version) of these top genes
+top_gene_ids <- top_abundant_genes$ensembl_version
+
+# --- Step 2: Prepare Data for Plotting ---
+# This assumes 'dds_si' is your main DESeqDataSet object for the small intestine.
+
+# Get the normalized counts for all genes
+normalized_counts_si <- counts(dds_si, normalized = TRUE)
+
+# Get the sample metadata (e.g., conditions)
+sample_info_si <- as.data.frame(colData(dds_si))
+
+# Filter the normalized counts to just our top genes and format for ggplot
+plot_data_top20 <- normalized_counts_si[top_gene_ids, ] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sample_name") %>%
+  # Join with the sample metadata to get the experimental conditions
+  left_join(sample_info_si %>% rownames_to_column("sample_name"), by = "sample_name") %>%
+  # Convert from wide to long format for plotting
+  pivot_longer(cols = all_of(top_gene_ids), names_to = "ensembl_version", values_to = "normalized_count")
+
+# --- Step 3: Add Gene Symbols for Clearer Labels ---
+
+# Create a clean Ensembl ID without the version number
+plot_data_top20 <- plot_data_top20 %>%
+  mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
+
+# Map the clean Ensembl IDs to gene symbols
+gene_symbols_map <- mapIds(org.Mm.eg.db,
+                           keys = unique(plot_data_top20$ensembl_id),
+                           column = "SYMBOL",
+                           keytype = "ENSEMBL",
+                           multiVals = "first")
+
+# Add the gene symbols to our plotting data
+plot_data_top20$symbol <- gene_symbols_map[plot_data_top20$ensembl_id]
+
+# --- Step 4: Generate the Boxplots ---
+
+# Create a plot for each gene using facet_wrap
+ggplot(plot_data_top20, aes(x = treatment, y = normalized_count, fill = treatment)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.7) + # Overlay individual data points
+  facet_wrap(~symbol, scales = "free_y", ncol = 5) + # Create a grid of plots
+  
+  # Assuming your conditions are named "Sucrose" and "Regular"
+  scale_fill_manual(values = color_palette) +
+  
+  labs(
+    title = "Top 20 Most Abundant Genes in Small Intestine",
+    subtitle = "E. faecalis: Sucrose vs Regular Water",
+    x = "Water Treatment",
+    y = "Normalized Gene Count"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold.italic", size = 9), # Style the gene names
+    axis.text.x = element_text(angle = 45, hjust = 1) # Angle x-axis labels
+  )
+
+ggsave('../data/R38_top20.pdf', width = 10, height = 8)
+```
+
+```{r}
+results_df_si2 <- as.data.frame(shrunken_si_contrast2) %>%
+  rownames_to_column("ensembl_version")
+
+# Find the top 50 genes with the largest absolute fold change
+top_lfc_genes <- results_df_si2 %>%
+  arrange(desc(abs(log2FoldChange))) %>%
+  head(50)
+
+# Extract the Ensembl IDs (with version) of these top genes
+top_gene_ids <- top_lfc_genes$ensembl_version
+
+# --- Step 2: Prepare Data for Plotting ---
+# This assumes 'dds_si' is your main DESeqDataSet object for the small intestine.
+
+# Get the normalized counts for all genes
+normalized_counts_si <- counts(dds_si, normalized = TRUE)
+
+# Get the sample metadata (e.g., conditions)
+sample_info_si <- as.data.frame(colData(dds_si))
+
+# Filter the normalized counts to just our top genes and format for ggplot
+plot_data_top50 <- normalized_counts_si[top_gene_ids, ] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sample_name") %>%
+  # Join with the sample metadata to get the experimental conditions
+  left_join(sample_info_si %>% rownames_to_column("sample_name"), by = "sample_name") %>%
+  # Convert from wide to long format for plotting
+  pivot_longer(cols = all_of(top_gene_ids), names_to = "ensembl_version", values_to = "normalized_count")
+
+# --- Step 3: Add Gene Symbols for Clearer Labels ---
+
+# Create a clean Ensembl ID without the version number
+plot_data_top50 <- plot_data_top50 %>%
+  mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
+
+# Map the clean Ensembl IDs to gene symbols
+gene_symbols_map <- mapIds(org.Mm.eg.db,
+                           keys = unique(plot_data_top50$ensembl_id),
+                           column = "SYMBOL",
+                           keytype = "ENSEMBL",
+                           multiVals = "first")
+
+# Add the gene symbols to our plotting data
+plot_data_top50$symbol <- gene_symbols_map[plot_data_top50$ensembl_id]
+
+# --- Step 4: Generate the Boxplots ---
+
+# Create a plot for each gene using facet_wrap
+ggplot(plot_data_top50, aes(x = treatment, y = normalized_count, fill = treatment)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.7) + # Overlay individual data points
+  facet_wrap(~symbol, scales = "free_y", ncol = 10) + # Create a grid of plots
+  
+  # Assuming your conditions are named "Sucrose" and "Regular"
+  scale_fill_manual(values = color_palette) +
+  
+  labs(
+    title = "Top 50 Genes by Absolute Fold Change in Small Intestine",
+    subtitle = "E. faecalis: Sucrose vs Regular Water",
+    x = "Water Treatment",
+    y = "Normalized Gene Count"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold.italic", size = 8), # Style the gene names
+    axis.text.x = element_text(angle = 45, hjust = 1) # Angle x-axis labels
+  )
+
+ggsave('../data/R38_top50.pdf', width = 20, height = 13)
+```
+
+## Volcano plots
 
 ```{r}
 # --- 2. Set up Gene Symbol Annotation ---
@@ -425,13 +589,14 @@ create_volcano_plot <- function(shrunken_results, plot_title) {
     # Add gene symbols for significant genes using ggrepel
     geom_text_repel(aes(label = symbol),
                     data = subset(results_df, padj < 0.05 & abs(log2FoldChange) > 1),
-                    max.overlaps = 15, # Increase to allow more labels
+                    max.overlaps = 2.8, # Increase to allow more labels
+                    size = 2,
                     box.padding = 0.5) +
     
     labs(title = plot_title,
          x = "Log2 Fold Change",
          y = "-log10(Adjusted P-value)") +
-    theme_minimal() +
+    theme_minimal(base_size = 11) +
     theme(legend.position = "none") # Hide the individual legends
 }
 
@@ -439,97 +604,20 @@ create_volcano_plot <- function(shrunken_results, plot_title) {
 # Create each volcano plot by calling the function with the corresponding results.
 # Small Intestine Plots
 p_si_contrast1 <- create_volcano_plot(shrunken_si_contrast1, "SI: E. faecalis vs PBS (Regular Water)") 
-p_si_contrast2 <- create_volcano_plot(shrunken_si_contrast2, "SI: E. faecalis (Sucrose vs Regular Water)")
+p_si_contrast2 <- create_volcano_plot(shrunken_si_contrast2, "E. faecalis (Sucrose vs Regular Water)")
 
 # Large Intestine Plots
 p_li_contrast1 <- create_volcano_plot(shrunken_li_contrast1, "LI: E. faecalis vs PBS (Regular Water)")    
-p_li_contrast2 <- create_volcano_plot(shrunken_li_contrast2, "LI: E. faecalis (Sucrose vs Regular Water)")
+p_li_contrast2 <- create_volcano_plot(shrunken_li_contrast2, "E. faecalis (Sucrose vs Regular Water)")
 
 # --- 5. Arrange Plots into a 2x2 Grid ---
 # Use patchwork to combine the plots. The '/' operator stacks plots vertically.
-(p_si_contrast1 + p_si_contrast2) / (p_li_contrast1 + p_li_contrast2)
-ggsave('../data/R38_DEG_volcano.png', width = 15, height = 9)
+p_si_contrast2  + p_li_contrast2
+ggsave('../data/R38_DEG_volcano.png', width = 6, height = 4)
 ```
 ## plot gene counts
 
-### Defa2 and Defa22
-
-```{r}
-# --- Step 1: Identify the Top Two Most Downregulated Genes ---
-
-# Convert results to a dataframe for easier manipulation
-results_df_li2 <- as.data.frame(shrunken_li_contrast2) %>%
-  rownames_to_column("ensembl_version")
-
-# Find the top 2 downregulated genes (negative log2FoldChange, sorted by p-value)
-top_downregulated_genes <- results_df_li2 %>%
-  filter(log2FoldChange < 0) %>%
-  arrange(log2FoldChange) %>%
-  head(2)
-
-# Extract the Ensembl IDs (with version) of these top genes
-top_gene_ids <- top_downregulated_genes$ensembl_version
-
-# --- Step 2: Prepare Data for Plotting ---
-
-# Get the normalized counts for all genes
-normalized_counts <- counts(dds_li, normalized = TRUE)
-
-# Get the sample metadata (e.g., conditions)
-sample_info <- as.data.frame(colData(dds_li))
-
-# Filter the normalized counts to just our top genes and format for ggplot
-plot_data <- normalized_counts[top_gene_ids, ] %>%
-  t() %>%
-  as.data.frame() %>%
-  rownames_to_column("sample_name") %>%
-  # Join with the sample metadata to get the experimental conditions
-  left_join(sample_info %>% rownames_to_column("sample_name"), by = "sample_name") %>%
-  # Convert from wide to long format for plotting
-  pivot_longer(cols = all_of(top_gene_ids), names_to = "ensembl_version", values_to = "normalized_count")
-
-# --- Step 3: Add Gene Symbols for Clearer Labels ---
-
-# Create a clean Ensembl ID without the version number
-plot_data <- plot_data %>%
-  mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
-
-# Map the clean Ensembl IDs to gene symbols
-gene_symbols <- mapIds(org.Mm.eg.db,
-                       keys = unique(plot_data$ensembl_id),
-                       column = "SYMBOL",
-                       keytype = "ENSEMBL",
-                       multiVals = "first")
-
-# Add the gene symbols to our plotting data
-plot_data$symbol <- gene_symbols[plot_data$ensembl_id]
-
-# --- Step 4: Generate the Boxplots ---
-
-# Create a plot for each gene using facet_wrap
-ggplot(plot_data, aes(x = treatment, y = normalized_count, fill = treatment)) +
-  geom_boxplot(alpha = 0.7) +
-  geom_jitter(width = 0.1, alpha = 0.8) + # Overlay individual data points
-  facet_wrap(~symbol, scales = "free_y") + # Create a separate plot for each gene
-  #scale_fill_manual(values = c("Sucrose" = "#F8766D", "Regular" = "#00BFC4")) +
-  labs(
-    title = "Abundance of Top 2 Downregulated Genes",
-    subtitle = "LI: E. faecalis (Sucrose vs Regular Water)",
-    x = "Treatment",
-    y = "Normalized Gene Count"
-  ) +
-  theme_minimal(base_size = 14) +
-  scale_y_sqrt() +
-  theme(
-    legend.position = "none",
-    axis.text.x = element_text(angle = 45,  hjust=1),
-    strip.text = element_text(face = "bold.italic") # Style the gene names
-  )
-
-
-```
-
-### Serpina10
+### Defa2 
 
 ```{r}
 get_gene_counts <- function(dds_object, gene_symbol, tissue_name) {
@@ -573,7 +661,40 @@ get_gene_counts <- function(dds_object, gene_symbol, tissue_name) {
     
   return(plot_df)
 }
+```
 
+
+```{r}
+li_counts_Defa2 <- get_gene_counts(dds_li, "Defa2", "Large Intestine")
+
+LI_Defa2 <- ggplot(li_counts_Defa2, aes(x = treatment, y = count, fill = treatment)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.8, height = 0) + # Overlay individual data points
+  #facet_wrap(~tissue, scales = "free_y") + # Create separate plots for LI and SI
+  
+  # Use the same colors as the previous plot for consistency
+  scale_fill_manual(values = color_palette) +
+  scale_y_sqrt() +
+  labs(
+    title = "Defa2",
+    x = "",
+    y = "Normalized Gene Count"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 12), # Style the facet titles
+    axis.text.x = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold.italic")
+  ) 
+
+LI_Defa2
+```
+
+
+### Serpina10
+
+```{r}
 # --- Step 1: Extract Serpina10 counts from both dds objects ---
 # This assumes 'dds_li' and 'dds_si' are your DESeqDataSet objects.
 li_counts <- get_gene_counts(dds_li, "Serpina10", "Large Intestine")
@@ -581,32 +702,32 @@ si_counts <- get_gene_counts(dds_si, "Serpina10", "Small Intestine")
 
 # --- Step 2: Combine the data from both tissues ---
 combined_counts <- rbind(li_counts, si_counts)
-```
 
-
-```{r}
 # --- Step 3: Generate the boxplots ---
-ggplot(combined_counts, aes(x = treatment, y = count, fill = treatment)) +
+SI_Serpina10 <- ggplot(si_counts, aes(x = treatment, y = count, fill = treatment)) +
   geom_boxplot(alpha = 0.7, outlier.shape = NA) +
   geom_jitter(width = 0.2, alpha = 0.8, height = 0) + # Overlay individual data points
-  facet_wrap(~tissue, scales = "free_y") + # Create separate plots for LI and SI
+  #facet_wrap(~tissue, scales = "free_y") + # Create separate plots for LI and SI
   
   # Use the same colors as the previous plot for consistency
-  #scale_fill_manual(values = c("Sucrose" = "#F8766D", "Regular" = "#00BFC4", "PBS" = "grey")) +
+  scale_fill_manual(values = color_palette) +
   
   labs(
-    title = "Normalized Abundance of Serpina10",
-    x = "Treatment",
+    title = "SERPINA10",
+    x = "",
     y = "Normalized Gene Count"
   ) +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 11) +
   theme(
     legend.position = "none",
     strip.text = element_text(face = "bold", size = 12), # Style the facet titles
-    axis.text.x = element_text(angle = 45,  hjust=1),
-    plot.title = element_text(hjust = 0.5, face = "bold")
+    axis.text.x = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold.italic")
   ) 
+
+SI_Serpina10
 ```
+
 
 # GSEA
 
@@ -687,6 +808,8 @@ hallmark_pathways <- hallmark_sets %>%
 
 # Combine both lists of pathways for a comprehensive analysis
 combined_pathways <- c(go_pathways, hallmark_pathways)
+
+names(hallmark_pathways)
 ```
 
 
@@ -707,7 +830,7 @@ fgsea_results <- fgsea(
 # --- Step 4: Explore and Visualize the Results ---
 
 # View the top enriched pathways
-top_pathways <- fgsea_results %>%
+top_pathways_Li <- fgsea_results %>%
   as_tibble() %>%
   arrange(desc(NES)) # NES = Normalized Enrichment Score
 
@@ -723,28 +846,21 @@ filtered_pathways <- fgsea_results %>%
 print(filtered_pathways)
 ```
 
-
-```{r}
-# --- Plotting an Enrichment Plot ---
-# This plot shows how the genes in a specific set are distributed in your ranked list.
-
-plotEnrichment(go_pathways[["GOBP_INTESTINAL_EPITHELIAL_CELL_DIFFERENTIATION"]], ranked_genes_li2) +
-  labs(title = "Intestinal Epithelial Cell Differentiation")
-```
-
+### LI bars 
 
 ```{r}
 # --- Plotting a Table of Top Pathways with NES ---
 # Process and plot the data.
-sig_pw_bar_LI <- top_pathways %>%
+sig_pw_bar_LI <- top_pathways_Li %>%
   # Keep only the pathways that are statistically significant.
   filter(padj < 0.05) %>%
   # Create a new, cleaner pathway name for the plot labels.
   mutate(
     pathway_clean = pathway %>%
-      str_replace("GOBP_", "") %>%       # Remove the "GOBP_" prefix.
-      str_to_lower() %>%                # Convert the entire name to lowercase.
-      str_replace_all("_", " ")         # Replace underscores with spaces for readability.
+      str_replace("HALLMARK_", "") %>%       # Remove the "GOBP_" prefix.
+      str_to_title() %>%                # Convert the entire name to lowercase.
+      str_replace_all("_", " ")  %>%        # Replace underscores with spaces for readability.
+      str_wrap( width = 20)
   ) %>%
   # Create the plot.
   ggplot(aes(x = NES, y = fct_reorder(pathway_clean, NES))) +
@@ -752,12 +868,12 @@ sig_pw_bar_LI <- top_pathways %>%
   geom_col(aes(fill = NES > 0)) +
   # Manually set the colors for positive (red) and negative (blue) NES values.
   # The `guide = "none"` part hides the unnecessary fill legend.
-  scale_fill_manual(values = c(`TRUE` = "red", `FALSE` = "blue"), guide = "none") +
+  scale_fill_manual(values = c(`TRUE` = "#E69F00", `FALSE` = "#56B4E9"), guide = "none") +
   # Set the labels for the axes and the title.
   labs(
-    title = "Significant Hallmark Pathways by Normalized Enrichment Score\nin LI samples",
+    #title = "Significant Hallmark Pathways by Normalized Enrichment Score\nin LI samples",
     x = "Normalized Enrichment Score (NES)",
-    y = "Pathway"
+    y = ""
   ) +
   # Apply a clean, minimal theme to the plot.
   theme_minimal()
@@ -767,6 +883,61 @@ ggsave('../data/R38_sig_pathway_li_contrast2.pdf', height = 8, width = 6)
 
 # The Hallmark sets confirm that sucrose acts as a powerful growth signal. It activates the master control switches for cell division (MYC, E2F, MTORC1), forcing the gut lining into a state of hyper-proliferation. This is fueled by a metabolic shift away from efficient energy production. The new data also reveals this comes at the cost of weakened detoxification and antiviral defense systems, making the gut potentially more vulnerable.
 ```
+
+### contrast 1: enterococcus effects on the host
+
+```{r}
+ranked_genes_li1 <- prepare_ranked_list(shrunken_li_contrast1)
+
+set.seed(42) # for reproducibility
+fgsea_results_li1 <- fgsea(
+  pathways = hallmark_pathways,
+  stats = ranked_genes_li1,
+  minSize = 15,   # Minimum size of a gene set to be tested
+  maxSize = 500,  # Maximum size of a gene set to be tested
+  nPermSimple = 10000 # Number of permutations
+)
+
+
+# --- Step 4: Explore and Visualize the Results ---
+
+# View the top enriched pathways
+top_pathways_li1 <- fgsea_results_li1 %>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+
+
+sig_pw_bar_LI1 <- top_pathways_li1 %>%
+  # Keep only the pathways that are statistically significant.
+  filter(padj < 0.05) %>%
+  # Create a new, cleaner pathway name for the plot labels.
+  mutate(
+    pathway_clean = pathway %>%
+      str_replace("HALLMARK_", "") %>%       # Remove the "GOBP_" prefix.
+      str_to_title() %>%                # Convert the entire name to lowercase.
+      str_replace_all("_", " ")  %>%        # Replace underscores with spaces for readability.
+      str_wrap( width = 30)
+  ) %>%
+  # Create the plot.
+  ggplot(aes(x = NES, y = fct_reorder(pathway_clean, NES))) +
+  # Add the bars. The fill color is determined by whether the NES is positive.
+  geom_col(aes(fill = NES > 0)) +
+  # Manually set the colors for positive (red) and negative (blue) NES values.
+  # The `guide = "none"` part hides the unnecessary fill legend.
+  scale_fill_manual(values = c(`TRUE` = "#E69F00", `FALSE` = "#56B4E9"), guide = "none") +
+  # Set the labels for the axes and the title.
+  labs(
+    #title = "Significant Hallmark Pathways by Normalized Enrichment Score\nin LI samples",
+    x = "Normalized Enrichment Score (NES)",
+    y = ""
+  ) +
+  # Apply a clean, minimal theme to the plot.
+  theme_minimal()
+
+sig_pw_bar_LI1
+```
+
 
 ## SI
 
@@ -791,6 +962,8 @@ top_pathways_SI <- fgsea_results_SI %>%
   arrange(desc(NES)) # NES = Normalized Enrichment Score
 ```
 
+### SI bars
+
 ```{r}
 sig_pw_bar_SI <- top_pathways_SI %>%
   # Keep only the pathways that are statistically significant.
@@ -798,9 +971,10 @@ sig_pw_bar_SI <- top_pathways_SI %>%
   # Create a new, cleaner pathway name for the plot labels.
   mutate(
     pathway_clean = pathway %>%
-      str_replace("GOBP_", "") %>%       # Remove the "GOBP_" prefix.
-      str_to_lower() %>%                # Convert the entire name to lowercase.
-      str_replace_all("_", " ")         # Replace underscores with spaces for readability.
+      str_replace("HALLMARK_", "") %>%       # Remove the "GOBP_" prefix.
+      str_to_title() %>%                # Convert the entire name to lowercase.
+      str_replace_all("_", " ")    %>%      # Replace underscores with spaces for readability.
+      str_wrap( width = 20)
   ) %>%
   # Create the plot.
   ggplot(aes(x = NES, y = fct_reorder(pathway_clean, NES))) +
@@ -808,12 +982,12 @@ sig_pw_bar_SI <- top_pathways_SI %>%
   geom_col(aes(fill = NES > 0)) +
   # Manually set the colors for positive (red) and negative (blue) NES values.
   # The `guide = "none"` part hides the unnecessary fill legend.
-  scale_fill_manual(values = c(`TRUE` = "red", `FALSE` = "blue"), guide = "none") +
+  scale_fill_manual(values = c(`TRUE` = "#E69F00", `FALSE` = "#56B4E9"), guide = "none") +
   # Set the labels for the axes and the title.
   labs(
-    title = "Significant Hallmark Pathways by Normalized Enrichment Score\nin SI samples",
+    #title = "Significant Hallmark Pathways by Normalized Enrichment Score\nin SI samples",
     x = "Normalized Enrichment Score (NES)",
-    y = "Pathway"
+    y = ""
   ) +
   # Apply a clean, minimal theme to the plot.
   theme_minimal()
@@ -824,5 +998,406 @@ ggsave('../data/R38_sig_pathway_si_contrast2.pdf', height = 6, width = 8)
 ```{r}
 sig_pw_bar_SI + sig_pw_bar_LI
 ggsave('../data/R38_sig_pw_bar.png', width = 11, height = 5)
+```
+### contrast 1: enterococcus effects on the host
+
+```{r}
+ranked_genes_si1 <- prepare_ranked_list(shrunken_si_contrast1)
+
+set.seed(42) # for reproducibility
+fgsea_results_si1 <- fgsea(
+  pathways = hallmark_pathways,
+  stats = ranked_genes_si1,
+  minSize = 15,   # Minimum size of a gene set to be tested
+  maxSize = 500,  # Maximum size of a gene set to be tested
+  nPermSimple = 10000 # Number of permutations
+)
+
+
+# --- Step 4: Explore and Visualize the Results ---
+
+# View the top enriched pathways
+top_pathways_si1 <- fgsea_results_si1 %>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+
+
+sig_pw_bar_SI1 <- top_pathways_si1 %>%
+  # Keep only the pathways that are statistically significant.
+  filter(padj < 0.05) %>%
+  # Create a new, cleaner pathway name for the plot labels.
+  mutate(
+    pathway_clean = pathway %>%
+      str_replace("HALLMARK_", "") %>%       # Remove the "GOBP_" prefix.
+      str_to_title() %>%                # Convert the entire name to lowercase.
+      str_replace_all("_", " ")  %>%        # Replace underscores with spaces for readability.
+      str_wrap( width = 40)
+  ) %>%
+  # Create the plot.
+  ggplot(aes(x = NES, y = fct_reorder(pathway_clean, NES))) +
+  # Add the bars. The fill color is determined by whether the NES is positive.
+  geom_col(aes(fill = NES > 0)) +
+  # Manually set the colors for positive (red) and negative (blue) NES values.
+  # The `guide = "none"` part hides the unnecessary fill legend.
+  scale_fill_manual(values = c(`TRUE` = "#E69F00", `FALSE` = "#56B4E9"), guide = "none") +
+  # Set the labels for the axes and the title.
+  labs(
+    #title = "Significant Hallmark Pathways by Normalized Enrichment Score\nin LI samples",
+    x = "Normalized Enrichment Score (NES)",
+    y = ""
+  ) +
+  # Apply a clean, minimal theme to the plot.
+  theme_minimal()
+
+sig_pw_bar_SI1
+```
+```{r}
+sig_pw_bar_SI1 + sig_pw_bar_LI1
+ggsave('../data/R38_sig_pw_bar_contrast1.png', width = 11, height = 5)
+```
+
+## g heatmap
+
+```{r}
+# find the overlapped significant pathways in these four comparisons
+list_of_dfs <- list(
+  LI_Contrast1 = top_pathways_li1,
+  LI_Contrast2 = top_pathways_Li,
+  SI_Contrast1 = top_pathways_si1,
+  SI_Contrast2 = top_pathways_SI
+)
+
+# Extract the significant pathway names from each dataframe
+significant_pathways_list <- lapply(list_of_dfs, function(df) {
+  df %>%
+    filter(padj < 0.05) %>%
+    pull(pathway)
+})
+
+# Use Reduce() to find the intersection (common elements) across all lists
+overlapping_pathways <- Reduce(intersect, significant_pathways_list)
+
+# Print the result
+print("Pathways significant in all four contrasts:")
+print(overlapping_pathways)
+```
+
+```{r}
+# --- Step 2: Find Overlapping Leading Edge Genes for the Common Pathways ---
+
+# This step will find the core genes driving the enrichment for each common pathway.
+common_leading_edge_genes <- lapply(overlapping_pathways, function(p) {
+  
+  # For the current pathway 'p', get the list of leading edge genes from each of the 4 contrasts
+  list_of_gene_sets <- lapply(list_of_dfs, function(df) {
+    # Filter for the specific pathway
+    pathway_data <- df %>% filter(pathway == p)
+    
+    # Check if the pathway was found and significant in this df before extracting genes
+    if (nrow(pathway_data) > 0 && pathway_data$padj < 0.05) {
+      # The 'leadingEdge' column is a list, so unlist to get the character vector of genes
+      return(unlist(pathway_data$leadingEdge))
+    } else {
+      # If the pathway isn't in this df, return NULL
+      return(NULL)
+    }
+  })
+  
+  # Remove any NULL elements from the list
+  list_of_gene_sets <- compact(list_of_gene_sets)
+  
+  # Find the intersection of these gene sets
+  if (length(list_of_gene_sets) > 0) {
+    Reduce(intersect, list_of_gene_sets)
+  } else {
+    character(0) # Return an empty vector if no sets to compare
+  }
+})
+
+# Name the final list with the pathway names for clarity
+names(common_leading_edge_genes) <- overlapping_pathways
+
+# Print the results
+print("Common leading edge genes for each overlapping pathway:")
+print(common_leading_edge_genes)
+```
+
+```{r}
+# ---  Calculate Pairwise Overlap of Leading Edge Genes ---
+
+# Get the names of the pathways for which we have common leading edge genes
+pathway_names <- names(common_leading_edge_genes)
+
+# Create an empty matrix to store the overlap counts
+overlap_matrix <- matrix(
+  0,
+  nrow = length(pathway_names),
+  ncol = length(pathway_names),
+  dimnames = list(pathway_names, pathway_names)
+)
+
+# Loop through each pair of pathways to calculate the number of overlapping genes
+for (i in 1:length(pathway_names)) {
+  for (j in i:length(pathway_names)) {
+    # Get the gene lists for the two pathways
+    genes1 <- common_leading_edge_genes[[pathway_names[i]]]
+    genes2 <- common_leading_edge_genes[[pathway_names[j]]]
+    
+    # Calculate the number of genes in the intersection
+    overlap_count <- length(intersect(genes1, genes2))
+    
+    # Fill the matrix (it's symmetric)
+    overlap_matrix[i, j] <- overlap_count
+    overlap_matrix[j, i] <- overlap_count
+  }
+}
+
+# Print the resulting matrix of overlap counts
+print("Pairwise overlap count of common leading edge genes:")
+print(overlap_matrix)
+```
+
+
+### heatmap
+
+```{r}
+# --- Create a Heatmap of Common Leading Edge Genes ---
+
+# First, get a single unique vector of all the common leading edge genes
+genes_to_plot <- unique(unlist(common_leading_edge_genes))
+
+all_counts_li <- genes_to_plot %>% 
+  set_names(genes_to_plot) %>% 
+  map(~get_gene_counts(dds_li, .x, "Large Intestine")) %>% 
+  bind_rows(.id = 'gene')
+
+all_counts_si <- genes_to_plot %>% 
+  set_names(genes_to_plot) %>% 
+  map(~get_gene_counts(dds_si, .x, "Small Intestine")) %>% 
+  bind_rows(.id = 'gene')
+```
+
+
+```{r}
+# Combine the data from both tissues
+combined_tidy_counts <- bind_rows(all_counts_li, all_counts_si)
+
+# Prepare the data matrix for the heatmap (genes on rows, samples on columns)
+heatmap_matrix <- combined_tidy_counts %>%
+  dplyr::select(gene_symbol = gene, sample = sample_name, normalized_count = count, tissue) %>%
+  # Handle cases where a gene might not have counts in all samples
+  filter(!is.na(gene_symbol))
+```
+
+
+```{r}
+# Create separate matrices for each tissue
+heatmap_matrix_li <- heatmap_matrix %>%
+    filter(tissue == "Large Intestine") %>%
+    dplyr::select(-tissue) %>%
+    pivot_wider(names_from = sample, values_from = normalized_count) %>%
+    column_to_rownames("gene_symbol")
+
+heatmap_matrix_si <- heatmap_matrix %>%
+    filter(tissue == "Small Intestine") %>%
+    dplyr::select(-tissue) %>%
+    pivot_wider(names_from = sample, values_from = normalized_count) %>%
+    column_to_rownames("gene_symbol")
+
+# Ensure both matrices have the same genes before ordering
+common_genes <- intersect(rownames(heatmap_matrix_li), rownames(heatmap_matrix_si))
+heatmap_matrix_li <- heatmap_matrix_li[common_genes, ]
+heatmap_matrix_si <- heatmap_matrix_si[common_genes, ]
+
+
+# Prepare the annotation dataframes
+annotation_col_li <- combined_tidy_counts %>% filter(tissue == "Large Intestine") %>% dplyr::select(sample = sample_name, treatment) %>% distinct() %>% column_to_rownames("sample")
+annotation_col_si <- combined_tidy_counts %>% filter(tissue == "Small Intestine") %>% dplyr::select(sample = sample_name, treatment) %>% distinct() %>% column_to_rownames("sample")
+
+# Define a colorblind-friendly Red-White-Blue color palette
+my_colors <- colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(100)
+
+# Generate a heatmap for the LI just to get the gene clustering order
+p_li_for_clustering <- pheatmap(heatmap_matrix_li, scale = "row", silent = TRUE)
+gene_order <- p_li_for_clustering$tree_row$order
+ordered_gene_names <- rownames(heatmap_matrix_li)[gene_order]
+
+# Reorder both matrices using the gene order from the LI heatmap
+heatmap_matrix_li_ordered <- heatmap_matrix_li[ordered_gene_names, ]
+heatmap_matrix_si_ordered <- heatmap_matrix_si[ordered_gene_names, ]
+
+
+# Generate and save the Large Intestine heatmap
+pheatmap(
+  heatmap_matrix_li_ordered,
+  main = "Large Intestine: Common Leading Edge Genes",
+  annotation_col = annotation_col_li,
+  color = my_colors,
+  scale = "row",
+  cluster_rows = FALSE, # Disable clustering to maintain the common order
+  cluster_cols = TRUE,
+  fontsize_row = 8,
+  filename = "../data/R38_heatmap_large_intestine.png",
+  width = 8,
+  height = 11
+)
+
+# Generate and save the Small Intestine heatmap
+pheatmap(
+  heatmap_matrix_si_ordered,
+  main = "Small Intestine: Common Leading Edge Genes",
+  annotation_col = annotation_col_si,
+  color = my_colors,
+  scale = "row",
+  cluster_rows = FALSE, # Disable clustering to maintain the common order
+  cluster_cols = TRUE,
+  fontsize_row = 8,
+  filename = "../data/R38_heatmap_small_intestine.png",
+  width = 8,
+  height = 11
+)
+```
+
+
+```{r}
+# the unique genes in the two pathways specifically
+interferon_alpha_genes <- common_leading_edge_genes[["HALLMARK_INTERFERON_ALPHA_RESPONSE"]]
+interferon_gamma_genes <- common_leading_edge_genes[["HALLMARK_INTERFERON_GAMMA_RESPONSE"]]
+unique_interferon_genes <- union(interferon_alpha_genes, interferon_gamma_genes)
+```
+
+
+```{r}
+# Prepare the data matrix for the heatmap (genes on rows, samples on columns)
+heatmap_matrix <- combined_tidy_counts %>%
+  dplyr::select(gene, sample_name, count) %>%
+  pivot_wider(names_from = sample_name, values_from = count) %>%
+  column_to_rownames("gene")
+
+# Prepare the annotation dataframe for the columns (samples)
+annotation_col <- combined_tidy_counts %>%
+  dplyr::select(sample_name, tissue, treatment) %>%
+  distinct() %>%
+  column_to_rownames("sample_name")
+
+# Generate the heatmap
+pheatmap(
+  heatmap_matrix,
+  main = "Expression of Common Leading Edge Genes",
+  annotation_col = annotation_col,
+  color = viridis(100),         # Use a colorblind-friendly palette
+  scale = "row",                # Scale genes to have mean 0 and SD 1
+  show_colnames = TRUE,
+  show_rownames = TRUE,
+  cluster_cols = TRUE,          # Cluster samples based on similarity
+  cluster_rows = TRUE,          # Cluster genes based on similarity
+  filename = '../data/R38_leading_genes_heatmap.pdf',
+  fontsize_row = 8, # Directly save the plot as a PNG
+  width = 10, # Specify width in inches
+  height = 11 # Specify height in inches
+)
+```
+
+
+## the enrichment plots
+
+```{r}
+# --- Large Intestine Plots ---
+
+# 1. Interferon Alpha Response in the Large Intestine
+p_li_ifn <- plotEnrichment(hallmark_pathways[["HALLMARK_INTERFERON_ALPHA_RESPONSE"]],
+                           ranked_genes_li2) +
+  labs(title = "Interferon Alpha Response") +
+  theme(
+        plot.subtitle = element_text(hjust = 0.5))
+
+
+# 2. E2F Targets (Cell Cycle) in the Large Intestine
+p_li_e2f <- plotEnrichment(hallmark_pathways[["HALLMARK_E2F_TARGETS"]],
+                           ranked_genes_li2) +
+  labs(title = "E2F Targets (Proliferation)") +
+  theme(
+        plot.subtitle = element_text(hjust = 0.5))
+
+
+# --- Small Intestine Plots ---
+
+# 3. Interferon Alpha Response in the Small Intestine
+p_si_ifn <- plotEnrichment(hallmark_pathways[["HALLMARK_INTERFERON_ALPHA_RESPONSE"]],
+                           ranked_genes_si2) +
+  labs(title = "Interferon Alpha Response") +
+  theme(
+        plot.subtitle = element_text(hjust = 0.5))
+
+
+# 4. E2F Targets (Cell Cycle) in the Small Intestine
+p_si_e2f <- plotEnrichment(hallmark_pathways[["HALLMARK_E2F_TARGETS"]],
+                           ranked_genes_si2) +
+  labs(title = "E2F Targets (Proliferation)") +
+  theme(
+        plot.subtitle = element_text(hjust = 0.5))
+
+
+# --- Arrange the plots into a 2x2 grid ---
+# Using the patchwork library for easy and clean arrangement
+(p_li_ifn + p_si_ifn) / (p_li_e2f + p_si_e2f)
+
+
+```
+
+# assemble 
+
+```{r}
+top_pca_all <- pca_plot
+
+SI_enrichment <- plot_grid( p_si_ifn, p_si_e2f,
+                       label_size = 12, ncol  =2,
+                align = 'vh', axis = 'lrtb')
+
+SI_panels <- plot_grid(p_si_contrast2, SI_Serpina10, sig_pw_bar_SI, p_si_ifn, p_si_e2f,
+                       label_size = 12, ncol  =1,
+                 rel_heights = c(1.2, 0.6,1.5,.8,.8),
+                 #labels = "auto", 
+                align = 'vh', axis = 'lrtb')
+
+LI_enrichment <- plot_grid( p_li_ifn, p_li_e2f,
+                       label_size = 12, ncol  =2,
+                 #rel_heights = c(1.2,2,1.8),
+                 #labels = "auto", 
+                align = 'vh', axis = 'lrtb')
+
+LI_panels <- plot_grid(p_li_contrast2, LI_Defa2, sig_pw_bar_LI, p_li_ifn, p_li_e2f,
+                       label_size = 12, ncol  =1,
+                 rel_heights = c(1.2, 0.6,1.5, .8,.8),
+                 #labels = "auto", 
+                align = 'vh', axis = 'lrtb')
+     
+                       
+two_columns <-  plot_grid( SI_panels , LI_panels , 
+                ncol  =2,
+                 #rel_heights = c(1.2,2,1.8),labels = "auto", 
+                align = 'vh', axis = 'lrtb')
+
+final_plot <- plot_grid( top_pca_all , two_columns , 
+                nrow  =2,
+                 rel_heights = c(0.5,2),
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Supplemental Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, two_columns,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R38_germ_free_RNAseq.pdf',
+      width = 8.5, height = 16, units = "in", device = 'pdf', 
+      dpi = 300)                    
 ```
 
