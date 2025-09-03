@@ -13,9 +13,11 @@ library(tidyverse)
 library(brms)   
 library(broom.mixed)
 library(tidybayes)
+library(janitor)
 library(patchwork)
 library(cowplot)
 library(brmstools)
+library(ggtext)
 library(tidytext)
 library(vdbR)
 connect_database()
@@ -418,6 +420,7 @@ asv_detailed_summary %>%
 
 ```
 
+## abun and prevelance of the top Enterococcus ASV
 
 ```{r}
 # First, we need to find out how many unique samples are in the entire dataset.
@@ -434,11 +437,7 @@ prevalence_df <- e_asv %>%
     .groups = 'drop'
   ) %>%
   mutate(prevalence = n_present / total_samples)
-```
 
-## abundance and prevelance of the two 
-
-```{r}
 # Now, we filter this list to keep only the ASVs that are prevalent
 # in at least 10% of all samples. We also sort them from most to least prevalent.
 # This sorted list will determine the order of the ASVs on our plot's x-axis.
@@ -456,49 +455,27 @@ plot_data <- e_asv %>%
   # to the sorted list we created. This ensures the x-axis is correctly ordered.
   mutate(asv_key = factor(asv_key, levels = prevalent_asv_keys))
 
-# Now, create the raincloud plot
-relab_rain <- ggplot(plot_data, aes(x = asv_key, y = count_relative)) +
-  
-  # The "Cloud": a half-violin plot to show the distribution's shape
-  ggdist::stat_halfeye(
-    adjust = 0.5, 
-    width = 0.6, 
-    .width = 0, 
-    justification = -0.2, 
-    point_colour = NA
-  ) + 
-  
-  # A traditional boxplot to show summary stats (median, quartiles)
-  # geom_boxplot(
-  #   width = 0.12, 
-  #   outlier.shape = NA # outliers will be shown by the jitter plot
-  # ) +
-  # 
-  # The "Rain": show all the individual data points
-  gghalves::geom_half_point(
-    side = "l", # show points on the left side
-    range_scale = 0.4, 
-    alpha = 0.2
-  ) +
-  
-  # Add a point for the mean, making it stand out
-  stat_summary(fun = mean, geom = "point", shape = 23,  # Here, we map the color aesthetic to a descriptive string
-    aes(color = "Mean"),  size = 3, fill = "white") +
-  # This new scale manually defines the color for our "Mean" aesthetic
-  scale_color_manual(name = "Statistic", values = c("Mean" = "black")) +
+relab_abun <- ggplot(plot_data, aes(x = asv_key, y = count_relative)) +
+ geom_jitter( alpha = 0.3,   
+              size = 1.5) +
+  # Add the mean value as a diamond
+  stat_summary(fun = mean, geom = "point", shape = 23, size = 5, fill = "white", color = "black") +
   
   # General aesthetics for a clean look
   labs(
     #title = "Distribution of Abundance for Present ASVs",
     #subtitle = "Showing samples with relative abundance > 0 and present in at least 10% of the samples",
-    x = "ASV Key",
+    x = "ASV",
     y = "Relative Abundance"
   ) +
   theme_minimal() +
   theme(legend.position = 'top') +
   coord_flip() # Flip coordinates to make it horizontal, which is easier to read
 
+relab_abun
+
 ```
+
 
 ```{r}
 plot_data_bars <-  prevalence_df %>%
@@ -510,7 +487,7 @@ plot_data_bars <-  prevalence_df %>%
 # ---  Panel 2: The Prevalence Bar Plot ---
 # Here we create the new horizontal bar plot
 p2 <- ggplot(plot_data_bars, aes(x = prevalence, y = asv_key)) +
-  geom_col(aes(fill = prevalence), alpha = 0.8) +
+  geom_col( alpha = 0.8) +
   # Add text labels to the bars for clarity
   geom_text(aes(label = scales::percent(prevalence, accuracy = 0.1)), hjust = -0.2, size = 3) +
   scale_x_continuous(
@@ -521,7 +498,7 @@ p2 <- ggplot(plot_data_bars, aes(x = prevalence, y = asv_key)) +
    # title = "Prevalence",
     #subtitle = "Percentage of samples",
     x = "Prevalence",
-    y = "ASV Key"
+    y = "ASV"
   ) +
   theme_minimal() +
    # Define the color scale for the boxplot fill.
@@ -533,7 +510,7 @@ p2 <- ggplot(plot_data_bars, aes(x = prevalence, y = asv_key)) +
   ) +
   # This cleans up the y-axis since the labels are already on the first plot
   theme(
-    #axis.text.y = element_blank(),
+    axis.text.y = element_blank(),
     axis.title.y = element_blank(),
     legend.position = "none"
   )
@@ -541,7 +518,7 @@ p2 <- ggplot(plot_data_bars, aes(x = prevalence, y = asv_key)) +
 
 # --- 5. Combine the Plots ---
 # plot_grid gives us the alignment control we need
-p_asv_level <- plot_grid(relab_rain, p2, 
+p_asv_level <- plot_grid(relab_abun, p2, 
           align = 'vh', # This is the key: 'v' for vertical alignment
           nrow = 1,      # Arrange in one row
           rel_widths = c(1.2, 1)) # Optional: Give the left plot a bit more width
@@ -597,22 +574,22 @@ gee_term <- gee_results %>% filter(term == "asv1_abundance")
 gee_coeff <- round(gee_term$estimate, 3)
 gee_p_value <- format(gee_term$p.value, digits = 2, scientific = TRUE)
 
-ggplot(joined, aes(x = asv1_abundance, y = shotgun_abundance)) +
-  # Add the points for each sample, colored by patient ID
-  geom_point(aes(color = pid), alpha = 0.7, size = 3) +
-  # Add a single regression line to show the overall trend from the GEE model
-  geom_smooth(method = "lm", se = TRUE, color = "#073B4C") +
-  
-  # Add informative labels and a title that includes the GEE correlation results
-  labs(
-    title = "Correlation between ASV_1 and E. faecium Abundance",
-    subtitle = paste0("GEE Coefficient = ", gee_coeff, " (p = ", gee_p_value, ")"),
-    x = "ASV_1 Relative Abundance (16S)",
-    y = "E. faecium Relative Abundance (Shotgun)"
-  ) +
-  # Use a clean theme
-  theme_bw(base_size = 14) +
-  theme(legend.position = 'none')
+# ggplot(joined, aes(x = asv1_abundance, y = shotgun_abundance)) +
+#   # Add the points for each sample, colored by patient ID
+#   geom_point(aes(color = pid), alpha = 0.7, size = 3) +
+#   # Add a single regression line to show the overall trend from the GEE model
+#   geom_smooth(method = "lm", se = TRUE, color = "#073B4C") +
+#   
+#   # Add informative labels and a title that includes the GEE correlation results
+#   labs(
+#     title = "Correlation between ASV_1 and E. faecium Abundance",
+#     subtitle = paste0("GEE Coefficient = ", gee_coeff, " (p = ", gee_p_value, ")"),
+#     x = "ASV_1 Relative Abundance (16S)",
+#     y = "E. faecium Relative Abundance (Shotgun)"
+#   ) +
+#   # Use a clean theme
+#   theme_bw(base_size = 14) +
+#   theme(legend.position = 'none')
 ```
 
 ```{r}
@@ -677,209 +654,413 @@ ggplot(joined, aes(x = asv1_abundance, y = shotgun_abundance)) +
 # not much change and the cor actually gets worse    
 ```
 
+## ASV1 & shotgun spp corresponding to that 
+
 ```{r}
-# what if I just correlating the shotgun abundance of those other possible species with asv_1
-# all_1 <- shotgun %>% 
-#   select(Sample, Species, Abundance) %>% 
-#   # these 4 are the ones that have 100% percent identity with asv_1 and exist in the shotgun data
-#   filter(Species %in% c('Enterococcus_durans','Enterococcus_hirae','Enterococcus_faecium','Enterococcus_mundtii')) %>% 
-#   rename(sampleid = Sample, shotgun_spp = Species, shotgun_relab = Abundance) %>% 
-#   full_join(e_asv_wide %>% select(sampleid, asv_1)) %>% 
-#   rename(asv1_abundance = asv_1) %>% 
-#   inner_join(meta %>% select(sampleid, pid, sdrt)) %>% 
-#   mutate(pid = factor(pid)) %>% 
-#   split(.$shotgun_spp)
-# 
-# gee_cor <- all_1 %>% 
-#   imap(function(df_, name_){
-#     joined = df_ %>% 
-#       mutate(asv1_abundance = if_else(is.na(asv1_abundance), 0, asv1_abundance),
-#             shotgun_relab = if_else(is.na(shotgun_relab), 0, shotgun_relab) )
-#     
-#     gee_model = geeglm(
-#       shotgun_relab ~ asv1_abundance,
-#       id = pid,
-#       data = joined,
-#       family = gaussian,
-#       corstr = "exchangeable"
-#     )
-#     
-#     # Use broom::tidy() to get a clean summary of the model results
-#     gee_results <- tidy(gee_model)
-#     
-#     # Extract the GEE coefficient and p-value for the plot title
-#     # We are interested in the term for our predictor, 'asv1_abundance'
-#     gee_term <- gee_results %>% filter(term == "asv1_abundance")
-#     gee_coeff <- round(gee_term$estimate, 3)
-#     gee_p_value <- format(gee_term$p.value, digits = 2, scientific = F)
-#     
-#     ggplot(joined, aes(x = asv1_abundance, y = shotgun_relab)) +
-#       # Add the points for each sample, colored by patient ID
-#       geom_point(, alpha = 0.7, size = 3) +
-#       # Add a single regression line to show the overall trend from the GEE model
-#       geom_smooth(method = "lm", se = TRUE, color = "#073B4C") +
-#       
-#       # Add informative labels and a title that includes the GEE correlation results
-#       labs(
-#         title = str_glue("Correlation between ASV_1 and\n{name_}"),
-#         subtitle = paste0("GEE Coefficient = ", gee_coeff, " (p = ", gee_p_value, ")"),
-#         x = "ASV_1 Relative Abundance (16S)",
-#         y = str_glue("{name_} Relab (Shotgun)")
-#       ) +
-#       # Use a clean theme
-#       theme_bw(base_size = 14) +
-#       theme(legend.position = 'none')
-#   })
-# 
-# res_1 <- plot_grid(plotlist = gee_cor, nrow = 2 )
-# ggsave('../data/R29_cor_asv_1.jpg', width = 10, height = 8)
+#what if I just correlating the shotgun abundance of those other possible species with asv_1
+all_1 <- shotgun %>%
+  select(Sample, Species, Abundance) %>%
+  # these 4 are the ones that have 100% percent identity with asv_1 and exist in the shotgun data
+  filter(Species %in% c('Enterococcus_durans','Enterococcus_hirae','Enterococcus_faecium','Enterococcus_mundtii')) %>%
+  rename(sampleid = Sample, shotgun_spp = Species, shotgun_relab = Abundance) %>%
+  mutate(shotgun_spp = str_replace(shotgun_spp, 'Enterococcus','E')) %>% 
+  full_join(e_asv_wide %>% select(sampleid, asv_1)) %>%
+  rename(asv1_abundance = asv_1) %>%
+  inner_join(meta %>% select(sampleid, pid, sdrt)) %>%
+  mutate(pid = factor(pid)) %>%
+  split(.$shotgun_spp)
+
+# Assuming 'all_1' is your list of dataframes
+list_names <- names(all_1)
+
+gee_cor <- all_1 %>%
+  imap(function(df_, name_){
+    joined = df_ %>%
+      mutate(asv1_abundance = if_else(is.na(asv1_abundance), 0, asv1_abundance),
+            shotgun_relab = if_else(is.na(shotgun_relab), 0, shotgun_relab) )
+
+    gee_model = geeglm(
+      shotgun_relab ~ asv1_abundance,
+      id = pid,
+      data = joined,
+      family = gaussian,
+      corstr = "exchangeable"
+    )
+
+    # Use broom::tidy() to get a clean summary of the model results
+    gee_results <- tidy(gee_model)
+
+    # Extract the GEE coefficient and p-value for the plot title
+    # We are interested in the term for our predictor, 'asv1_abundance'
+    gee_term <- gee_results %>% filter(term == "asv1_abundance")
+    gee_coeff <- round(gee_term$estimate, 3)
+    gee_p_value <- format(gee_term$p.value, digits = 2, scientific = F)
+
+    p <- ggplot(joined, aes(x = asv1_abundance, y = shotgun_relab)) +
+      # Add the points for each sample, colored by patient ID
+      geom_point( alpha = 0.5, size = 2) +
+      geom_abline(intercept = 0, slope = 1, color = "blue", linetype = "dashed", size = 1.2) +
+      # Use annotate() to place text directly on the plot
+      annotate(
+        "text",
+        x = Inf, y = Inf, # Position at the top-right corner
+        hjust = 1.2, vjust = 1.5, # Adjust to bring it in from the edge
+        color = "red",
+        size = 3,
+        # Use str_glue with a newline character (\n) for two lines
+        label = str_glue("Coeff = {gee_coeff} p = {gee_p_value}")
+      ) +
+
+      # Add informative labels and a title that includes the GEE correlation results
+      labs(
+       # title = str_glue("Correlation between ASV_1 and\n{name_}"),
+        x = "ASV_1 Relative Abundance (16S)",
+        y = str_glue("{name_}\n(Shotgun Relab)")
+      ) +
+      # Use a clean theme
+      theme_bw(base_size = 10) +
+      theme(legend.position = 'none', aspect.ratio = 1/2) 
+    
+    # --- Conditionally remove the x-axis title ---
+    # Check if the current plot is the last one in the list
+    is_last_plot <- name_ == list_names[length(list_names)]
+    
+    # If it's NOT the last plot, remove the x-axis title
+    if (!is_last_plot) {
+      p <- p + theme(axis.title.x = element_blank())
+    }
+    return(p)
+    
+  })
+
+res_1 <- plot_grid(plotlist = gee_cor, nrow = 4, align = 'v' )
+ggsave('../data/R29_cor_asv_1.jpg', height = 10)
 ```
+
+## ASV33 & shotgun spp corresponding to that 
+
+```{r}
+all_33 <- shotgun %>%
+  select(Sample, Species, Abundance) %>%
+  # these 4 are the ones that have 100% percent identity with asv_1 and exist in the shotgun data
+  filter(Species %in% c('Enterococcus_faecalis','Enterococcus_dispar')) %>%
+  rename(sampleid = Sample, shotgun_spp = Species, shotgun_relab = Abundance) %>%
+  mutate(shotgun_spp = str_replace(shotgun_spp, 'Enterococcus','E')) %>% 
+  full_join(e_asv_wide %>% select(sampleid, asv_33)) %>%
+  rename(asv33_abundance = asv_33) %>%
+  inner_join(meta %>% select(sampleid, pid, sdrt)) %>%
+  mutate(pid = factor(pid)) %>%
+  split(.$shotgun_spp)
+
+# Assuming 'all_33' is your list of dataframes
+list_names_33 <- names(all_33)
+
+gee_cor_33 <- all_33 %>%
+  imap(function(df_, name_){
+    joined = df_ %>%
+      mutate(asv33_abundance = if_else(is.na(asv33_abundance), 0, asv33_abundance),
+            shotgun_relab = if_else(is.na(shotgun_relab), 0, shotgun_relab) )
+      
+
+    gee_model = geeglm(
+      shotgun_relab ~ asv33_abundance,
+      id = pid,
+      data = joined,
+      family = gaussian,
+      corstr = "exchangeable"
+    ) 
+
+    # Use broom::tidy() to get a clean summary of the model results
+    gee_results <- tidy(gee_model)
+
+    # Extract the GEE coefficient and p-value for the plot title
+    # We are interested in the term for our predictor, 'asv33_abundance'
+    gee_term <- gee_results %>% filter(term == "asv33_abundance")
+    gee_coeff <- round(gee_term$estimate, 3)
+    gee_p_value <- format(gee_term$p.value, digits = 2, scientific = F)
+
+    p <- ggplot(joined, aes(x = asv33_abundance, y = shotgun_relab)) +
+      # Add the points for each sample, colored by patient ID
+      geom_point( alpha = 0.5, size = 2) +
+      geom_abline(intercept = 0, slope = 1, color = "blue", linetype = "dashed", size = 1.2) +
+      # Use annotate() to place text directly on the plot
+      annotate(
+        "text",
+        x = Inf, y = Inf, # Position at the top-right corner
+        hjust = 1.2, vjust = 1.5, # Adjust to bring it in from the edge
+        color = "red",
+        size = 3,
+        # Use str_glue with a newline character (\n) for two lines
+        label = str_glue("Coeff = {gee_coeff} p = {gee_p_value}")
+      ) +
+
+      # Add informative labels and a title that includes the GEE correlation results
+      labs(
+       # title = str_glue("Correlation between ASV_1 and\n{name_}"),
+        x = "ASV_33 Relative Abundance (16S)",
+        y = str_glue("{name_}\n(Shotgun Relab)")
+      ) +
+      # Use a clean theme
+      theme_bw(base_size = 10) +
+      theme(legend.position = 'none', aspect.ratio = 1/2) 
+    
+    # --- Conditionally remove the x-axis title ---
+    # Check if the current plot is the last one in the list
+    is_last_plot <- name_ == list_names_33[length(list_names_33)]
+    
+    # If it's NOT the last plot, remove the x-axis title
+    if (!is_last_plot) {
+      p <- p + theme(axis.title.x = element_blank())
+    }
+    return(p)
+    
+  })
+
+res_33 <- plot_grid(plotlist = gee_cor_33, nrow = 2, align = 'v' )
+ggsave('../data/R29_cor_asv_33.jpg', height = 6)
+```
+
 # shotgun samples with any Enterococcus
 
-
 ```{r}
-shot_enter <- shotgun %>% 
-  filter(str_detect(Species, 'Enterococcus')) %>% 
-  clean_names() %>% 
-  select(sample, species, abundance, pid) %>% 
-  mutate(
-    asv = case_when(
-    species %in% c("Enterococcus_faecium" , 'Enterococcus_hirae', 'Enterococcus_mundtii', 'Enterococcus_durans') ~ "asv_1",
-    species %in% c("Enterococcus_faecalis", 'Enterococcus_dispar')~ "asv_33",
-    TRUE                              ~ NA_character_ # Handle ties or other cases
-   )
-  ) %>% 
-  filter(abundance > 0)
-
-total_shotgun_samples <- shotgun %>% distinct(Sample) %>% nrow
-
-# Create prevalence data
-prevalence_df <- shot_enter %>%
-  mutate(species_label = str_replace(species, "Enterococcus_", "E. ")) %>% 
-  group_by(asv, species_label) %>%
-  summarise(n_samples = n_distinct(sample)) %>% # Assuming you have a patient ID 'pid'
-  mutate(prevalence = n_samples /total_shotgun_samples) %>%
-  ungroup() %>% 
-   filter(!is.na(asv))
-
-# This step calculates all the summary stats we need for all plots.
-summary_data <- shot_enter %>%
-  mutate(species_label = str_replace(species, "Enterococcus_", "E. ")) %>%
-  group_by(asv, species_label) %>%
-  # Calculate mean abundance and prevalence for sizing and sorting
-  summarise(
-    mean_abundance = mean(abundance),
-    median_abundance = median(abundance),
-    n_samples = n_distinct(sample)
-  ) %>%
-   mutate(prevalence = n_samples /total_shotgun_samples) %>%
-  ungroup() %>% filter(!is.na(asv)) %>% 
-  # Use reorder_within to create the sortable factor
-  mutate(species_ordered = reorder_within(species_label, median_abundance, asv))
+# shot_enter <- shotgun %>% 
+#   filter(str_detect(Species, 'Enterococcus')) %>% 
+#   clean_names() %>% 
+#   select(sample, species, abundance, pid) %>% 
+#   mutate(
+#     asv = case_when(
+#     species %in% c("Enterococcus_faecium" , 'Enterococcus_hirae', 'Enterococcus_mundtii', 'Enterococcus_durans') ~ "asv_1",
+#     species %in% c("Enterococcus_faecalis", 'Enterococcus_dispar')~ "asv_33",
+#     TRUE                              ~ NA_character_ # Handle ties or other cases
+#    )
+#   ) %>% 
+#   filter(abundance > 0)
+# 
+# total_shotgun_samples <- shotgun %>% distinct(Sample) %>% nrow
+# 
+# # Create prevalence data
+# prevalence_df <- shot_enter %>%
+#   mutate(species_label = str_replace(species, "Enterococcus_", "E. ")) %>% 
+#   group_by(asv, species_label) %>%
+#   summarise(n_samples = n_distinct(sample)) %>% # Assuming you have a patient ID 'pid'
+#   mutate(prevalence = n_samples /total_shotgun_samples) %>%
+#   ungroup() %>% 
+#    filter(!is.na(asv))
+# 
+# # This step calculates all the summary stats we need for all plots.
+# summary_data <- shot_enter %>%
+#   mutate(species_label = str_replace(species, "Enterococcus_", "E. ")) %>%
+#   group_by(asv, species_label) %>%
+#   # Calculate mean abundance and prevalence for sizing and sorting
+#   summarise(
+#     mean_abundance = mean(abundance),
+#     median_abundance = median(abundance),
+#     n_samples = n_distinct(sample)
+#   ) %>%
+#    mutate(prevalence = n_samples /total_shotgun_samples) %>%
+#   ungroup() %>% filter(!is.na(asv)) %>% 
+#   # Use reorder_within to create the sortable factor
+#   mutate(species_ordered = reorder_within(species_label, median_abundance, asv))
+# 
+# plot_data <- shot_enter %>%
+#   mutate(species_label = str_replace(species, "Enterococcus_", "E. ")) %>% 
+#   filter(!is.na(asv))%>%
+#   # This is the key step for sorting within each facet
+#   # We calculate the median abundance for each species WITHIN each 'asv' group
+#   group_by(asv, species_label) %>%
+#   mutate(median_abundance = median(abundance)) %>%
+#   ungroup()
+# 
+# # Now, use reorder_within to create a new factor that ggplot can sort correctly
+# plot_data_sorted <- plot_data %>%
+#   mutate(species_ordered = reorder_within(species_label, median_abundance, asv))
+# 
+# 
+# 
+# p_abundance <- ggplot(plot_data_sorted, aes(x = abundance, y = species_ordered)) +
+#   geom_jitter(aes(color = asv), alpha = 0.4, height = 0.2, size = 1.5) +
+#   geom_boxplot(width = 0.4, outlier.shape = NA, fill = NA, color = "gray30") +
+#   # Add the mean value as a diamond
+#   stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "white", color = "black") +
+#   # This special scale works with reorder_within to create the correct labels
+#   scale_y_reordered() +
+#   facet_wrap(~ asv, ncol = 1, scales = "free_y") +
+#   labs(
+#     #title = "Species Abundance",
+#     x = "Relative Abundance",
+#     y = "Metagenomic sequencing species"
+#   ) +
+#   theme_minimal_grid() +
+#   theme(
+#   legend.position = "none",
+#     strip.text = element_text(face = "bold", size = 12),
+#     axis.ticks.y = element_blank()
+#   )
+# 
+# # --- 3. Prepare the Prevalence Data ---
+# 
+# 
+# # Apply the same sorting logic to the prevalence data
+# prevalence_sorted <- prevalence_df %>%
+#   left_join(plot_data_sorted %>% select(species_label, asv, median_abundance) %>% distinct(), 
+#             by = c("species_label", "asv")) %>%
+#   mutate(species_ordered = reorder_within(species_label, median_abundance, asv))
+# 
+# 
+# # --- 4. Create the Prevalence Bar Plot (Panel 2) ---
+# 
+# p2 <- ggplot(prevalence_sorted, aes(x = prevalence, y = species_ordered)) +
+#   geom_col(aes(fill = asv), alpha = 0.8) +
+#   geom_text(aes(label = scales::percent(prevalence, accuracy = 1)), hjust = -0.2, size = 3.5) +
+#   scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
+#   # Use the same facet wrap and scale_y_reordered to ensure perfect alignment
+#   scale_y_reordered() +
+#   facet_wrap(~ asv, ncol = 1, scales = "free_y") +
+#   labs(
+#     #title = "Prevalence",
+#     x = "Prevalence",
+#     y = ""
+#   ) +
+#   theme_minimal_grid() +
+#   theme(
+#     legend.position = "none",
+#     strip.text = element_text(face = "bold", size = 12),
+#     axis.text.y = element_blank(), # Hide y-axis text as it's redundant
+#     axis.ticks.y = element_blank()
+#   )
+# 
+# # --- 5. Combine the Plots ---
+# 
+# p_species_level <- plot_grid(p_abundance, p2, align = 'h', # Align horizontally
+#           axis = "tb",
+#           nrow = 1,
+#           rel_widths = c(1.2, 1))
 ```
 
+# two cluster text label  
 
 ```{r}
-plot_data <- shot_enter %>%
-  mutate(species_label = str_replace(species, "Enterococcus_", "E. ")) %>% 
-  filter(!is.na(asv))%>%
-  # This is the key step for sorting within each facet
-  # We calculate the median abundance for each species WITHIN each 'asv' group
-  group_by(asv, species_label) %>%
-  mutate(median_abundance = median(abundance)) %>%
+# --- 1. Calculate Summary Data for the Diagram ---
+# We need to get the mean abundance for each species within each ASV group
+summary_data_cluster <- summary_data %>% 
+  # Crucially, sort the species by mean abundance WITHIN each ASV group
+  group_by(asv) %>%
+  arrange(desc(mean_abundance)) %>%
+# Assign horizontal position (1, 2, 3...) for plotting
+  mutate(x_pos = row_number()) %>%
   ungroup()
 
-# Now, use reorder_within to create a new factor that ggplot can sort correctly
-plot_data_sorted <- plot_data %>%
-  mutate(species_ordered = reorder_within(species_label, median_abundance, asv))
 
-# A dedicated plot just for our data-driven labels.
-p_labels <- ggplot(summary_data, aes(x = 0, y = species_ordered)) +
-  # Use geom_text to create the labels, sizing them by mean abundance
-  geom_text(aes(label = species_label, size = mean_abundance), hjust = 0) +
-  # This special scale works with reorder_within
-  scale_y_reordered() +
-  # Control the range of font sizes for a nice visual effect
-  scale_size_continuous(range = c(2.5, 8)) +
-  facet_wrap(~ asv, ncol = 1, scales = "free_y") +
-  # Make everything except the text invisible
+# --- 2. Create the Diagram with ggplot2 ---
+annot <- ggplot(summary_data_cluster, aes(x = x_pos, y = asv)) +
+  
+  # This layer adds the species names.
+  # The 'size' is scaled by mean_abundance.
+  geom_text(
+    aes(label = species_label, size = mean_abundance),
+    vjust = 0.5 # This helps vertically center the text in each row
+  ) +
+  
+  # This layer adds the "asv_X -->" labels at the start of each row.
+  # We use a subset of the data so the label only appears once per row.
+  geom_text(
+    data = . %>% distinct(asv), 
+    aes(x = 0, label = paste0(asv, "   →")),
+    size = 6,
+    #fontface = "bold",
+    hjust = 1 # Right-aligns the text to the arrow
+  ) +
+  
+  # This controls the range of font sizes for a nice visual effect.
+  scale_size_continuous(range = c(4, 11)) +
+  
+  # This expands the x-axis limits to ensure all text fits.
+  xlim(-1, max(summary_data_cluster$x_pos) + 0.5) +
+  
+  # This removes all plot elements (axes, grid, background) for a clean look.
   theme_void() +
   theme(
-    strip.text = element_blank(), # Hide facet titles, they'll be on the other plots
-    legend.position = "none"
+    legend.position = "none" # Hides the size legend.
   )
-
-p_abundance <- ggplot(plot_data_sorted, aes(x = abundance, y = species_ordered)) +
-  geom_jitter(aes(color = asv), alpha = 0.4, height = 0.2, size = 1.5) +
-  geom_boxplot(width = 0.4, outlier.shape = NA, fill = NA, color = "gray30") +
-  # Add the mean value as a diamond
-  stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "white", color = "black") +
-  # This special scale works with reorder_within to create the correct labels
-  scale_y_reordered() +
-  facet_wrap(~ asv, ncol = 1, scales = "free_y") +
-  labs(
-    title = "Species Abundance",
-    x = "Relative Abundance",
-    y = ""
-  ) +
-  theme_minimal_grid() +
-  theme(
-  legend.position = "none",
-    strip.text = element_text(face = "bold", size = 12),
-    axis.text.y = element_blank(), # Hide the default axis text
-    axis.ticks.y = element_blank()
-  )
-
-# --- 3. Prepare the Prevalence Data ---
-
-
-# Apply the same sorting logic to the prevalence data
-prevalence_sorted <- prevalence_df %>%
-  left_join(plot_data_sorted %>% select(species_label, asv, median_abundance) %>% distinct(), 
-            by = c("species_label", "asv")) %>%
-  mutate(species_ordered = reorder_within(species_label, median_abundance, asv))
-
-
-# --- 4. Create the Prevalence Bar Plot (Panel 2) ---
-
-p2 <- ggplot(prevalence_sorted, aes(x = prevalence, y = species_ordered)) +
-  geom_col(aes(fill = asv), alpha = 0.8) +
-  geom_text(aes(label = scales::percent(prevalence, accuracy = 1)), hjust = -0.2, size = 3.5) +
-  scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
-  # Use the same facet wrap and scale_y_reordered to ensure perfect alignment
-  scale_y_reordered() +
-  facet_wrap(~ asv, ncol = 1, scales = "free_y") +
-  labs(
-    title = "Prevalence",
-    x = "Prevalence",
-    y = ""
-  ) +
-  theme_minimal_grid() +
-  theme(
-    legend.position = "none",
-    strip.text = element_text(face = "bold", size = 12),
-    axis.text.y = element_blank(), # Hide y-axis text as it's redundant
-    axis.ticks.y = element_blank()
-  )
-
-# --- 5. Combine the Plots ---
-
-p_species_level <- plot_grid(p_labels, p_abundance, p2, align = 'h', # Align horizontally
-          axis = "tb",
-          nrow = 1,
-          rel_widths = c(0.3, 1.5, 1))
 ```
 
-# final plot assemble  
+# assemble 
+
+## table
 
 ```{r}
+# the table that has the cluster information from Nick
+# --- 1. Read the Table Data from the CSV file ---
+# This reads the provided CSV into a dataframe.
+# The `read_csv` function is generally robust to different CSV formats.
+cluster_table <- read_csv("../data/cluster_table.csv")
+
+# --- 2. Process the Data for Plotting ---
+# To create the table, we need to group by 'asv' and collapse all the
+# associated species into a single line of text.
+table_data <- cluster_table %>%
+  # Grouping by 'asv' so we can summarize all species for each one
+  group_by(asv) %>%
+  # The 'summarise' function creates the list. 'paste' joins the text.
+  summarise(
+    # We clean up the species names and join them with a comma and space
+    possible_species = paste(str_replace(species, "Enterococcus_", "E. "), collapse = ", ")
+  ) %>%
+  ungroup()
+
+
+# --- 3. Create the Table Plot (Panel A) ---
+# This ggplot object is designed to look like a clean text table.
+p_table <- table_data %>%
+  # We use Markdown formatting to make the ASV names bold.
+  mutate(label = glue::glue("**{asv}**: {possible_species}")) %>%
+  ggplot(aes(x = 0, y = fct_rev(asv))) +
+  # 'geom_richtext' from the ggtext package renders the Markdown formatting.
+  geom_richtext(
+    aes(label = label),
+    hjust = 0,          # Left-align the text
+    label.color = NA,   # This removes the box around the text
+    fill = NA
+  ) +
+  labs(
+    title = "ASV to Species Cluster Mapping"
+  ) +
+  # This makes the x-axis wide enough for the text to fit.
+  scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  # 'theme_void' removes all plot decorations (axes, gridlines, background).
+  theme_void() +
+  theme(
+    axis.text.y = element_blank(), # The ASV is in the text, so the axis label is redundant.
+    plot.title = element_text(hjust = 0.5, face = "bold", margin = margin(b = 10))
+  )
+p_table
+```
+
+## bottom
+
+```{r}
+# the bottom row that has my correlation plot
+# decided to arrange the panels manually .....
+bottom <- plot_grid(
+  gee_cor$E_faecium, gee_cor_33$E_faecalis,
+  gee_cor$E_mundtii, gee_cor_33$E_dispar,
+  gee_cor$E_hirae, NA,
+  gee_cor$E_durans, NA,
+  ncol = 2,          # Arrange them in two rows (vertically)
+  align = 'hv',       # Align them horizontally
+  axis = 'lrtb',
+  rel_widths  = c(1, 1) # Give the bottom plot 1.5x the height of the top one
+)
+bottom
+
 # plot_grid arranges the plots and aligns them
 final_plot <- plot_grid(
   p_asv_level, 
-  p_species_level, 
-  nrow = 2,          # Arrange them in two rows (vertically)
+  p_table, 
+  bottom,
+  nrow = 3,          # Arrange them in two rows (vertically)
   align = 'hv',       # Align them horizontally
-  rel_heights = c(1, 1.5) # Give the bottom plot 1.5x the height of the top one
+  rel_heights = c(.7, 0.5, 1.8) # Give the bottom plot 1.5x the height of the top one
 )
 
 title <- ggdraw() + 
@@ -890,11 +1071,10 @@ combined <- plot_grid(
   title, final_plot,
   ncol = 1,
   # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
+  rel_heights = c(0.01, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/R29_Enterococcus_spp.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300) 
 ```
-
