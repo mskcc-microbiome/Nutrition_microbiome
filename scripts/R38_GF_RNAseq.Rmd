@@ -25,6 +25,7 @@ library(ggupset)
 library(pheatmap)      # For creating the heatmap
 library(viridis)  
 library(RColorBrewer) 
+library(gridExtra)
 ```
 
 Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
@@ -794,12 +795,12 @@ head(ranked_genes_li2)
 # "Biological Process" (BP) collection is a great place to start.
 
 # Fetch all GO:BP gene sets for mouse ("Mus musculus")
-go_bp_sets <- msigdbr(species = "Mus musculus", category = "C5", subcategory = "GO:BP")
-
-# fgsea requires the gene sets in a specific list format.
-# We'll convert the dataframe from msigdbr into that format.
-go_pathways <- go_bp_sets %>%
-  split(x = .$gene_symbol, f = .$gs_name)
+# go_bp_sets <- msigdbr(species = "Mus musculus", category = "C5", subcategory = "GO:BP")
+# 
+# # fgsea requires the gene sets in a specific list format.
+# # We'll convert the dataframe from msigdbr into that format.
+# go_pathways <- go_bp_sets %>%
+#   split(x = .$gene_symbol, f = .$gs_name)
 
 # Fetch the 50 Hallmark gene sets for mouse
 hallmark_sets <- msigdbr(species = "Mus musculus", category = "H")
@@ -807,7 +808,7 @@ hallmark_pathways <- hallmark_sets %>%
   split(x = .$gene_symbol, f = .$gs_name)
 
 # Combine both lists of pathways for a comprehensive analysis
-combined_pathways <- c(go_pathways, hallmark_pathways)
+# combined_pathways <- c(go_pathways, hallmark_pathways)
 
 names(hallmark_pathways)
 ```
@@ -1158,162 +1159,8 @@ print("Pairwise overlap count of common leading edge genes:")
 print(overlap_matrix)
 ```
 
-### heatmap
-
-```{r}
-# Define custom colors for the tissue annotation to be yellow and green
-ann_colors <- list(
-    tissue = c(small_intestine = "yellow", large_intestine = "green"),
-    treatment = color_palette
-)
-
-# --- Create a Heatmap of Common Leading Edge Genes ---
-
-# First, get a single unique vector of all the common leading edge genes
-genes_to_plot <- unique(unlist(common_leading_edge_genes))
-
-all_counts_li <- genes_to_plot %>% 
-  set_names(genes_to_plot) %>% 
-  map(~get_gene_counts(dds_li, .x, "Large Intestine")) %>% 
-  bind_rows(.id = 'gene')
-
-all_counts_si <- genes_to_plot %>% 
-  set_names(genes_to_plot) %>% 
-  map(~get_gene_counts(dds_si, .x, "Small Intestine")) %>% 
-  bind_rows(.id = 'gene')
-```
 
 
-```{r}
-# Combine the data from both tissues
-combined_tidy_counts <- bind_rows(all_counts_li, all_counts_si)
-
-# Prepare the data matrix for the heatmap (genes on rows, samples on columns)
-heatmap_matrix <- combined_tidy_counts %>%
-  dplyr::select(gene_symbol = gene, sample = sample_name, normalized_count = count, tissue) %>%
-  # Handle cases where a gene might not have counts in all samples
-  filter(!is.na(gene_symbol))
-```
-
-
-```{r}
-# Create separate matrices for each tissue
-heatmap_matrix_li <- heatmap_matrix %>%
-    filter(tissue == "Large Intestine") %>%
-    dplyr::select(-tissue) %>%
-    pivot_wider(names_from = sample, values_from = normalized_count) %>%
-    column_to_rownames("gene_symbol")
-
-heatmap_matrix_si <- heatmap_matrix %>%
-    filter(tissue == "Small Intestine") %>%
-    dplyr::select(-tissue) %>%
-    pivot_wider(names_from = sample, values_from = normalized_count) %>%
-    column_to_rownames("gene_symbol")
-
-# Ensure both matrices have the same genes before ordering
-common_genes <- intersect(rownames(heatmap_matrix_li), rownames(heatmap_matrix_si))
-heatmap_matrix_li <- heatmap_matrix_li[common_genes, ]
-heatmap_matrix_si <- heatmap_matrix_si[common_genes, ]
-
-
-# Prepare the annotation dataframes
-annotation_col_li <- combined_tidy_counts %>% filter(tissue == "Large Intestine") %>% dplyr::select(sample = sample_name, treatment) %>% distinct() %>% column_to_rownames("sample")
-annotation_col_si <- combined_tidy_counts %>% filter(tissue == "Small Intestine") %>% dplyr::select(sample = sample_name, treatment) %>% distinct() %>% column_to_rownames("sample")
-
-# Define a colorblind-friendly Red-White-Blue color palette
-my_colors <- colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(100)
-
-# Generate a heatmap for the LI just to get the gene clustering order
-p_li_for_clustering <- pheatmap(heatmap_matrix_li, scale = "row", silent = TRUE)
-gene_order <- p_li_for_clustering$tree_row$order
-ordered_gene_names <- rownames(heatmap_matrix_li)[gene_order]
-
-# Reorder both matrices using the gene order from the LI heatmap
-heatmap_matrix_li_ordered <- heatmap_matrix_li[ordered_gene_names, ]
-heatmap_matrix_si_ordered <- heatmap_matrix_si[ordered_gene_names, ]
-
-
-# Generate and save the Large Intestine heatmap
-pheatmap(
-  heatmap_matrix_li_ordered,
-  main = "Large Intestine: Common Leading Edge Genes",
-  annotation_col = annotation_col_li,
-  color = my_colors,
-  scale = "row",
-  cluster_rows = FALSE, # Disable clustering to maintain the common order
-  cluster_cols = TRUE,
-  fontsize_row = 8,
-  filename = "../data/R38_heatmap_large_intestine.png",
-  width = 8,
-  height = 11
-)
-
-# Generate and save the Small Intestine heatmap
-pheatmap(
-  heatmap_matrix_si_ordered,
-  main = "Small Intestine: Common Leading Edge Genes",
-  annotation_col = annotation_col_si,
-  color = my_colors,
-  scale = "row",
-  cluster_rows = FALSE, # Disable clustering to maintain the common order
-  cluster_cols = TRUE,
-  fontsize_row = 8,
-  filename = "../data/R38_heatmap_small_intestine.png",
-  width = 8,
-  height = 11
-)
-```
-
-
-```{r}
-# the unique genes in the two pathways specifically
-interferon_alpha_genes <- common_leading_edge_genes[["HALLMARK_INTERFERON_ALPHA_RESPONSE"]]
-interferon_gamma_genes <- common_leading_edge_genes[["HALLMARK_INTERFERON_GAMMA_RESPONSE"]]
-unique_interferon_genes <- union(interferon_alpha_genes, interferon_gamma_genes)
-```
-
-### interferon_genes
-
-```{r}
-# Prepare the data matrix for the heatmap (genes on rows, samples on columns)
-heatmap_matrix <- combined_tidy_counts %>%
-  filter(gene %in% unique_interferon_genes ) %>% 
-  dplyr::select(gene, sample_name, count) %>%
-  pivot_wider(names_from = sample_name, values_from = count) %>%
-  column_to_rownames("gene")
-
-# Prepare the annotation dataframe for the columns (samples)
-annotation_col <- combined_tidy_counts %>%
-  dplyr::select(sample_name, tissue, treatment) %>%
-  distinct() %>%
-  column_to_rownames("sample_name")
-
-my_colors_rd_bu <- colorRampPalette(rev(brewer.pal(n = 11, name = "RdBu")))(100)
-
-ann_colors <- list(
-    tissue = c(`Small Intestine` = "yellow", `Large Intestine` = "green"),
-    treatment = color_palette
-)
-
-# Generate the heatmap
-pheatmap(
-  heatmap_matrix,
-  main = "Expression of Common Leading Edge Genes in the interferon pathways",
-  annotation_col = annotation_col,
-  annotation_colors = ann_colors,
-  color = my_colors_rd_bu,         # Use a colorblind-friendly palette
-  scale = "row",                # Scale genes to have mean 0 and SD 1
-  show_colnames = TRUE,
-  show_rownames = TRUE,
-  cluster_cols = TRUE,          # Cluster samples based on similarity
-  cluster_rows = TRUE,          # Cluster genes based on similarity
-  filename = '../data/R38_leading_genes_heatmap.png',
-  fontsize_row = 8, # Directly save the plot as a PNG
-  width = 10, # Specify width in inches
-  height = 8 # Specify height in inches
-)
-
-```
 
 ### top and bottom genes heatmap
 
@@ -1405,155 +1252,7 @@ pheatmap(
 )
 
 ```
-### treatment effects
 
-```{r}
-# --- Step 1: Select Genes of Interest from Key GSEA Pathways ---
-# This approach focuses on genes from pathways that you know are behaving differently.
-
-
-
-# Extract the significant pathway names from each dataframe
-list_of_gsea_dfs <- lapply(list_of_dfs, function(df) {
-  df %>%
-    filter(padj < 0.05) 
-})
-
-# Define the pathways that tell the most interesting story
-pathways_of_interest <- c(
-  "HALLMARK_E2F_TARGETS", # Proliferation
-  "HALLMARK_INTERFERON_ALPHA_RESPONSE", # Immune response
-  "HALLMARK_OXIDATIVE_PHOSPHORYLATION" # Metabolism
-)
-
-# Extract all unique leading-edge genes from these pathways across all 4 contrasts
-genes_to_plot <- list_of_gsea_dfs %>%
-  map_dfr(~ .x %>% filter(pathway %in% pathways_of_interest)) %>%
-  pull(leadingEdge) %>%
-  unlist() %>%
-  unique()
-```
-
-
-```{r}
-# --- Step 2: Create a Matrix of Log2 Fold Changes ---
-# The matrix will have genes on rows and contrasts on columns.
-
-# List your shrunken results dataframes in the correct order
-list_of_shrunken_dfs <- list(
-  LI_Colonization = shrunken_li_contrast1,
-  LI_Sucrose = shrunken_li_contrast2,
-  SI_Colonization = shrunken_si_contrast1,
-  SI_Sucrose = shrunken_si_contrast2
-)
-
-# Map over the list to extract the LFC for each gene, creating a single dataframe
-processed_lfc_list <- list_of_shrunken_dfs %>%
-  map(~ as.data.frame(.x) %>%
-        rownames_to_column("ensembl_version") %>%
-        # Ensure log2FoldChange is not NA
-        filter(!is.na(log2FoldChange)) %>%
-        # Clean the ensembl ID by removing the version
-        mutate(ENSEMBL = str_remove(ensembl_version, "\\..*")) %>%
-        # Add gene symbols
-        mutate(SYMBOL = mapIds(org.Mm.eg.db,
-                               keys = ENSEMBL,
-                               column = "SYMBOL",
-                               keytype = "ENSEMBL",
-                               multiVals = "first")) %>%
-        # Remove genes that didn't map to a symbol and filter for our genes of interest
-        filter(!is.na(SYMBOL) & SYMBOL %in% genes_to_plot) %>%
-        # In case one symbol maps to multiple Ensembl IDs, take the one with the largest absolute LFC
-        group_by(SYMBOL) %>%
-        slice_max(abs(log2FoldChange), n = 1, with_ties = FALSE) %>%
-        ungroup() %>%
-        dplyr::select(SYMBOL, log2FoldChange)) 
-
-# Now, join the list of processed dataframes together using purrr::reduce
-lfc_df_joined <- purrr::reduce(processed_lfc_list, full_join, by = "SYMBOL")
-
-# Finally, clean up the column names and set the row names to create the final matrix
-lfc_matrix <- lfc_df_joined %>%
-  `colnames<-`(c("SYMBOL", names(list_of_shrunken_dfs))) %>%
-  column_to_rownames("SYMBOL")
-```
-
-
-```{r}
-# --- Step 3: Generate the LFC Heatmaps (Split by Tissue and Paneled by Pathway) ---
-
-# Define a colorblind-friendly Red-White-Blue color palette
-my_colors <- colorR-ampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(100)
-
-# Create a mapping of genes to their primary pathway for annotation
-# Get the unique leading edge genes for each pathway
-genes_prolif <- list_of_gsea_dfs %>% map_dfr(~.x %>% filter(pathway == "HALLMARK_E2F_TARGETS")) %>% pull(leadingEdge) %>% unlist() %>% unique()
-genes_immune <- list_of_gsea_dfs %>% map_dfr(~.x %>% filter(pathway == "HALLMARK_INTERFERON_ALPHA_RESPONSE")) %>% pull(leadingEdge) %>% unlist() %>% unique()
-genes_metab <- list_of_gsea_dfs %>% map_dfr(~.x %>% filter(pathway == "HALLMARK_OXIDATIVE_PHOSPHORYLATION")) %>% pull(leadingEdge) %>% unlist() %>% unique()
-
-# Create the row annotation dataframe
-annotation_row <- data.frame(
-  Pathway = case_when(
-    rownames(lfc_matrix) %in% genes_prolif ~ "Proliferation",
-    rownames(lfc_matrix) %in% genes_immune ~ "Immune Response",
-    rownames(lfc_matrix) %in% genes_metab ~ "Metabolism",
-    TRUE ~ "Other"
-  )
-)
-rownames(annotation_row) <- rownames(lfc_matrix)
-
-# Order the annotation and the main matrix by Pathway for clean paneling
-annotation_row <- annotation_row %>% arrange(Pathway)
-lfc_matrix_ordered <- lfc_matrix[rownames(annotation_row), ]
-
-# Calculate the positions for the gaps between panels
-gaps_row <- table(annotation_row$Pathway) %>% cumsum() %>% head(-1)
-
-# Define colors for the row annotation
-ann_colors <- list(
-  Pathway = c(Proliferation = "#E41A1C", `Immune Response` = "#377EB8", Metabolism = "#4DAF4A")
-)
-
-# Split the ordered LFC matrix into SI and LI
-lfc_matrix_si <- lfc_matrix_ordered %>% dplyr::select(contains("SI"))
-lfc_matrix_li <- lfc_matrix_ordered %>% dplyr::select(contains("LI"))
-
-# Generate the Small Intestine heatmap with panels
-pheatmap(
-  lfc_matrix_si,
-  main = "Small Intestine: Treatment Effects (LFC)",
-  color = my_colors,
-  annotation_row = annotation_row,
-  annotation_colors = ann_colors,
-  cluster_cols = FALSE,
-  cluster_rows = FALSE, # Clustering is now manual
-  gaps_row = gaps_row,  # Add gaps between pathway panels
-  show_rownames = TRUE,
-  fontsize_row = 8,
-  filename = "../data/LFC_heatmap_SI_effects_paneled.png",
-  width = 7,
-  height = 12
-)
-
-# Generate the Large Intestine heatmap with panels
-pheatmap(
-  lfc_matrix_li,
-  main = "Large Intestine: Treatment Effects (LFC)",
-  color = my_colors,
-  annotation_row = annotation_row,
-  annotation_colors = ann_colors,
-  cluster_cols = FALSE,
-  cluster_rows = FALSE, # Clustering is now manual
-  gaps_row = gaps_row,  # Add gaps between pathway panels
-  show_rownames = TRUE,
-  fontsize_row = 8,
-  filename = "../data/LFC_heatmap_LI_effects_paneled.png",
-  width = 7,
-  height = 12
-)
-
-
-```
 
 ## the enrichment plots
 
@@ -1654,5 +1353,233 @@ combined <- plot_grid(
 ggsave('../data/R38_germ_free_RNAseq.pdf',
       width = 8.5, height = 16, units = "in", device = 'pdf', 
       dpi = 300)                    
+```
+
+# gsea combine
+
+```{r}
+# Arrange the Plots into a 2x2 Grid with Cowplot ---
+
+# Arrange the SI plots into the top row
+top_row <- plot_grid(sig_pw_bar_SI1, sig_pw_bar_SI, ncol = 2)
+
+# Arrange the LI plots into the bottom row
+bottom_row <- plot_grid(sig_pw_bar_LI1, sig_pw_bar_LI, ncol = 2)
+
+# Create titles for the rows
+si_title <- ggdraw() + draw_label("Small Intestine", fontface = 'bold', x = 0.5, size = 18)
+li_title <- ggdraw() + draw_label("Large Intestine", fontface = 'bold', x = 0.5, size = 18)
+
+# Combine the titled rows into the final plot
+final_plot <- plot_grid(
+  si_title,
+  top_row,
+  li_title,
+  bottom_row,
+  ncol = 1,
+  rel_heights = c(0.1, 1, 0.1, 1) # Give space for the titles
+)
+
+# --- Step 4: Save the Final Figure ---
+
+# Save the combined plot to a file
+save_plot("../data/R38_gsea_summary_figure.jpg", final_plot, base_width = 14, base_height = 12)
+```
+
+## heatmap of the opposing two pathways
+
+```{r}
+# --- Step 1: Identify Key Genes from GSEA Results ---
+
+# List your GSEA result dataframes
+list_of_gsea_dfs <- lapply(list_of_dfs, function(df) {
+  df %>%
+    filter(padj < 0.05)
+})
+
+# Define the key opposing pathways you want to visualize
+prolif_pathways <- c("HALLMARK_E2F_TARGETS", "HALLMARK_G2M_CHECKPOINT")
+immune_pathways <- c("HALLMARK_INTERFERON_ALPHA_RESPONSE", "HALLMARK_INTERFERON_GAMMA_RESPONSE")
+
+# A helper function to extract leading-edge genes for a set of pathways
+get_leading_edge_genes <- function(gsea_list, target_pathways) {
+  gsea_list %>%
+    map_dfr(~ .x %>% filter(pathway %in% target_pathways)) %>%
+    pull(leadingEdge) %>%
+    unlist() %>%
+    unique()
+}
+
+# Get the unique genes for each biological theme
+prolif_genes <- get_leading_edge_genes(list_of_gsea_dfs, prolif_pathways)
+immune_genes <- get_leading_edge_genes(list_of_gsea_dfs, immune_pathways)
+genes_to_plot <- unique(c(prolif_genes, immune_genes))
+```
+
+
+```{r}
+# --- Step 2: Extract and Prepare Normalized Count Data ---
+
+all_counts_li <- genes_to_plot %>% 
+  set_names(genes_to_plot) %>% 
+  map(~get_gene_counts(dds_li, .x, "Large Intestine")) %>% 
+  bind_rows(.id = 'gene')
+
+all_counts_si <- genes_to_plot %>% 
+  set_names(genes_to_plot) %>% 
+  map(~get_gene_counts(dds_si, .x, "Small Intestine")) %>% 
+  bind_rows(.id = 'gene')
+
+```
+
+### Colonization effects
+
+```{r}
+each_width <- 4
+each_height <- 6
+# --- Step 2: Prepare a Reusable Heatmap Plotting Function ---
+# This function will take a tidy dataframe and generate a heatmap.
+
+generate_tissue_heatmap <- function(tidy_counts_df, tissue_name) {
+  
+  # Filter for the genes of interest
+  plot_data_tidy <- tidy_counts_df %>%
+    filter(gene %in% genes_to_plot)%>%
+    filter(str_detect(treatment, "regular_water"))
+  
+  # Convert the tidy data to a matrix for pheatmap
+  plot_matrix <- plot_data_tidy %>%
+    dplyr::select(gene, sample_name, count) %>%
+    pivot_wider(names_from = sample_name, values_from = count) %>%
+    column_to_rownames("gene")
+  
+  # Create the annotation for the columns (samples)
+  annotation_col <- plot_data_tidy %>%
+    dplyr::select(sample_name, treatment) %>% # Can add other columns like 'water' if needed
+    distinct() %>%
+    column_to_rownames("sample_name")
+  
+  # Create the annotation for the rows (genes)
+  annotation_row <- data.frame(
+    Pathway = case_when(
+      rownames(plot_matrix) %in% prolif_genes ~ "Proliferation",
+      rownames(plot_matrix) %in% immune_genes ~ "Immune Response"
+    )
+  )
+  rownames(annotation_row) <- rownames(plot_matrix)
+  
+  # Order the matrix and annotations by Pathway for clean paneling
+  annotation_row <- annotation_row %>% arrange(Pathway)
+  plot_matrix <- plot_matrix[rownames(annotation_row), ]
+  
+  # Calculate the positions for the gaps between gene groups
+  gaps_row <- table(annotation_row$Pathway) %>% cumsum() %>% head(-1)
+  
+  # Define custom colors
+  ann_colors <- list(
+    treatment = setNames(c("#A2E8E6", "#00BFC4"),
+                         c("PBS__regular_water", "E. faecalis__regular_water")),
+    Pathway = c(Proliferation = "#D95F02", `Immune Response` = "purple")
+  )
+  
+  # Generate the heatmap
+  pheatmap(
+    plot_matrix,
+    main = paste(tissue_name, "- Colonization Effect"),
+    annotation_col = annotation_col,
+    annotation_row = annotation_row,
+    annotation_colors = ann_colors,
+    scale = "row", # Scale genes to have mean 0 and SD 1 (Z-score)
+    cluster_cols = F, # Cluster samples by similarity
+    cluster_rows = FALSE, # Keep the defined pathway grouping
+    gaps_row = gaps_row, # Add a visual gap between pathways
+    show_rownames = F,
+    fontsize_row = 10,
+    filename = paste0("../data/gsea_leading_edge_heatmap_Colonization_", gsub(" ", "_", tissue_name), ".jpg"),
+    width = each_width,
+    height = each_height
+  )
+}
+
+# --- Step 3: Generate the Two Heatmaps ---
+
+
+# Generate the heatmap for the Small Intestine
+generate_tissue_heatmap(all_counts_si, "Small Intestine")
+
+# Generate the heatmap for the Large Intestine
+generate_tissue_heatmap(all_counts_li, "Large Intestine")
+
+####################################### sucrose effects
+
+generate_tissue_heatmap_sucrose <- function(tidy_counts_df, tissue_name) {
+  
+  # Filter for the genes of interest
+  plot_data_tidy <- tidy_counts_df %>%
+    filter(gene %in% genes_to_plot)%>%
+    filter(str_detect(treatment, "E. faecalis"))
+  
+  # Convert the tidy data to a matrix for pheatmap
+  plot_matrix <- plot_data_tidy %>%
+    dplyr::select(gene, sample_name, count) %>%
+    pivot_wider(names_from = sample_name, values_from = count) %>%
+    column_to_rownames("gene")
+  
+  # Create the annotation for the columns (samples)
+  annotation_col <- plot_data_tidy %>%
+    dplyr::select(sample_name, treatment) %>% # Can add other columns like 'water' if needed
+    distinct() %>%
+    column_to_rownames("sample_name")
+  
+  # Create the annotation for the rows (genes)
+  annotation_row <- data.frame(
+    Pathway = case_when(
+      rownames(plot_matrix) %in% prolif_genes ~ "Proliferation",
+      rownames(plot_matrix) %in% immune_genes ~ "Immune Response"
+    )
+  )
+  rownames(annotation_row) <- rownames(plot_matrix)
+  
+  # Order the matrix and annotations by Pathway for clean paneling
+  annotation_row <- annotation_row %>% arrange(Pathway)
+  plot_matrix <- plot_matrix[rownames(annotation_row), ]
+  
+  # Calculate the positions for the gaps between gene groups
+  gaps_row <- table(annotation_row$Pathway) %>% cumsum() %>% head(-1)
+  
+  # Define custom colors
+  ann_colors <- list(
+    treatment = setNames(c("#00BFC4", "#F8766D"),
+                         c("E. faecalis__regular_water", "E. faecalis__sucrose_water")),
+    Pathway = c(Proliferation = "#D95F02", `Immune Response` = "purple")
+  )
+       
+  # Generate the heatmap
+  pheatmap(
+    plot_matrix,
+    main = paste(tissue_name, "- Sucrose Effect"),
+    annotation_col = annotation_col,
+    annotation_row = annotation_row,
+    annotation_colors = ann_colors,
+    scale = "row", # Scale genes to have mean 0 and SD 1 (Z-score)
+    cluster_cols = F, # Cluster samples by similarity
+    cluster_rows = FALSE, # Keep the defined pathway grouping
+    gaps_row = gaps_row, # Add a visual gap between pathways
+    show_rownames = F,
+    fontsize_row = 10,
+    filename = paste0("../data/gsea_leading_edge_heatmap_sucrose_", gsub(" ", "_", tissue_name), ".jpg"),
+    width = each_width,
+    height = each_height
+  )
+}
+
+# --- Step 3: Generate the Two Heatmaps ---
+
+
+# Generate the heatmap for the Small Intestine
+generate_tissue_heatmap_sucrose(all_counts_si, "Small Intestine")
+
+# Generate the heatmap for the Large Intestine
+generate_tissue_heatmap_sucrose(all_counts_li, "Large Intestine")
 ```
 
