@@ -1,0 +1,5 @@
+outs:
+- md5: 85218ca18baac6cbdba8fb35cd3a80e0
+  size: 370176
+  hash: md5
+  path: 072_time_legend.pdf

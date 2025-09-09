@@ -1,0 +1,5 @@
+outs:
+- md5: b75d1fb21c88974d9e6eee7007da4d26
+  size: 6057
+  hash: md5
+  path: R07_no_fiber_experiment_data_CFU.csv

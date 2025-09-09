@@ -1,0 +1,5 @@
+outs:
+- md5: c8ecfa11819692d5ade8f2e5a943cb19
+  size: 4497
+  hash: md5
+  path: 01_mice_accession_info.csv

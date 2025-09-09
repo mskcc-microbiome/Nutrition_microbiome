@@ -1,0 +1,5 @@
+outs:
+- md5: 7acfece0aa39e749c244a01154d0e688
+  size: 17926758
+  hash: md5
+  path: 171_div_model_fg_post_interaction.csv

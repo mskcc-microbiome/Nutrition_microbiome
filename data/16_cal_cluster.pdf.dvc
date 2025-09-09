@@ -1,0 +1,5 @@
+outs:
+- md5: 9c30a73c3bcafbce1a842e10b84c29bb
+  size: 135114
+  hash: md5
+  path: 16_cal_cluster.pdf

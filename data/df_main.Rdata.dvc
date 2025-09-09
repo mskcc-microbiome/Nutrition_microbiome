@@ -1,0 +1,5 @@
+outs:
+- md5: d7c2486b635b3521c6940c550226afc4
+  size: 24134
+  hash: md5
+  path: df_main.Rdata

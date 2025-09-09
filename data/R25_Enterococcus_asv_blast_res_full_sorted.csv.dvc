@@ -1,0 +1,5 @@
+outs:
+- md5: 3358539c34776e7fc39fce7a9a09d395
+  size: 4080659
+  hash: md5
+  path: R25_Enterococcus_asv_blast_res_full_sorted.csv

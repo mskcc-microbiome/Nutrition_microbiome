@@ -1,0 +1,5 @@
+outs:
+- md5: 7a60563f387e2ca1370501163e54dd00
+  size: 535529477
+  hash: md5
+  path: 090_target_protein_genus_macro_model_post_interaction.csv

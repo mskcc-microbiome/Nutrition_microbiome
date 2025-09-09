@@ -1,0 +1,5 @@
+outs:
+- md5: e60f19a6f712ba424c7b7f8f11792347
+  size: 2962512
+  hash: md5
+  path: 05_f3_sugars_days.RDS

@@ -1,0 +1,5 @@
+outs:
+- md5: ae4ef9015f3197bbf96fa6a249d986ab
+  size: 35885
+  hash: md5
+  path: 05_cleaned_three_sugars_longtime_mice.RDS

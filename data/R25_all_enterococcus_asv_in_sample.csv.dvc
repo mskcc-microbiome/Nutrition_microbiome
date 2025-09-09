@@ -1,0 +1,5 @@
+outs:
+- md5: 1b91a10a4c04618d46ab5e5ffece1c37
+  size: 310435
+  hash: md5
+  path: R25_all_enterococcus_asv_in_sample.csv

@@ -1,0 +1,5 @@
+outs:
+- md5: 0bfc131ff53a90016233bc1ac776a7ae
+  size: 596
+  hash: md5
+  path: 086_twoscore_procrustes.csv

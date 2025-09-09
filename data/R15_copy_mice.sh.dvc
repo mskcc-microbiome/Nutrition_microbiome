@@ -1,0 +1,5 @@
+outs:
+- md5: 84f90628a73d07f8a47bc2d37081cc12
+  size: 23976
+  hash: md5
+  path: R15_copy_mice.sh

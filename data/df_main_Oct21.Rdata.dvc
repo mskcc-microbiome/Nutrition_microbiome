@@ -1,0 +1,5 @@
+outs:
+- md5: ce95a00b3bcbcf58f90b9a4edcb18eeb
+  size: 24380
+  hash: md5
+  path: df_main_Oct21.Rdata

@@ -1,0 +1,5 @@
+outs:
+- md5: 3db084221114742750b2f194f408a12a
+  size: 633746
+  hash: md5
+  path: 16_dense_4_log2.pdf

@@ -1,0 +1,5 @@
+outs:
+- md5: 62ecb77b80862c86cf93a7347c83c690
+  size: 623160
+  hash: md5
+  path: R25_top_hits_filtered_enterococcus_asv.csv

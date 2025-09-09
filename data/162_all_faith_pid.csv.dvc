@@ -1,0 +1,5 @@
+outs:
+- md5: 35851e6f8fdacf44159f4674c255dbd3
+  size: 103231
+  hash: md5
+  path: 162_all_faith_pid.csv

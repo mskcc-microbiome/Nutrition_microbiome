@@ -1,0 +1,6 @@
+outs:
+- md5: 1d7bc4305614babb2face6f5c069689a.dir
+  size: 12735158
+  nfiles: 113
+  hash: md5
+  path: R01_maaslin2_output_ALL_grp4_pbs_reference_abx_effects

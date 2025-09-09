@@ -1,0 +1,5 @@
+outs:
+- md5: 4fcfb210410ac6d15ebc6a4a6bcb0417
+  size: 1164262
+  hash: md5
+  path: 090_model_alpha_macro_fat_prior_interaction.csv

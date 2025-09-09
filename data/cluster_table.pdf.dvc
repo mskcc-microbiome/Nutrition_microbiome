@@ -1,0 +1,5 @@
+outs:
+- md5: d1e770f4616b890064caea3b37916f46
+  size: 4868
+  hash: md5
+  path: cluster_table.pdf

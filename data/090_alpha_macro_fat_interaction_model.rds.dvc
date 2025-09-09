@@ -1,0 +1,5 @@
+outs:
+- md5: e8d81168917de7602b8042655e66634a
+  size: 10547708
+  hash: md5
+  path: 090_alpha_macro_fat_interaction_model.rds

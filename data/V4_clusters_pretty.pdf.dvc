@@ -1,0 +1,5 @@
+outs:
+- md5: c6400663f54632b3e7a1993ee242f1be
+  size: 10676
+  hash: md5
+  path: V4_clusters_pretty.pdf

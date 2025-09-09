@@ -1,0 +1,5 @@
+outs:
+- md5: c026ce854d65e660b5d8aa5f26226104
+  size: 103974
+  hash: md5
+  path: 09_clinical_outcome.pdf

@@ -1,0 +1,5 @@
+outs:
+- md5: 08412a1bccca495334cde619de202a51
+  size: 1483
+  hash: md5
+  path: 08_chow_intake.csv

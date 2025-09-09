@@ -1,0 +1,5 @@
+outs:
+- md5: 45db9d481cac10b5440e86991e76a168
+  size: 13923
+  hash: md5
+  path: output_food_tree_datatree.qza

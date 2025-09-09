@@ -1,0 +1,5 @@
+outs:
+- md5: cd936f1b31155437642a380222ae538c
+  size: 11776187
+  hash: md5
+  path: 084_mod_PCA.rds

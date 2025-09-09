@@ -1,0 +1,5 @@
+outs:
+- md5: 1cd1b0073cb3c2195a568db9ba1295d5
+  size: 82478
+  hash: md5
+  path: 003_patient_summary_for_173.pdf

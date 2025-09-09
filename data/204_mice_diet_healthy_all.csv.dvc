@@ -1,0 +1,5 @@
+outs:
+- md5: 719fb7c1792d67509ac28383593d3bf7
+  size: 42492934
+  hash: md5
+  path: 204_mice_diet_healthy_all.csv

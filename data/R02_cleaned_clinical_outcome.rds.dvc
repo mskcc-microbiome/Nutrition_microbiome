@@ -1,0 +1,5 @@
+outs:
+- md5: 0d8c85e2d4932f07b1d5bc10a3c9e548
+  size: 82721
+  hash: md5
+  path: R02_cleaned_clinical_outcome.rds

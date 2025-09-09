@@ -1,0 +1,5 @@
+outs:
+- md5: d0efc3f94d23999b788ba3a3346ed236
+  size: 912
+  hash: md5
+  path: 072_total_patients_zero_eating_days_pid.csv

@@ -1,0 +1,5 @@
+outs:
+- md5: 30da3a6974c354d66c67b061f425c6af
+  size: 14945500
+  hash: md5
+  path: 18_model_div_original_no_abx_and_FQ.csv

@@ -1,0 +1,6 @@
+outs:
+- md5: c01d11e5656b0677576ee467d16603aa.dir
+  size: 5034322
+  nfiles: 67
+  hash: md5
+  path: R01_maaslin2_output_ALL_grp4_family

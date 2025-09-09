@@ -1,0 +1,5 @@
+outs:
+- md5: 677d3d407c144f014adcd9683dfde37e
+  size: 6710
+  hash: md5
+  path: 07_nofiber.csv

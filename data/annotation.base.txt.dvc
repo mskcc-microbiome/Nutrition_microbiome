@@ -1,0 +1,5 @@
+outs:
+- md5: 3d60d303f51d2b12399ea1543594c8b8
+  size: 2185
+  hash: md5
+  path: annotation.base.txt
