@@ -1,0 +1,5 @@
+[core]
+    remote = nutrition_remote
+    autostage = true
+['remote "nutrition_remote"']
+    url = /Volumes/peledlab/Projects/Nutrition_microbiome/data
