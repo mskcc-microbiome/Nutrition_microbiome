@@ -23,13 +23,7 @@ library(ggpubr)
 library(broom)
 library(rstatix)
 ```
-```{r}
-library(vdbR)
-connect_database('~/dbConfig_example.txt')
-list_table_from_database()
-get_table_from_database('allbmt_medsrx')
-get_table_from_database('asv_alpha_diversity_ag')
-```
+
 
 ```{r}
 dat <- read_csv('../data/7_9_25Biapenem Rebuttal Experiment.csv') %>% 
@@ -97,7 +91,7 @@ ggsave('../data/R31_room_counts.pdf', width = 7, height = 12)
 fc_data <- dat %>% 
   mutate(day = str_glue('day{day}')) %>% 
   spread('day','logCFU') %>% 
-  mutate(fc = day6/day0)
+  mutate(fc = day6/day1)
 
 max_finite_fc <- fc_data %>%
   filter(is.finite(fc)) %>%
@@ -156,7 +150,7 @@ ggplot(plot_data, aes(x = treatment, y = fc_plot, fill = treatment)) +
   ) +
   # Add informative labels and a title
   labs(
-    title = "Enterococcus Fold Change from Day 0 to Day 6",
+    title = "Enterococcus Fold Change from Day 1 to Day 6",
     subtitle = "Faceted by Jax room",
     x = ""
   ) +
@@ -198,6 +192,10 @@ experiment_data <- read_csv('../data/7_9_25Biapenem Rebuttal Experiment_updated.
   mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
   clean_names() %>%
   mutate(logCFU = log10(cf_us_per_gram_stool)) 
+
+RB08_7_9_25 <- experiment_data %>% 
+  select(treatment:mouse_identifier, log10_cf_us_per_gram_stool = logCFU)
+
 ```
 ```{r}
 processed_data <- experiment_data %>%
@@ -229,10 +227,10 @@ processed_data <- experiment_data %>%
   # Convert the new grouping variable to a factor and set the levels to enforce the desired plot order.
   mutate(
     plot_group = factor(plot_group, levels = c(
-      "PBS_vehicle_0", "PBS_vehicle_3", "PBS_vehicle_6",
-      "PBS_sucrose_0", "PBS_sucrose_3", "PBS_sucrose_6",
-      "biapenem_vehicle_0", "biapenem_vehicle_3", "biapenem_vehicle_6",
-      "biapenem_sucrose_0", "biapenem_sucrose_3", "biapenem_sucrose_6"
+      "PBS_vehicle_1", "PBS_vehicle_3", "PBS_vehicle_6",
+      "PBS_sucrose_1", "PBS_sucrose_3", "PBS_sucrose_6",
+      "biapenem_vehicle_1", "biapenem_vehicle_3", "biapenem_vehicle_6",
+      "biapenem_sucrose_1", "biapenem_sucrose_3", "biapenem_sucrose_6"
     ))
   )
 ```
@@ -264,7 +262,7 @@ ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool, fill = diet
   ) +
   
   # Set the x-axis tick labels to show the day for each group.
-  scale_x_discrete(labels = rep(c("0", "3", "6"), 4)) +
+  scale_x_discrete(labels = rep(c("1", "3", "6"), 4)) +
   
   # Manually set the colors to match the publication figure (gray for vehicle, pink for sucrose).
   scale_fill_manual(values = c("vehicle" = "gray", "sucrose" = "#FF69B4")) +
@@ -1502,7 +1500,8 @@ w1 <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xl
   mutate(group = if_else(str_detect(treatment, 'PBS'), 'RB08', group)) %>% 
   rename(room = group) %>% 
   filter(room == 'RB08')  %>%  # this room has the all 4 groups
-  mutate(experiment_no = "survey_RB08")
+  mutate(experiment_no = "survey_RB08") %>% 
+  full_join(RB08_7_9_25)
 
 w2 <- read_csv('../data/7_25_25_biapenem_rebuttal_EM07.xlsx - Sheet1.csv') %>%  
    filter(!is.na(Stool_weight_mg)) %>% clean_names() %>% 
@@ -1544,7 +1543,7 @@ w4 <- bind_rows(exp1_data, exp2_data) %>%
   mutate(log10_cf_us_per_gram_stool = log10(cf_us_per_gram_stool)) 
 
 weights <- bind_rows(
-  w1 %>%  select(experiment_no, group = room, day, mouse_identifier, mice_weights = weight, treatment),
+  w1 %>%  select(experiment_no, group = room, day, mouse_identifier, mice_weights = weight, treatment, log10_cf_us_per_gram_stool),
   w2 %>%  select(experiment_no, group, day, mouse_identifier, mice_weights , treatment, log10_cf_us_per_gram_stool) %>% mutate(mice_weights = as.numeric(mice_weights)),
   w3 %>% mutate(log10_cf_us_per_gram_stool = log10(cf_us_per_gram_stool)) %>%  select(experiment_no, group, day, mouse_identifier, mice_weights , treatment, log10_cf_us_per_gram_stool),
   w4 %>% select(experiment_no, group, day, mouse_identifier, mice_weights , treatment, log10_cf_us_per_gram_stool)
@@ -1592,6 +1591,11 @@ processed_weights <- weights %>%
   mutate(
     experiment_no = factor(experiment_no)
   )
+
+# tally of the data points
+processed_weights_tally <- processed_weights %>% 
+  filter(day == 1) %>% 
+  count(experiment_no, diet_treatment, antibiotic_treatment) 
 ```
 
 ## weight longitudinal
@@ -1833,7 +1837,7 @@ since weight is not having linear change vs time
 ```{r}
 weight_data <- processed_weights %>%
   filter(antibiotic_treatment == 'biapenem') %>%
-  filter(!is.na(log10_cf_us_per_gram_stool)) %>%
+  #filter(!is.na(log10_cf_us_per_gram_stool)) %>%
   mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}'))
 ```
 
@@ -1865,7 +1869,11 @@ summary(weight_model1)
 # The interaction's significance confirms that this difference between -0.22 and -0.047 is statistically real.
 # the above model has the day 3 has the reference level which is pretty weird
 ```
+
+### raw weights all of the data 
+
 ```{r}
+# using all of the mice even the mice that died before the day 6
 weight_data2 <- weight_data %>%  
   mutate(day = str_glue('{day}'),
          day = factor(day, levels = c('1','3','6')),
@@ -1876,28 +1884,58 @@ weight_model2 <- lmer(
   mice_weights ~ log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
   data = weight_data2
 )
-
+ 
 # Step 3: Interpret the results.
 summary(weight_model2)
 
 # even if I switch the factor levels of sucrose water and regular water and the log CFU is still significant 
 ```
+```{r}
+weight_data2_ancova <- weight_data2 %>%
+  # Group by each individual mouse to operate on their specific data
+  group_by(experiment_no, mouse_identifier) %>%
+  # Make sure the data is sorted by day to correctly identify the baseline
+  arrange(day, .by_group = TRUE) %>%
+  # Create a new 'baseline_weight' column.
+  # 'first(mice_weights)' grabs the weight from the first time point (Day 1)
+  # and applies it to all rows for that mouse.
+  mutate(baseline_weight = first(mice_weights)) %>%
+  ungroup() %>%
+  # Now, filter out the baseline day itself. The model should only learn
+  # from what happened *after* the treatment started.
+  filter(day != '1')
+
+# --- Model Fitting ---
+# Now, run the linear mixed-effects model using the prepared data.
+ancova_model_gram_weights <- lmer(
+  # The outcome is the raw mouse weight at post-treatment time points.
+  # 'baseline_weight' is included as a key predictor to control for starting weight.
+  mice_weights ~ baseline_weight + log10_cf_us_per_gram_stool * diet_treatment +
+                 day + (1 | mouse_identifier) + (1 | experiment_no),
+  data = weight_data2_ancova
+)
+
+# --- View the Results ---
+# The summary will show the effects of your treatments after adjusting for
+# the starting weight of each mouse.
+summary(ancova_model_gram_weights)
+```
 
 
 ```{r}
-# what if I remove all of the mice have died before day 6
-weight_data3 <- weight_data2 %>%
-  group_by( mouse_identifier) %>%
-  filter(n() == 3) %>%
-  ungroup()
- 
-weight_model3 <- lmer(
-  mice_weights ~ log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
-  data = weight_data3
-)
-
-# Step 3: Interpret the results.
-summary(weight_model3)
+# # what if I remove all of the mice have died before day 6
+# weight_data3 <- weight_data2 %>%
+#   group_by( mouse_identifier) %>%
+#   filter(n() == 3) %>%
+#   ungroup()
+#  
+# weight_model3 <- lmer(
+#   mice_weights ~ log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
+#   data = weight_data3
+# )
+# 
+# # Step 3: Interpret the results.
+# summary(weight_model3)
 
 ```
 
@@ -1926,10 +1964,9 @@ summary(weight_model3)
 #   )
 ```
 
-### trajectories of mice 
+### trajectories of mice for all of the mice
 
 ```{r}
-# weight_data3 only has all mice that had all three data points. 
 
 # Define the new color palette for the groups
 color_palette <- c(
@@ -1939,7 +1976,7 @@ color_palette <- c(
 )
 
 # a plot where the mouse weight are on the y, the day are on the x , and each mouse trajectory of weight on thin lines across the days, plot a point for each day's median, and a interval brackets and line that covers fr the 25% and 75% percentile , do this as the two facets , regular water and sucrose water. 
-timeline <- ggplot(weight_data3, aes(x = day, y = mice_weights)) +
+timeline <- ggplot(weight_data2, aes(x = day, y = mice_weights)) +
   
   # 1. Plot individual mouse trajectories as thin, semi-transparent lines.
   # The 'group' aesthetic is essential to tell ggplot to draw a separate line for each mouse.
@@ -1991,7 +2028,7 @@ timeline
 # Use ggpredict() to get the predicted values from your model.
 # This calculates the predicted mouse weight across a range of CFU values
 # for each diet treatment, averaging over the effect of 'day'.
-predicted_effects <- ggpredict(weight_model3, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
+predicted_effects <- ggpredict(weight_model2, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
 
 # Now, plot these predictions
 scatter <- ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
@@ -2001,7 +2038,7 @@ scatter <- ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, color = NA) +
   # Add the original raw data points in the background for context
   geom_point(
-    data = weight_data3,
+    data = weight_data2,
     aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment),
     alpha = 0.5,
     inherit.aes = FALSE # Tells the points not to inherit the main aes
@@ -2015,6 +2052,7 @@ scatter <- ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
     color = "Diet Treatment",
     fill = "Diet Treatment"
   ) + 
+  coord_fixed() +
   theme_bw() +
   theme(legend.position = 'bottom', plot.title = element_blank(),
         plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"))
@@ -2089,55 +2127,7 @@ ggplot(plot_data_percent, aes(x = day, y = percent_change)) +
 
 ```
 
-```{r}
-# a subset of the above that I exclude the survey_RB08 experiment since I don't have the CFU
-plot_data_percent_subset <- plot_data_percent %>% 
-  filter(experiment_no != 'survey_RB08')
-  
-# 2. Create the plot
-ggplot(plot_data_percent_subset, aes(x = day, y = percent_change)) +
-  
-  # Add a horizontal dashed line at y=0 to represent the baseline
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
-  
-  # Plot individual mouse trajectories as thin, semi-transparent lines
-  geom_line(aes(group = mouse_identifier), color = "grey70", alpha = 0.6) +
-  
- stat_summary(
-    aes(color = diet_treatment), 
-    fun.data = "median_hilow", 
-    fun.args = list(conf.int = 0.5), # This is a shortcut for 25th-75th percentile
-    geom = "errorbar",
-    width = 0.2,
-    linewidth = 1
-  ) +
-  
- # Calculate and plot a line connecting the medians.
-  stat_summary(
-    aes(color = diet_treatment, group = diet_treatment),
-    fun = median,
-    geom = "line",
-    linewidth = 0.9
-  ) +
-  
-  # Calculate and plot the median as a point.
-  stat_summary(
-    aes(color = diet_treatment),
-    fun = median,
-    geom = "point",
-    size = 2
-  ) +
-  scale_color_manual(values = color_palette) +
-  # 4. Split the plot into two panels based on the diet treatment.
-  facet_wrap(~diet_treatment) +
-  # Add informative labels and a clean theme
-  labs(
-    title = "Mouse Weight Percent Change from Baseline by Diet\nexcluding the survey_RB08 experiment",
-    x = "Day",
-    y = "Weight Change from Baseline (%)"
-  ) +
-  theme_bw()
-```
+
 ```{r}
 # I'm curious if there is a simple difference at day 3 or day 6 just with plain old wilcox tests.  (which I understand would not address repeated measures and would not address the deaths and would not address the two separate experiments).  I suspect there will not be
 # 2. Perform Wilcoxon tests for Raw Mouse Weights
@@ -2163,6 +2153,7 @@ print("--------------------------------------------------")
 print("Wilcoxon Test Results for Percent Change from Baseline")
 print(percent_change_test_results)
 ```
+
 ### per% change model
 
 ```{r}
@@ -2170,7 +2161,7 @@ print(percent_change_test_results)
 percent_change_model <- lmer(
   percent_change ~ log10_cf_us_per_gram_stool * diet_treatment +
                    day + (1 | mouse_identifier) + (1 | experiment_no),
-  data = plot_data_percent_subset %>% filter(day != '1')
+  data = plot_data_percent %>% filter(day != '1')
 )
 
 summary(percent_change_model)
@@ -2182,12 +2173,11 @@ summary(percent_change_model)
 
 ```{r}
 # add a table to show how many mice included
-weight_data3 %>% filter(day  == '1') %>% count(experiment_no, diet_treatment) %>% 
+weight_data2 %>% filter(day  == '1') %>% count(experiment_no, diet_treatment) %>% 
   spread('diet_treatment','n') %>% 
-  mutate(experiment_no = seq(1, nrow(.)),
-        experiment_no= str_glue('Experiment_{experiment_no}') ) %>% 
+  #mutate(experiment_no = seq(1, nrow(.)), experiment_no= str_glue('Experiment_{experiment_no}') ) %>% 
   gt()  %>% 
-  gt::gtsave(filename = "../data/R31_mice_tally.png")
+  gt::gtsave(filename = "../data/R31_mice_tally.png") 
 ```
 
 
