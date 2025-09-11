@@ -1601,37 +1601,37 @@ processed_weights_tally <- processed_weights %>%
 ## weight longitudinal
 
 ```{r}
-# Create the plot.
-ggplot(processed_weights, aes(x = plot_group, y = mice_weights)) +
-  # Add the boxplots. The 'outlier.shape = NA' hides the default outlier points
-  # since we'll be plotting all points ourselves.
-  geom_boxplot(outlier.shape = NA) +
-  # Add the individual data points as jittered shapes.
-  # 'shape' is mapped to the experiment number.
-  # 'alpha' adds some transparency to see overlapping points.
-  geom_jitter(aes(color = diet_treatment), width = 0.2, alpha = 0.8, size = 2) + 
-  
-  # Manually set the colors to match the publication figure (gray for vehicle, pink for sucrose).
-  scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
-  # Create separate panels for each treatment group defined in 'plot_group'.
-  #facet_wrap(~plot_group) +
-  # Add informative labels and a title.
-  labs(
-    title = "Mice Weight by Treatment and Day",
-    x = "Day",
-    y = "Mice Weight (g)",
-    shape = "Experiment No."
-  ) +
-  # Use a clean, black-and-white theme for clarity.
-  theme_bw() +
-  # Improve the readability of the theme.
-  theme(
-    strip.text = element_text(size = 10, face = "bold"),
-    axis.title = element_text(size = 12),
-    axis.text.x = element_text(size = 10, vjust = 0, angle = 90), # Adjust position of day numbers
-    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
-  )
-ggsave('../data/R31_few_weight_timeline.jpg', width = 7, height = 7)
+# # Create the plot.
+# ggplot(processed_weights, aes(x = plot_group, y = mice_weights)) +
+#   # Add the boxplots. The 'outlier.shape = NA' hides the default outlier points
+#   # since we'll be plotting all points ourselves.
+#   geom_boxplot(outlier.shape = NA) +
+#   # Add the individual data points as jittered shapes.
+#   # 'shape' is mapped to the experiment number.
+#   # 'alpha' adds some transparency to see overlapping points.
+#   geom_jitter(aes(color = diet_treatment), width = 0.2, alpha = 0.8, size = 2) + 
+#   
+#   # Manually set the colors to match the publication figure (gray for vehicle, pink for sucrose).
+#   scale_color_manual(values = c("regular_water" = "gray40", "sucrose_water" = "red")) +
+#   # Create separate panels for each treatment group defined in 'plot_group'.
+#   #facet_wrap(~plot_group) +
+#   # Add informative labels and a title.
+#   labs(
+#     title = "Mice Weight by Treatment and Day",
+#     x = "Day",
+#     y = "Mice Weight (g)",
+#     shape = "Experiment No."
+#   ) +
+#   # Use a clean, black-and-white theme for clarity.
+#   theme_bw() +
+#   # Improve the readability of the theme.
+#   theme(
+#     strip.text = element_text(size = 10, face = "bold"),
+#     axis.title = element_text(size = 12),
+#     axis.text.x = element_text(size = 10, vjust = 0, angle = 90), # Adjust position of day numbers
+#     plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+#   )
+# ggsave('../data/R31_few_weight_timeline.jpg', width = 7, height = 7)
 ```
 
 ```{r}
@@ -1843,53 +1843,54 @@ weight_data <- processed_weights %>%
 
 
 ```{r}
-weight_data1 <- weight_data %>%  
-  # For each mouse...
-  group_by(mouse_identifier) %>%
-  # Create a new column with the Day 1 weight for that mouse
-  mutate(baseline_weight = first(mice_weights[day == 1])) %>%
-  ungroup() %>%
-  # Now, filter out the Day 1 data so we only model post-treatment effects
-  filter(day > 1) %>% 
-  mutate(day = str_glue('day{day}'),
-         day = factor(day, levels = c('day3','day6')))
-
-# the question: "Does the relationship between bacterial load and weight depend on the diet?" yes def
-weight_model1 <- lmer(
-  mice_weights ~ baseline_weight + log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
-  data = weight_data1
-)
-
-# Step 3: Interpret the results.
-summary(weight_model1)
-# For the Regular Water group: A 10-fold increase in CFU is associated with a -0.22g change in weight.
-
-# For the Sucrose Water group: A 10-fold increase in CFU is associated with only a -0.047g change in weight.
+# weight_data1 <- weight_data %>%  
+#   # For each mouse...
+#   group_by(mouse_identifier) %>%
+#   # Create a new column with the Day 1 weight for that mouse
+#   mutate(baseline_weight = first(mice_weights[day == 1])) %>%
+#   ungroup() %>%
+#   # Now, filter out the Day 1 data so we only model post-treatment effects
+#   filter(day > 1) %>% 
+#   mutate(day = str_glue('day{day}'),
+#          day = factor(day, levels = c('day3','day6')))
 # 
-# The interaction's significance confirms that this difference between -0.22 and -0.047 is statistically real.
-# the above model has the day 3 has the reference level which is pretty weird
+# # the question: "Does the relationship between bacterial load and weight depend on the diet?" yes def
+# weight_model1 <- lmer(
+#   mice_weights ~ baseline_weight + log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
+#   data = weight_data1
+# )
+# 
+# # Step 3: Interpret the results.
+# summary(weight_model1)
+# # For the Regular Water group: A 10-fold increase in CFU is associated with a -0.22g change in weight.
+# 
+# # For the Sucrose Water group: A 10-fold increase in CFU is associated with only a -0.047g change in weight.
+# # 
+# # The interaction's significance confirms that this difference between -0.22 and -0.047 is statistically real.
+# # the above model has the day 3 has the reference level which is pretty weird
 ```
 
 ### raw weights all of the data 
 
 ```{r}
 # using all of the mice even the mice that died before the day 6
-weight_data2 <- weight_data %>%  
+weight_data2 <- weight_data %>%
   mutate(day = str_glue('{day}'),
          day = factor(day, levels = c('1','3','6')),
          diet_treatment = factor(as.character(diet_treatment), levels = c('regular_water','sucrose_water')))
-
-# the question: "Does the relationship between bacterial load and weight depend on the diet?" yes def
-weight_model2 <- lmer(
-  mice_weights ~ log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
-  data = weight_data2
-)
- 
-# Step 3: Interpret the results.
-summary(weight_model2)
-
-# even if I switch the factor levels of sucrose water and regular water and the log CFU is still significant 
+# 
+# # the question: "Does the relationship between bacterial load and weight depend on the diet?" yes def
+# weight_model2 <- lmer(
+#   mice_weights ~ log10_cf_us_per_gram_stool * diet_treatment + day + (1 | mouse_identifier) + (1 | experiment_no),
+#   data = weight_data2
+# )
+#  
+# # Step 3: Interpret the results.
+# summary(weight_model2)
+# 
+# # even if I switch the factor levels of sucrose water and regular water and the log CFU is still significant 
 ```
+
 ```{r}
 weight_data2_ancova <- weight_data2 %>%
   # Group by each individual mouse to operate on their specific data
@@ -1919,6 +1920,41 @@ ancova_model_gram_weights <- lmer(
 # The summary will show the effects of your treatments after adjusting for
 # the starting weight of each mouse.
 summary(ancova_model_gram_weights)
+```
+
+### scatter prediction
+
+```{r}
+# make the ggpredict scatter plot 
+predicted_effects_ancova <- ggpredict(ancova_model_gram_weights, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
+
+# Now, plot these predictions
+scatter_predicted_effects_ancova <- ggplot(predicted_effects_ancova, aes(x = x, y = predicted, color = group)) +
+  # Plot the predicted trend line
+  geom_line(linewidth = 1) +
+  # Add the confidence interval ribbon from the model
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, color = NA) +
+  # Add the original raw data points in the background for context
+  geom_point(
+    data = weight_data2_ancova,
+    aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment),
+    alpha = 0.5,
+    inherit.aes = FALSE # Tells the points not to inherit the main aes
+  ) +
+  scale_color_manual(values = color_palette) +
+  scale_fill_manual(values = color_palette) +
+  labs(
+    #title = "Model-Predicted Effect of Bacterial Load on Mouse Weight by Diet",
+    x = "Log10( CFU per Gram Stool)",
+    y = "Predicted Mouse Weight (g)",
+    color = "Diet Treatment",
+    fill = "Diet Treatment"
+  ) + 
+  coord_fixed() +
+  theme_bw() +
+  theme(legend.position = 'bottom', plot.title = element_blank(),
+        plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"))
+scatter_predicted_effects_ancova
 ```
 
 
@@ -1964,7 +2000,7 @@ summary(ancova_model_gram_weights)
 #   )
 ```
 
-### trajectories of mice for all of the mice
+### timeline raw weights
 
 ```{r}
 
@@ -2022,49 +2058,47 @@ timeline <- ggplot(weight_data2, aes(x = day, y = mice_weights)) +
 timeline
 ```
 
-### scatter prediction
 
 ```{r}
-# Use ggpredict() to get the predicted values from your model.
-# This calculates the predicted mouse weight across a range of CFU values
-# for each diet treatment, averaging over the effect of 'day'.
-predicted_effects <- ggpredict(weight_model2, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
-
-# Now, plot these predictions
-scatter <- ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
-  # Plot the predicted trend line
-  geom_line(linewidth = 1) +
-  # Add the confidence interval ribbon from the model
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, color = NA) +
-  # Add the original raw data points in the background for context
-  geom_point(
-    data = weight_data2,
-    aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment),
-    alpha = 0.5,
-    inherit.aes = FALSE # Tells the points not to inherit the main aes
-  ) +
-  scale_color_manual(values = color_palette) +
-  scale_fill_manual(values = color_palette) +
-  labs(
-    #title = "Model-Predicted Effect of Bacterial Load on Mouse Weight by Diet",
-    x = "Log10( CFU per Gram Stool)",
-    y = "Predicted Mouse Weight (g)",
-    color = "Diet Treatment",
-    fill = "Diet Treatment"
-  ) + 
-  coord_fixed() +
-  theme_bw() +
-  theme(legend.position = 'bottom', plot.title = element_blank(),
-        plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"))
-scatter
+# # Use ggpredict() to get the predicted values from your model.
+# # This calculates the predicted mouse weight across a range of CFU values
+# # for each diet treatment, averaging over the effect of 'day'.
+# predicted_effects <- ggpredict(weight_model2, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
+# 
+# # Now, plot these predictions
+# scatter <- ggplot(predicted_effects, aes(x = x, y = predicted, color = group)) +
+#   # Plot the predicted trend line
+#   geom_line(linewidth = 1) +
+#   # Add the confidence interval ribbon from the model
+#   geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, color = NA) +
+#   # Add the original raw data points in the background for context
+#   geom_point(
+#     data = weight_data2,
+#     aes(x = log10_cf_us_per_gram_stool, y = mice_weights, color = diet_treatment),
+#     alpha = 0.5,
+#     inherit.aes = FALSE # Tells the points not to inherit the main aes
+#   ) +
+#   scale_color_manual(values = color_palette) +
+#   scale_fill_manual(values = color_palette) +
+#   labs(
+#     #title = "Model-Predicted Effect of Bacterial Load on Mouse Weight by Diet",
+#     x = "Log10( CFU per Gram Stool)",
+#     y = "Predicted Mouse Weight (g)",
+#     color = "Diet Treatment",
+#     fill = "Diet Treatment"
+#   ) + 
+#   coord_fixed() +
+#   theme_bw() +
+#   theme(legend.position = 'bottom', plot.title = element_blank(),
+#         plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"))
+# scatter
 ```
 
-### % change from baseline
+### timeline % change
 
 ```{r}
 # for the weights:
 # replot timecourses & analyze as fold-change (or percent) from baseline (happy to discuss the merits with Teng as well)
-
 
 # 1. Prepare the data by calculating percent change from baseline
 plot_data_percent <- processed_weights %>%
@@ -2082,7 +2116,7 @@ plot_data_percent <- processed_weights %>%
   ungroup() 
 
 # 2. Create the plot
-ggplot(plot_data_percent, aes(x = day, y = percent_change)) +
+timeline_percent <- ggplot(plot_data_percent, aes(x = day, y = percent_change)) +
   
   # Add a horizontal dashed line at y=0 to represent the baseline
   geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
@@ -2119,12 +2153,13 @@ ggplot(plot_data_percent, aes(x = day, y = percent_change)) +
   facet_wrap(~diet_treatment) +
   # Add informative labels and a clean theme
   labs(
-    title = "Mouse Weight Percent Change from Baseline by Diet",
+    #title = "Mouse Weight Percent Change from Baseline by Diet",
     x = "Day",
     y = "Weight Change from Baseline (%)"
   ) +
-  theme_bw()
+  theme_bw() + theme(legend.position = 'none')
 
+timeline_percent
 ```
 
 
@@ -2164,7 +2199,50 @@ percent_change_model <- lmer(
   data = plot_data_percent %>% filter(day != '1')
 )
 
-summary(percent_change_model)
+#summary(percent_change_model)
+
+predicted_effects_percent <- ggpredict(percent_change_model, terms = c("log10_cf_us_per_gram_stool", "diet_treatment"))
+
+# Now, create a custom plot using ggplot2 for full control over the aesthetics.
+predicted_effects_percent_plot <- ggplot(predicted_effects_percent, aes(x = x, y = predicted, color = group)) +
+  
+  # Add the original raw data points in the background for context.
+  # These points come from the original dataset used to fit the model.
+  geom_point(
+    data = plot_data_percent, # Use the original data here
+    aes(x = log10_cf_us_per_gram_stool, y = percent_change, color = diet_treatment),
+    alpha = 0.4, # Make points semi-transparent
+    inherit.aes = FALSE # Prevents this layer from inheriting the main aesthetics
+  ) +
+  
+  # Plot the predicted trend line from the model.
+  geom_line(linewidth = 1) +
+  
+  # Add a ribbon for the confidence interval around the predicted line.
+  geom_ribbon(
+    aes(ymin = conf.low, ymax = conf.high, fill = group), 
+    alpha = 0.2, # Make the ribbon semi-transparent
+    color = NA   # Remove the outline from the ribbon
+  ) +
+  scale_color_manual(values = color_palette) +
+  scale_fill_manual(values = color_palette) +
+  
+  # Add a horizontal line at y=0 to represent the baseline.
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+
+  # Add clear labels and a title.
+  labs(
+    #title = "Model-Predicted Effect of Bacterial Load on Percent Weight Change",
+    x = "Log10 CFU per Gram Stool",
+    y = "Predicted Weight Change from Baseline (%)",
+    color = "Diet Treatment",
+    fill = "Diet Treatment"
+  ) +
+  
+  # Use a clean theme for a professional look.
+  theme_bw() + theme( legend.position = 'top')
+
+predicted_effects_percent_plot
 ```
 
 ## assemble 
@@ -2173,22 +2251,20 @@ summary(percent_change_model)
 
 ```{r}
 # add a table to show how many mice included
-weight_data2 %>% filter(day  == '1') %>% count(experiment_no, diet_treatment) %>% 
-  spread('diet_treatment','n') %>% 
-  #mutate(experiment_no = seq(1, nrow(.)), experiment_no= str_glue('Experiment_{experiment_no}') ) %>% 
-  gt()  %>% 
-  gt::gtsave(filename = "../data/R31_mice_tally.png") 
+# weight_data2 %>% filter(day  == '1') %>% count(experiment_no, diet_treatment) %>% 
+#   spread('diet_treatment','n') %>% 
+#   #mutate(experiment_no = seq(1, nrow(.)), experiment_no= str_glue('Experiment_{experiment_no}') ) %>% 
+#   gt()  %>% 
+#   gt::gtsave(filename = "../data/R31_mice_tally.png") 
 ```
 
 
 ```{r}
-tally <- ggdraw() + draw_image("../data/R31_mice_tally.png", scale =5.5)
-
-weight_plot <-  plot_grid(tally,
-                          timeline,
-                          scatter,
-                 label_size = 12, nrow  = 3,
-                 rel_heights = c(.5,.8,1),labels = "auto", 
+weight_plot <-  plot_grid(timeline,
+                          timeline_percent,
+                          predicted_effects_percent_plot,
+                 label_size = 12, ncol  = 2,
+                labels = "auto", 
                 align = 'vh', axis = 'lrtb')
 
 title <- ggdraw() + 
@@ -2199,8 +2275,8 @@ combined <- plot_grid(
   title, weight_plot,
   ncol = 1,
   # rel_heights values control vertical title margins
-  rel_heights = c(0.07, 1)
-) +theme(plot.margin = unit(c(1,10,1,2), "cm"))
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/R31_mice_weight_reduction.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
