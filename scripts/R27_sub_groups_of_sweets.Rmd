@@ -19,6 +19,7 @@ library(cowplot)
 library(ggridges)
 library(brmstools)
 library(bayesplot)
+library(ggtext)
 options(mc.cores = parallel::detectCores())
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
@@ -1867,5 +1868,85 @@ plot_interactions <- ggplot(interaction_df_processed, aes(x = estimate, y = fct_
 
 # Combine the plots and add the overall title for this model's results
 plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
+```
+## figure 
+
+```{r}
+# the above figure but make it the way the other figure look like 
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+level_order <- rev(c(
+    "abx", "EN", "TPN",
+    "abx * Formulated beverages", "Formulated beverages",
+    "abx * Nonalcoholic beverages", "Nonalcoholic beverages",
+    "abx * Sugars and sweets", "Sugars and sweets", # Note: 'Sugars and sweets' becomes 'Sweets'
+    "abx * Water", "Water",
+    "abx * Grains", "Grains",
+    "abx * Milk", "Milk",
+    "abx * Eggs", "Eggs",
+    "abx * Legumes", "Legumes",
+    "abx * Meats", "Meats",
+    "abx * Fruits", "Fruits",
+    "abx * Oils", "Oils",
+    "abx * Vegetables", "Vegetables"
+))
+
+cleaned_effects <- results_df %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>% 
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")
+  ) %>% 
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) >= 0) %>% 
+  mutate(clean_term = factor(clean_term, levels = level_order))
+
+shading_df <- cleaned_effects %>%
+  mutate(y_numeric = as.numeric(clean_term)) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+plot_subsweets <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#FBEADC", # A light orange/peach color like the example
+    alpha = 0.7,
+    inherit.aes = FALSE
+   ) +
+   # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  # Add labels and a clean theme
+  labs(
+    x = "ln(diversity) change",
+    y = ""
+  ) +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown())
+  
+plot_subsweets  
 ```
 
