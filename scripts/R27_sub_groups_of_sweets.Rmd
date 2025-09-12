@@ -1028,7 +1028,7 @@ ggsave(
  
 # tallying exposure to the food codes at different levels 
 
-## first 2 digits
+## first 2 digits exposure samples and patients 
 
 ```{r}
 level2 <- final_model_data %>% select(starts_with("avg_intake_")) %>% select(!contains('fg')) %>% 
@@ -1037,27 +1037,24 @@ level2 <- final_model_data %>% select(starts_with("avg_intake_")) %>% select(!co
   mutate(food_code = c('92','91','94','95'))
 
 exposure_number2 <- final_model_data %>% 
-  # Use summarise() with across() to apply a function to multiple columns
-  summarise(
-    # The across() function targets all columns that start with "avg_intake_"
-    across(
-      starts_with("avg_intake_"),
-      # For each column, count the number of rows where the value is greater than 0
-      # The sum(condition) trick works because TRUE evaluates to 1 and FALSE to 0
-      ~ sum(.x > 0, na.rm = TRUE),
-      # Create new column names like "n_Nonalcoholic_beverages"
-      .names = "n_{.col}"
-    )
-  ) %>%
-  # Optional: Pivot the data into a long format for easier viewing
   pivot_longer(
-      cols = everything(),
-      names_to = "food_category",
-      values_to = "num_stool_exposed_to_any_intake"
+    cols = starts_with("avg_intake_"),
+    names_to = "key",
+    values_to = "intake_value"
   ) %>%
+  # Filter the reshaped data to only include rows where intake was recorded.
+  filter(intake_value > 0) %>%
+  # Group the data by the new category column.
+  group_by(key) %>%
+  # Calculate the two summary statistics for each group.
+  # 'n()' counts the total number of rows in the group (the non-zero observations).
+  # 'n_distinct(pid)' counts the unique patient IDs in that group.
+  summarise(
+    non_zero_rows = n(),
+    unique_pids = n_distinct(pid)
+  ) %>% 
   # Clean up the names for the final table
-  mutate(food_category = str_remove(food_category, "n_avg_intake_")) %>% 
-  inner_join(level2,  by = "food_category") %>% 
+  inner_join(level2,  by = "key") %>% 
   mutate(level = "2-Digit Subcategories")
 
 
@@ -1375,118 +1372,6 @@ ggsave('../data/R27_faceted_exposure.jpg', width = 12, height = 9)
 ```
 
 
-
-# make a tree showing the first three digit level of the sweets group that showed up in this dataset 
-
-```{r}
-
-
-
-# what are the food codes that exist in this data set 
-fndds_structure_table <- dtb_ %>%  
-  mutate(Food_code = as.character(Food_code)) %>%
-  filter(str_detect(Food_code, '^9')) %>% 
-  distinct(Food_code) %>% 
-  mutate(f2_code = str_sub(Food_code, start = , end = 2),
-         f3_code = str_sub(Food_code, start = , end = 3),
-         f4_code = str_sub(Food_code, start = , end = 4)) %>% 
-  distinct(f3_code, .keep_all = T) %>% 
-  left_join(level2) %>% 
-  left_join(level3) %>% 
-  select(-f4_code)
-```
-```{r}
-library(ape)      # For creating phylogenetic objects
-library(ggtree)   # For visualizing trees
-
-# --- Step 2: Convert the Table into a Tree Structure (Newick Format) ---
-# This section programmatically builds the text representation of the tree
-# that the 'ape' package can understand.
-
-# Create a mapping of code to description for labels
-code_to_desc <- bind_rows(
-  fndds_structure_table %>% distinct(code = f2_code, desc = f2_desc),
-  fndds_structure_table %>% distinct(code = f3_code, desc = f3_desc),
-  tibble(code = '9', desc = "Sugars, Sweets, and Beverages")
-) %>%
-  distinct() %>%
-  # Clean up the descriptions for better readability
-  mutate(
-    desc = str_replace_all(desc, "_", " "),
-    desc = str_replace(desc, "sugarsugar", "sugar"),
-    desc = str_replace(desc, "energy drinks sport.+$", "etc.")
-  ) %>%
-  mutate(label = paste(code, desc, sep = ": "))
-
-```
-```{r}
-# Create the node data, starting with the tips (level 3)
-nodes_l3 <- fndds_structure_table %>%
-  distinct(code = f3_code, parent = f2_code) %>%
-  arrange(parent, code) %>%
-  mutate(y = row_number(), x = 2.0) # Level 3 nodes are at x=2.0
-
-# Calculate positions for level 2 nodes by centering them over their children
-nodes_l2 <- nodes_l3 %>%
-  group_by(parent) %>%
-  summarise(y = mean(y)) %>%
-  rename(code = parent) %>%
-  mutate(x = 1.5, parent = '9') # Level 2 nodes are at x=1.5
-
-# Calculate position for the root node (level 1) by centering it over its children
-nodes_l1 <- nodes_l2 %>%
-  summarise(y = mean(y)) %>%
-  mutate(x = 1.0, code = '9', parent = NA) # Root node is at x=1.0
-
-# Combine all nodes into one dataframe
-all_nodes <- bind_rows(nodes_l1, nodes_l2, nodes_l3) %>%
-  mutate(across(c(code, parent), as.character)) %>%
-  left_join(code_to_desc, by = c("code" = "code"))
-
-# --- Step 3: Create the Edge Dataframe for Drawing Lines ---
-# This creates the vertical and horizontal lines for the tree structure.
-edges <- all_nodes %>%
-  filter(!is.na(parent)) %>%
-  left_join(all_nodes, by = c("parent" = "code"), suffix = c("_child", "_parent")) %>%
-  select(x = x_child, y = y_child, xend = x_parent, yend = y_parent)
-
-# --- Step 4: Create the Final Tree Diagram with ggplot2 ---
-ggplot() +
-  # Draw the horizontal segments of the tree
-  geom_segment(data = edges, aes(x = x, y = y, xend = xend + 0.02, yend = y), color = "gray50") +
-  # Draw the vertical segments of the tree
-  geom_segment(data = edges, aes(x = xend + 0.02, y = y, xend = xend + 0.02, yend = yend), color = "gray50") +
-
-  # Draw the points for each node
-  geom_point(data = all_nodes, aes(x = x, y = y, color = factor(x)), size = 2) +
-  
-  # Draw the text labels, now left-aligned
-  geom_text(
-    data = all_nodes,
-    aes(x = x + 0.05, y = y, label = paste(code, desc, sep = ": ")), # Add a small offset from the point
-    hjust = 0,  # Left-align the text
-    size = 3.5,
-    fontface = "plain"
-  ) +
-  
-  # Define custom colors for each level of the hierarchy
-  scale_color_manual(values = c("1" = "#073B4C", "1.5" = "#118AB2", "2" = "#06D6A0"), guide = "none") +
-  
-  # Reverse the y-axis to have the root at the top and set x-axis limits for a compact view
-  scale_y_reverse() +
-  scale_x_continuous(limits = c(0.9, 3.5)) +
-  
-  # Use a minimal theme to remove axes and grids
-  theme_void() +
-  
-  # Add a title
-  labs(title = "FNDDS Hierarchy for Sugars, Sweets, and Beverages") +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", margin = margin(b = 20))
-  )
-
-ggsave('../data/R27_g9_tree.pdf', width = 12)
-```
 
 # the pairwise correlation between the 4 subgroups 
 
@@ -1869,7 +1754,7 @@ plot_interactions <- ggplot(interaction_df_processed, aes(x = estimate, y = fct_
 # Combine the plots and add the overall title for this model's results
 plot_main_effects / plot_interactions + plot_layout(heights = c(1, 2))
 ```
-## figure 
+## forest figure 
 
 ```{r}
 # the above figure but make it the way the other figure look like 
@@ -1948,5 +1833,97 @@ plot_subsweets <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
   theme(legend.position = "none", axis.text.y = element_markdown())
   
 plot_subsweets  
+```
+## tree with exposure
+
+```{r}
+library(ggtree)
+# 1. Define the Tree Structure in Newick format
+# This text format describes the parent-child relationships from your PDF.
+tree_text <- "((('91: Sugars and sweets'), ('92: Nonalcoholic beverages'), ('94: Water noncarbonated'), ('95: Formulated nutrition beverages etc.'))'9: Sugars, Sweets, and Beverages');"
+
+# Read the text to create a formal tree object.
+phylo_tree <- read.tree(text = tree_text)
+
+# 2. Create the Annotation Data
+# Recreate the summary data from your screenshot and add a 'label' column
+# that exactly matches the tip labels in the tree.
+annotation_data <- exposure_number2 %>%
+  # Create the text that will be displayed on the plot.
+  mutate(
+    exposure_text = paste("Samples:", non_zero_rows, " Patients:", unique_pids),
+    # Map the summary data to the exact tip labels from the tree.
+    label = case_when(
+      food_category == "Sugars_and_sweets" ~ "'91: Sugars and sweets'",
+      food_category == "Nonalcoholic_beverages" ~ "'92: Nonalcoholic beverages'",
+      food_category == "Water" ~ "'94: Water noncarbonated'",
+      food_category == "Formulated_beverages" ~ "'95: Formulated nutrition beverages etc.'"
+    )
+  )
+
+# 3. Create the Plot
+# Start by plotting the basic tree.
+tree_plot <- ggtree(phylo_tree)
+
+# Explicitly join the annotation data to the tree's internal data.
+tree_plot$data <- tree_plot$data %>%
+  left_join(annotation_data, by = "label") %>%
+  # Create a new, combined label that includes the exposure data for the tips.
+  mutate(
+    combined_label = if_else(
+      isTip & !is.na(exposure_text),
+      paste(label, exposure_text, sep = " \nExposure number:      "),
+      label # Keep the original label for internal nodes
+    )
+  )
+
+# Now, build the final plot using the new combined label.
+annotated_tree_plot <- tree_plot +
+  # Use the new 'combined_label' for the tip text.
+  geom_tiplab(aes(label = combined_label), align = TRUE, size = 3.5) +
+  # Add the label for the internal node (the root in this case).
+  geom_nodelab(
+    aes(label = combined_label, subset = !isTip), # Label only non-tip nodes
+    hjust = 1.2, # Position the label to the left of the node
+    size = 4
+    ) +
+  # Set the plot limits to make enough space for the new text.
+  xlim(-28, 49)
+
+
+# Print the final plot.
+print(annotated_tree_plot)
+   
+ggsave('../data/R27_g9_tree.pdf', width = 8.5)
+```
+## assemble
+
+```{r}
+bottom <-  plot_grid(
+                          plot_subsweets,NA,
+                 label_size = 12, ncol  = 2,
+                 rel_widths  = c(2,1),
+                labels = c('b'))
+
+subsweets_plot <-  plot_grid(annotated_tree_plot,
+                          bottom,
+                 label_size = 12, ncol  = 1,
+                 rel_heights = c(1,2),
+                labels = c('a', NA))
+
+title <- ggdraw() + 
+  draw_label("Supplemental Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, subsweets_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R27_subgroup_sweets_FNDDS.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
 ```
 
