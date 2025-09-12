@@ -9,7 +9,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-library(tidyverse)
 library(ggpubr)
 library(edgeR)
 library(DESeq2)
@@ -26,6 +25,7 @@ library(pheatmap)      # For creating the heatmap
 library(viridis)  
 library(RColorBrewer) 
 library(gridExtra)
+library(tidyverse)
 ```
 
 Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
@@ -687,6 +687,14 @@ p_li_contrast2 <- create_volcano_plot(shrunken_li_contrast2, "E. faecalis (Sucro
 # Use patchwork to combine the plots. The '/' operator stacks plots vertically.
 p_si_contrast2  + p_li_contrast2
 ggsave('../data/R38_DEG_volcano.png', width = 6, height = 4)
+```
+
+
+```{r}
+# the volcano for the non-shrunken resutls
+
+original_si_contrast2 <- create_volcano_plot(results_si_contrast2, "E. faecalis (Sucrose vs Regular Water)")
+
 ```
 ## plot gene counts
 
@@ -1455,7 +1463,7 @@ final_plot <- plot_grid(
 # --- Step 4: Save the Final Figure ---
 
 # Save the combined plot to a file
-save_plot("../data/R38_gsea_summary_figure.jpg", final_plot, base_width = 14, base_height = 12)
+save_plot("../data/R38_gsea_summary_figure.pdf", final_plot, base_width = 14, base_height = 12)
 ```
 
 ## heatmap of the opposing two pathways
