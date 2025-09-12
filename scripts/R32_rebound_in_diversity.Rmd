@@ -97,6 +97,9 @@ meds_expanded <- meds_updated %>%
       TRUE ~ "not_antibacterial"
     ), .groups = "drop"
   )
+
+
+meds_expanded %>%  write_csv('../data/R32_meds_expanded_all_medication_classified_for_each_day.csv')
 ```
 ```{r}
 # summarize the daily sweets intake for the patients 
@@ -210,7 +213,8 @@ ggsave('../data/R32_rebound_pid_selected.pdf', width = 22, height = 9)
 
 ```{r}
 # I looked very hard and saw these 5 patients had some trend ...
-trend <- c('P108','P120','P73','P74','P78')
+# actually only P108 is most obvious
+trend <- c('P108')
 
 # Filter all necessary data for the selected patient(s)
 patient_diversity_data <- microbiome_data %>% filter(pid %in% trend)
@@ -218,6 +222,23 @@ patient_sweets_data <- sweets_intake %>% filter(pid %in% trend)
 patient_abx_data <- meds_expanded %>%
   filter(pid %in% trend, exposure_category == "broad_spectrum")
 
+# look at what medication this patient had exactly 
+patient_med_data <- meds_updated %>% 
+  filter(pid == 'P108') %>% 
+  distinct() %>% 
+  filter(startday %in% 10:21 & stopday %in% 10:21) %>% 
+  filter(drug_category_for_this_study == 'broad_spectrum')
+
+
+# ---  Create a summary dataframe for placing the annotations ---
+annotation_data <- patient_abx_data %>%
+  group_by(pid) %>%
+  # Find the middle day of the exposure period to center the text
+  summarise(x_position = mean(range(day)), .groups = "drop")
+```
+
+
+```{r}
 # To properly scale the two y-axes, we need to find a scaling factor.
 # This factor will transform the sweets intake values to fit on the same plot
 # as the diversity values. We calculate one global factor for all selected patients
@@ -233,7 +254,16 @@ ggplot() +
     data = patient_abx_data,
     aes(xmin = day - 0.5, xmax = day + 0.5, ymin = -Inf, ymax = Inf),
     fill = "#FF000070",
-    alpha = 0.3
+    alpha = 0.2
+  ) +
+   # --- Add the text annotation for the antibiotic ---
+  geom_text(
+    data = annotation_data,
+    aes(x = x_position, y = Inf, label = "piperacillin-tazobactam"),
+    vjust = 1.5,        # Nudge the text down from the top edge
+    size = 3.5,         # Adjust size for readability
+    color = "#FF0000",
+    fontface = "italic" # Make it stand out a bit
   ) +
   # Add the line and points for microbiome diversity
   geom_line(
@@ -272,9 +302,8 @@ ggplot() +
   ) +
   # Add labels and title
   labs(
-    title = "Case Studies: Selected Rebound Patients",
-    x = "Day Relative to Transplant",
-    subtitle  = "Light pink shading indicates broad-spectrum antibiotic exposure."
+    #title = "Case Studies: Selected Rebound Patients",
+    x = "Day Relative to Transplant"
   ) +
   # Apply a clean theme
   theme_bw() +
@@ -285,5 +314,6 @@ ggplot() +
     axis.text.y.right = element_text(color = "#db2589"),
     strip.background = element_rect(fill="gray80") # Style facet titles
   )
+ggsave('../data/R32_rebound_patient.jpg', width = 5, height = 3)
 ```
 
