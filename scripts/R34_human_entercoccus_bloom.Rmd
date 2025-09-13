@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(ggpubr) 
+library(cowplot)
 ```
 
 ```{r}
@@ -127,140 +128,82 @@ antibiotic_days_in_window <- abx_exposure %>%
 ```
 
 ```{r}
-bloom_threshold <- 0.10
+generate_bloom_plot <- function(abundance_data, antibiotic_data, threshold) {
+  
+  # --- 1. Data Processing ---
+  
+  # Calculate the number of bloom days for each patient based on the threshold.
+  bloom_duration <- abundance_data %>%
+    filter(Enterococcus_relab > threshold) %>%
+    group_by(pid) %>%
+    summarise(bloom_days = n(), .groups = "drop")
+  
+  # Get the total number of samples for each patient to normalize by.
+  total_samples_per_patient <- abundance_data %>%
+    group_by(pid) %>%
+    summarise(total_samples = n(), .groups = "drop")
+    
+  # Create a master list of all unique patients.
+  all_patients <- abundance_data %>%
+    distinct(pid)
+  
+  # Combine all the data frames. Using left_join ensures all patients are kept.
+  analysis_data <- all_patients %>%
+    left_join(antibiotic_data, by = "pid") %>%
+    left_join(bloom_duration, by = "pid") %>%
+    left_join(total_samples_per_patient, by = "pid") %>%
+    # Replace NA values with 0 for patients with no blooms or no antibiotic exposure.
+    mutate(
+      broad_spectrum_exposure_days = replace_na(broad_spectrum_exposure_days, 0),
+      bloom_days = replace_na(bloom_days, 0)
+    ) %>%
+    # Calculate the proportion of time in bloom.
+    mutate(
+      proportion_in_bloom = bloom_days / total_samples
+    )
+    
+  # --- 2. Plotting ---
+  
+  # Create the plot object.
+  plot <- ggplot(analysis_data, aes(x = broad_spectrum_exposure_days, y = proportion_in_bloom)) +
+    geom_point(alpha = 0.7, size = 3, color = "#0072B2") +
+    geom_smooth(method = "lm", se = FALSE, color = "#D55E00", linetype = "dashed") +
+    # Use stat_cor to display the Spearman correlation and p-value.
+    stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top", size = 5) +
+    # Format y-axis as percentages.
+    scale_y_continuous(labels = scales::percent_format()) +
+    labs(
+      #title = "Sustained Antibiotic Exposure is Linked to\nProportion of Time in Bloom",
+      x = "Total Days of Broad-Spectrum Antibiotic Exposure",
+      # The y-axis label is now dynamic, based on the function's 'threshold' input.
+      y = paste0("Proportion of Time in Bloom\n(>", threshold * 100, "% Abundance)")
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(color = "grey80", fill = NA)
+    )
+    
+  # Return the final plot object.
+  return(plot)
+}
 
-# Calculate the duration of the bloom for each patient
-bloom_duration <- enterococcus_abundance %>%
-  # Filter for time points where Enterococcus is above the bloom threshold
-  filter(Enterococcus_relab > bloom_threshold) %>%
-  # Group by patient to count the number of bloom days for each one
-  group_by(pid) %>%
-  # 'n()' counts the number of samples (days) in the bloom state
-  summarise(bloom_days = n()) %>%
-  ungroup()
 
-# --- . Combine Data for Final Analysis & Normalize for Sampling Frequency ---
-# Get the total number of samples for each patient to use for normalization.
-total_samples_per_patient <- enterococcus_abundance %>%
-  group_by(pid) %>%
-  summarise(total_samples = n()) %>%
-  ungroup()
+# Now, call the function for each threshold.
+plot_0.1 <- generate_bloom_plot(enterococcus_abundance, antibiotic_days_in_window, 0.1)
+plot_0.3 <- generate_bloom_plot(enterococcus_abundance, antibiotic_days_in_window, 0.3)
 
-# Create a master list of all patients who have stool samples.
-all_patients <- enterococcus_abundance %>%
-  distinct(pid)
 
-# Combine the antibiotic and bloom duration data. Using left_joins from the master
-# patient list ensures we keep all patients, even if they had zero bloom days
-# or zero antibiotic exposure days.
-analysis_data <- all_patients %>%
-  left_join(antibiotic_days_in_window, by = "pid") %>%
-  left_join(bloom_duration, by = "pid") %>%
-  left_join(total_samples_per_patient, by = "pid") %>%
-  # If a patient had no blooms or no antibiotics in their window, the count will be NA.
-  # We must replace these NAs with 0.
-  mutate(
-    broad_spectrum_exposure_days = replace_na(broad_spectrum_exposure_days, 0),
-    bloom_days = replace_na(bloom_days, 0)
-  ) %>%
-  # Calculate the proportion of time in bloom to control for sampling frequency.
-  mutate(
-    proportion_in_bloom = bloom_days / total_samples
-  )
+# Or, arrange them side-by-side for a direct comparison using ggarrange.
+combined_plot <- ggarrange(plot_0.1, plot_0.3, ncol = 2, nrow = 1)
 
-# --- 5. Perform Correlation and Plot ---
-# Now we create the scatter plot to visualize the relationship.
-bloom0.1 <- ggplot(analysis_data, aes(x = broad_spectrum_exposure_days, y = proportion_in_bloom)) +
-  geom_point(alpha = 0.7, size = 3, color = "#0072B2") +
-  # Add a regression line to show the trend
-  geom_smooth(method = "lm", se = FALSE, color = "#D55E00", linetype = "dashed") +
-  # Use the 'stat_cor' function from ggpubr to automatically calculate and display
-  # the Spearman correlation coefficient and p-value on the plot.
-  stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top", size = 5) +
-  # Convert y-axis labels to percentages for better readability.
-  scale_y_continuous(labels = scales::percent_format()) +
-  labs(
-    title = "Sustained Antibiotic Exposure is Linked to\nProportion of Time in Bloom",
-    x = "Total Days of Broad-Spectrum Antibiotic Exposure During Stool Sampling",
-    y = "Proportion of Time in Enterococcus Bloom State\n(>10% Abundance)",
-    caption = "Each point represents one patient.. Bloom duration is normalized by sampling frequency."
-  ) +
-  theme_minimal(base_size = 11) +
-  theme(
-    plot.title = element_text(face = "bold", size = 12),
-    panel.grid.minor = element_blank(),
-    panel.border = element_rect(color = "grey80", fill = NA)
-  )
+# Display the combined plot.
+print(combined_plot)
 
 ```
 
-```{r}
-# what if we choose the bloom state threshold to be 30%
-bloom_threshold_high <- 0.30
-
-# Calculate the duration of the bloom for each patient
-bloom_duration_high <- enterococcus_abundance %>%
-  # Filter for time points where Enterococcus is above the bloom threshold
-  filter(Enterococcus_relab > bloom_threshold_high) %>%
-  # Group by patient to count the number of bloom days for each one
-  group_by(pid) %>%
-  # 'n()' counts the number of samples (days) in the bloom state
-  summarise(bloom_days = n()) %>%
-  ungroup()
-
-
-# Combine the antibiotic and bloom duration data. Using left_joins from the master
-# patient list ensures we keep all patients, even if they had zero bloom days
-# or zero antibiotic exposure days.
-analysis_data_high <- all_patients %>%
-  left_join(antibiotic_days_in_window, by = "pid") %>%
-  left_join(bloom_duration_high, by = "pid") %>%
-  left_join(total_samples_per_patient, by = "pid") %>%
-  # If a patient had no blooms or no antibiotics in their window, the count will be NA.
-  # We must replace these NAs with 0.
-  mutate(
-    broad_spectrum_exposure_days = replace_na(broad_spectrum_exposure_days, 0),
-    bloom_days = replace_na(bloom_days, 0)
-  ) %>%
-  # Calculate the proportion of time in bloom to control for sampling frequency.
-  mutate(
-    proportion_in_bloom = bloom_days / total_samples
-  )
-
-# --- 5. Perform Correlation and Plot ---
-# Now we create the scatter plot to visualize the relationship.
-bloom0.3 <- ggplot(analysis_data_high, aes(x = broad_spectrum_exposure_days, y = proportion_in_bloom)) +
-  geom_point(alpha = 0.7, size = 3, color = "#0072B2") +
-  # Add a regression line to show the trend
-  geom_smooth(method = "lm", se = FALSE, color = "#D55E00", linetype = "dashed") +
-  # Use the 'stat_cor' function from ggpubr to automatically calculate and display
-  # the Spearman correlation coefficient and p-value on the plot.
-  stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top", size = 5) +
-  # Convert y-axis labels to percentages for better readability.
-  scale_y_continuous(labels = scales::percent_format()) +
-  labs(
-    title = "Sustained Antibiotic Exposure is Linked to\nProportion of Time in Bloom",
-    x = "Total Days of Broad-Spectrum Antibiotic Exposure During Stool Sampling",
-    y = "Proportion of Time in Enterococcus Bloom State\n(>30% Abundance)",
-    caption = "Each point represents one patient.. Bloom duration is normalized by sampling frequency."
-  ) +
-  theme_minimal(base_size = 11) +
-  theme(
-    plot.title = element_text(face = "bold", size = 12),
-    panel.grid.minor = element_blank(),
-    panel.border = element_rect(color = "grey80", fill = NA)
-  )
-```
-
-```{r}
-
-# --- 4. Arrange the Plots Side-by-Side ---
-# Use the patchwork library to combine the two plots into a single figure.
-p1 + p2 + bloom0.1 + bloom0.3
-ggsave('../data/R34_pt_enterococcus_bloom.png', width = 12, height = 10)
-```
 # the days between the first and last day of Entercoccus relab >= XXXX
-
 
 ```{r}
 # This function calculates the summary statistics for a given threshold.
@@ -278,7 +221,7 @@ calculate_duration <- function(data, threshold) {
       duration_days = if_else(is.na(first_sdrt_high_entero), NA_real_, as.numeric(last_sdrt_high_entero - first_sdrt_high_entero + 1)),
       threshold_label = paste(">=", threshold) # Add a label for plotting
     ) %>%
-    filter(!is.na(duration_days)) # Remove patients who never met the threshold
+    filter(!is.na(duration_days) & duration_days > 1) # Remove patients who never met the threshold, and only keeping the patients that have at least 2 samples that in the bloom state
 }
 
 # Calculate summaries for both thresholds and combine them into one dataframe.
@@ -294,10 +237,10 @@ annotation_data <- combined_summary %>%
   summarise(patient_count = n(), .groups = 'drop')
 
 # Create the faceted plot.
-ggplot(combined_summary, aes(x = "", y = duration_days)) +
+duration_days_estimate <- ggplot(combined_summary, aes(x = "", y = duration_days)) +
   geom_boxplot(width = 0.4, outlier.shape = NA) +
   geom_jitter(width = 0.1, alpha = 0.6, color = "steelblue") +
-  stat_summary(fun = mean, geom = "point", shape = 23, size = 4, fill = "white") +
+  #stat_summary(fun = mean, geom = "point", shape = 23, size = 4, fill = "white") +
   
   # Use facet_wrap to create separate plots for each threshold.
   # This is the key to ensuring the y-axes are on the same scale.
@@ -307,7 +250,9 @@ ggplot(combined_summary, aes(x = "", y = duration_days)) +
   geom_text(data = annotation_data, 
             aes(x = 1.4, y = Inf, label = paste("n =", patient_count, "patients")), 
             vjust = 2) +
-  
+  scale_y_continuous(
+    breaks = seq(0, 36, 4)
+  ) +
   labs(
     title = "Duration of Enterococcus Dominance by Threshold",
     y = "Duration (days)",
@@ -358,5 +303,31 @@ ggplot(plot_data, aes(x = sdrt, y = Enterococcus_relab)) +
     strip.text = element_text(face = "bold") # Make the patient ID labels bold.
   )
 
+```
+
+# assemble 
+
+```{r}
+
+final_plot <-  plot_grid( duration_days_estimate , combined_plot,
+                 label_size = 12, nrow  =2,
+                 rel_heights = c(1.2,2),labels = "auto", 
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R34_pt_enterococcus_bloom.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
 ```
 
