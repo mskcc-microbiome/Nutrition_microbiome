@@ -1,6 +1,7 @@
 library(vegan)
 library(tidyverse)
 library(ggplot2)
+library(forcats)
 library(rstudioapi) 
 
 # get the path of this script, if the following code breaks for you, can hardcode pathdir to the directory where you have saved this file.
@@ -30,12 +31,13 @@ otu_table[is.na(otu_table)] <- 0
 dist_mat <- as.matrix(vegdist(t(otu_table), method = "bray"))
 
 clinical_cov <- readRDS(paste0(proj_home, "/data/R02_cleaned_clinical_outcome.rds")) %>%
-  select(c(source,intensity, age, sex, disease.simple, modal_diet, pid))
+  select(c(source,intensity, age, sex, disease.simple, pid))
 
 metadata <- read.csv(paste0(proj_home, "/data/153_combined_META.csv")) %>% 
   select(c(sampleid, empirical, timebin, fg_egg, fg_fruit, fg_grain, fg_legume, fg_meat, fg_milk, fg_oils, fg_sweets, fg_veggie, TPN, EN, pid)) %>%
   left_join(clinical_cov, by = "pid") %>%
-  select(-pid)
+  select(-pid) %>%
+  mutate(disease.simple = if_else(disease.simple == "AML", "AML", "all others"))
     
 
 # make sure sample order is the same:
@@ -44,9 +46,27 @@ metadata <- metadata[reorder_indices,] %>%
   remove_rownames() %>%
   column_to_rownames("sampleid")
 
+metadata %>%
+  select(c(pid, disease.simple)) %>%
+  unique() %>%
+  select(-pid) %>%
+  mutate(fill = disease.simple == "AML") %>%
+  ggplot(aes(x = fct_infreq(disease.simple), fill = fill)) +
+  geom_bar() + 
+  theme_classic() +
+  labs(
+      x = "",
+      y = "Number of Patients"
+      
+    ) + 
+  theme(
+    legend.position = "none"
+  )
+
+print(table(metadata$disease.simple))
 threshold = 0.05
 factor_fit <- vegan::envfit(as.data.frame(dist_mat), metadata, perms=1000)
-plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(dist_mat, metadata, threshold = threshold, perms = 100)
+plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(dist_mat, metadata, threshold = threshold, perms = 10000)
 
 plotting_data_frame %>%
    filter(significant) %>% 
