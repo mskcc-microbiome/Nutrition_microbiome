@@ -2260,6 +2260,7 @@ predicted_effects_percent_plot
 
 
 ```{r}
+# please remove panel a. I think the scatterplot should convey whether it is day 3 or day 6, perhaps with shapes
 weight_plot <-  plot_grid(timeline,
                           timeline_percent,
                           predicted_effects_percent_plot,

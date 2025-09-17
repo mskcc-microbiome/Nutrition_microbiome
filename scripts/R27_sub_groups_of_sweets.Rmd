@@ -70,7 +70,13 @@ dtb  <- read_csv('../data/152_combined_DTB.csv')
 # testing the solid and liquid sugar foods association with abx !     
 dtb_ <- dtb %>% 
   select(pid, fdrt, Food_NSC, Food_code, dehydrated_weight, Sugars_g) 
+
+dtb_9 <- dtb %>% 
+  distinct(Food_NSC, Food_code, description) %>% 
+  mutate(Food_code = as.character(Food_code)) %>% 
+  filter(str_detect(Food_code, '^9'))
 ```
+
 # 3 broad categories
  
 ```{r}

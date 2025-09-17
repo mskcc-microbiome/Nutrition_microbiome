@@ -68,8 +68,6 @@ cts_ <- cts %>%
   select(asv_key, sampleid, count)
 ```
 
-
-
 ```{r}
 library(tidyverse)
 library(ggpubr)
@@ -77,6 +75,7 @@ library(vdbR)
 connect_database()
 list_table_from_database('asv')
 get_table_from_database('asv_annotation_blast_detailed_ag')
+get_table_from_database('asv_annotation_blast_ag')
 
 meta <- read_csv('../data/153_combined_META.csv')
 details <- get_counts_subset(meta$sampleid)
@@ -94,6 +93,8 @@ asv_97 <- detailsall %>%
   filter(pident > 97)
 
 asv_97 %>% write_csv('../data/171_asv_with_pident_gt_97.csv')
+
+
 ```
 
 ```{r}
@@ -101,11 +102,21 @@ asv_97 %>% write_csv('../data/171_asv_with_pident_gt_97.csv')
 quality_asv <- read_csv('../data/171_asv_with_pident_gt_97.csv') %>% 
   pull(asv_key)
 
+# save a table that has the asv > 97 and also the samples and their relab
+asv_relab_97 <- details %>% 
+  select(asv_key, sampleid, count_relative) %>% 
+  left_join(asv_annotation_blast_ag %>% select(asv_key, genus)) %>% 
+  mutate(genus = if_else(asv_key %in% quality_asv, genus, NA))
+
+asv_relab_97 %>% write_csv('../data/171_quality_asv_relab_pident97_genus.csv')
+```
+
+
+```{r}
 annot <- asv_annotation_blast_ag %>% 
   select(asv_key, genus) %>% 
   mutate(genus = if_else(asv_key %in% quality_asv, genus, NA))
   
-
   
 cts_all <- cts_ %>% 
   left_join(annot %>%  select(asv_key, genus), by  = 'asv_key') %>% 

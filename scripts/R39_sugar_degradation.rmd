@@ -11,6 +11,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(vegan)
+library(ggpubr)
+library(cowplot)
 ```
 
 ```{r}
@@ -33,6 +35,16 @@ baseline_metadata <- metadata_df %>%
   slice_min(order_by = sdrt, n = 1) %>%
   ungroup()
 
+# Tally and print the number of patients per cluster in the baseline analysis
+patient_tally <- baseline_metadata %>%
+  count(modal_diet)
+
+print("Number of patients per modal_diet in the baseline analysis:")
+print(patient_tally)
+```
+
+
+```{r}
 # 2. Filter the abundance table to only include these baseline samples
 baseline_abundance <- abundance_table %>%
   filter(sampleid %in% baseline_metadata$sampleid) %>% 
@@ -102,7 +114,7 @@ pcoa_plot <- ggplot(plot_data, aes(x = PCoA1, y = PCoA2, color = modal_diet)) +
     hjust = 0, 
     vjust = 1, 
     size = 3,
-    fontface = "bold"
+    fontface = "bold", color = 'red'
   ) +
   theme(plot.title = element_text(hjust = 0.5, face = "bold"),
         legend.position = "bottom") + coord_fixed()
@@ -114,9 +126,80 @@ print(pcoa_plot)
 
 ```{r}
 # find the genus relab of those key genus in the baseline samples
-genus_relab <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv')
+asv_taxonomy_table <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv')
 ```
 ```{r}
+# ---  Compare abundance of key genera ---
 
+# 9. Define key genera and prepare data
+key_genera <- c("Bifidobacterium", "Lactobacillus", "Faecalibacterium", "Roseburia", "Ruminococcus")
+
+# Use the long-format ASV table and filter for baseline samples and key genera
+# Then, group by sample and genus to sum abundances, in case a genus is represented by multiple ASVs
+genus_abundance <- asv_taxonomy_table %>%
+  filter(sampleid %in% baseline_metadata$sampleid) %>%
+  filter(genus %in% key_genera) %>%
+  group_by(sampleid, genus) %>%
+  summarise(relative_abundance = sum(count_relative), .groups = 'drop')
+
+# Join with metadata to get cluster information
+genus_plot_data <- genus_abundance %>%
+  left_join(baseline_metadata, by = 'sampleid')
+
+# Calculate the pseudo-abundance (half of the smallest non-zero relative abundance)
+# This is crucial for log transformation when zeros are present.
+pseudo_abundance <- min(genus_plot_data$relative_abundance[genus_plot_data$relative_abundance > 0]) / 2
+
+# Add the log10 transformed abundance column
+genus_plot_data <- genus_plot_data %>%
+  mutate(log10_relab = log10(relative_abundance + pseudo_abundance))
+
+
+# 10. Create and display the faceted boxplot using log10 transformed data
+genus_boxplot <- ggplot(genus_plot_data, aes(x = modal_diet, y = log10_relab, fill = modal_diet)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  facet_wrap(~genus, scales = "free_y") +
+  theme_bw() +
+  labs(
+    title = "Relative Abundance of Key Genera at Baseline",
+    x = "",
+    y = "Log10(Relative Abundance)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_blank(),
+    legend.position = "none" # Hide legend as colors are clear from x-axis
+  ) +
+  scale_fill_manual(values = c( "darkslateblue",  "darkgoldenrod2"), name = '') +
+  stat_compare_means(method = "wilcox.test", label = "p.format", label.y.npc = 0.9, label.x.npc = 0.4)
+
+print(genus_boxplot)
 ```
+# assemble 
+
+```{r}
+final_plot <-  plot_grid(pcoa_plot,
+                        genus_boxplot,
+                         rel_heights = c(1.5,1.5),
+                 label_size = 12, ncol  = 1,
+                labels = "auto", 
+                align = 'vh', axis = 'lrtb')
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R39_patients_baseline_sugar_degradation.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
+```
+
 
