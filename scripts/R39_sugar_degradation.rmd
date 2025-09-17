@@ -1,0 +1,122 @@
+---
+title: "baseline sugar degradation"
+output: html_document
+date: "2025-09-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(vegan)
+```
+
+```{r}
+metadata_df <- read_csv('../data/153_combined_META.csv') %>% 
+  select(pid, sampleid, sdrt) %>% 
+  left_join(read_rds('../data/R02_cleaned_clinical_outcome.rds') %>% select(pid, modal_diet) %>%
+  mutate(modal_diet = as.character(modal_diet),
+         modal_diet = if_else(modal_diet == 'High intake', 'Higher-intake', 'Lower-intake/sugar-enriched'),
+         modal_diet = factor(modal_diet, levels = c( 'Lower-intake/sugar-enriched', 'Higher-intake'))))
+
+abundance_table <- read_csv('../data/R25_asv_counts.csv')
+```
+# beta diversity comparison
+
+```{r}
+# 1. Find the earliest (baseline) sample for each patient
+baseline_metadata <- metadata_df %>%
+  filter(sdrt <= 0) %>% # Keep only samples on or before transplant day
+  group_by(pid) %>%
+  slice_min(order_by = sdrt, n = 1) %>%
+  ungroup()
+
+# 2. Filter the abundance table to only include these baseline samples
+baseline_abundance <- abundance_table %>%
+  filter(sampleid %in% baseline_metadata$sampleid) %>% 
+  select(- count) %>% 
+  spread('asv_key','count_relative', fill = 0)
+
+# 3. Filter low-prevalence ASVs from the abundance table
+# This step removes noise and improves statistical power.
+# First, separate the sample IDs from the abundance data.
+sample_ids <- baseline_abundance$sampleid
+asv_matrix <- baseline_abundance %>% select(-sampleid)
+
+# Calculate the prevalence of each ASV (the proportion of samples it appears in)
+prevalence <- colSums(asv_matrix > 0) / nrow(asv_matrix)
+
+# Keep only ASVs that are present in at least 10% of the samples
+asv_matrix_filtered <- asv_matrix[, prevalence >= 0.10]
+
+# 4. Calculate the Bray-Curtis distance matrix
+#    Make sure the order of rows in abundance matches metadata for the test.
+#    It's good practice to arrange both by sampleid to be certain.
+baseline_metadata <- baseline_metadata %>% 
+  arrange(sampleid) %>%
+  filter(sampleid %in% sample_ids) # Ensure metadata matches the filtered abundance samples
+
+# The asv_matrix_filtered is already in the correct order from the steps above
+bray_dist <- vegdist(asv_matrix_filtered, method = "bray")
+
+# 5. Run the PERMANOVA test
+#    This tests if the 'modal_diet' grouping explains the distances between samples
+permanova_result <- adonis2(bray_dist ~ modal_diet, data = baseline_metadata, permutations = 999)
+  
+# 6. Look at the results
+print(permanova_result)
+
+```
+```{r}
+# 7. Perform Principal Coordinate Analysis (PCoA) for visualization
+pcoa <- cmdscale(bray_dist, k = 2, eig = TRUE)
+pcoa_points <- as.data.frame(pcoa$points)
+colnames(pcoa_points) <- c("PCoA1", "PCoA2")
+
+# Combine PCoA coordinates with metadata for plotting
+plot_data <- bind_cols(baseline_metadata, pcoa_points)
+
+# Extract R-squared and p-value from PERMANOVA results for annotation
+r2_value <- permanova_result$R2[1]
+p_value <- permanova_result$`Pr(>F)`[1]
+plot_annotation <- paste0("PERMANOVA\nR² = ", round(r2_value, 3), "\np = ", p_value)
+
+# 8. Create and display the PCoA plot
+pcoa_plot <- ggplot(plot_data, aes(x = PCoA1, y = PCoA2, color = modal_diet)) +
+  geom_point(size = 4, alpha = 0.8) +
+  theme_bw() +
+  labs(
+    title = "Baseline Microbiome Composition by Dietary Cluster",
+    x = paste0("PCoA1 (", round(100 * pcoa$eig[1] / sum(pcoa$eig), 1), "%)"),
+    y = paste0("PCoA2 (", round(100 * pcoa$eig[2] / sum(pcoa$eig), 1), "%)"),
+    color = "Dietary Cluster"
+  ) +
+  scale_color_manual(values = c( "darkslateblue",  "darkgoldenrod2"), name = '') +
+  annotate(
+    "text", 
+    x = min(plot_data$PCoA1), 
+    y = max(plot_data$PCoA2), 
+    label = plot_annotation, 
+    hjust = 0, 
+    vjust = 1, 
+    size = 3,
+    fontface = "bold"
+  ) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "bottom") + coord_fixed()
+
+print(pcoa_plot)
+
+```
+# key simple sugar fermenters relab comparison
+
+```{r}
+# find the genus relab of those key genus in the baseline samples
+genus_relab <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv')
+```
+```{r}
+
+```
+
