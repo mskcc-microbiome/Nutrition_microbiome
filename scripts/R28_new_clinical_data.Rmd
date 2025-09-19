@@ -11,6 +11,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(broom)
+library(cowplot)
+library(patchwork)
+library(ggh4x)
 ```
 
 # clean data from Oriana's data of CD4 count
@@ -41,7 +44,7 @@ dat <- readxl::read_excel('/Volumes/vandenBrinkLab/Oriana/IR/data_pull/MED30338 
   select(mrn, pid,  hct, test_day, LCI_SUBTEST_NAME, LR_RESULT_VALUE, source_and_gvhdppx, day_exposed) %>% 
   janitor::clean_names()
 
-dat
+dat %>% write_csv('../data/R28_IR_data_cleaned.csv')
 ```
 
 # CD4
@@ -147,18 +150,41 @@ combined_df <- bind_rows(d100_df, d180_df) %>%
   # Make 'landmark' a factor with specified levels to ensure Day 100 is on the left.
   mutate(landmark = factor(landmark, levels = c("Day_100", "Day_180")))
 
+# Define a color palette for the landmark days.
+# Using ggplot's standard teal and red for contrast.
+landmark_colors <- c(
+  "Day_100" = "#F8766D", 
+  "Day_180" = "#00BFC4"  
+)
+
+# Dynamically create the color vector for the facet strips.
+# This repeats each landmark color for the number of prophylaxis groups.
+strip_colors <- rep(landmark_colors, each = nlevels(combined_df$source_and_gvhdppx))
 
 # --- Step 3: Create the Faceted Plot ---
-ggplot(combined_df, aes(x = peri_engraftment_diversity, y = log1p(cd4_value))) +
+scatter_plot <- ggplot(combined_df, aes(x = peri_engraftment_diversity, y = log1p(cd4_value))) +
   # Add the points for the scatter plot.
   geom_point(alpha = 0.8, color = "black") +
   
-  # Add the linear regression line to each facet. The 'se = FALSE' hides the confidence interval ribbon.
-  geom_smooth(method = "lm", se = T, color = "blue", formula = y ~ x) +
+   # The regression line and confidence interval are also colored by landmark.
+  # The fill aesthetic is used for the confidence ribbon's color.
+  geom_smooth( method = "lm", se = TRUE, alpha = 0.15, formula = y ~ x) +
   
-  # This is where the magic happens for faceting.
-  # It creates a grid of plots, separated by 'landmark' and 'source_and_gvhdppx'.
-  facet_wrap(~ landmark + source_and_gvhdppx, ncol = 4) + 
+  # Use ggh4x::facet_wrap2 to apply the custom colors to the facet strips.
+  ggh4x::facet_wrap2(
+    ~ landmark + source_and_gvhdppx,
+    ncol = 4,
+    strip = strip_themed(
+      # Color the background of each strip using our dynamically created color vector.
+      background_x = elem_list_rect(fill = strip_colors),
+      # Use white text for better contrast against the colored backgrounds.
+      text_x = elem_list_text(color = "white", face = "bold")
+    )
+  ) +
+  
+  # Apply the custom color palettes for both color (lines/points) and fill (ribbons).
+  scale_color_manual(values = landmark_colors) +
+  scale_fill_manual(values = landmark_colors) +
   
   # Add clean, descriptive labels for the axes and title.
   labs(
@@ -166,6 +192,9 @@ ggplot(combined_df, aes(x = peri_engraftment_diversity, y = log1p(cd4_value))) +
     y = "log(Absolute CD4 Count)"
   ) +
   
+   scale_x_continuous(
+    breaks = seq(0, 25, 7)
+  ) +
   # Use a minimal, clean theme suitable for publication.
   theme_minimal() +
   theme(
@@ -173,25 +202,102 @@ ggplot(combined_df, aes(x = peri_engraftment_diversity, y = log1p(cd4_value))) +
     plot.title = element_text(hjust = 0.5),
     plot.subtitle = element_text(hjust = 0.5)
   )
+scatter_plot
 ```
 
 ## modeling 
 
 ```{r}
-correlation_model <- lm(log1p(cd4_value) ~   source_and_gvhdppx  + peri_engraftment_diversity  , data = d100_df)
+model_d100 <- lm(log1p(cd4_value) ~ source_and_gvhdppx  + peri_engraftment_diversity  , data = d100_df)
 
-# Get a summary of the model to extract statistics
-model_summary <- summary(correlation_model)
-model_summary
+model_d180 <- lm(log1p(cd4_value) ~ peri_engraftment_diversity + source_and_gvhdppx , data = d180_df)
 ```
-
 
 ```{r}
-correlation_model <- lm(log1p(cd4_value) ~ peri_engraftment_diversity + source_and_gvhdppx , data = d180_df)
+# ---  Tidy Model Outputs and Combine ---
+# Use broom::tidy() to extract coefficients and 95% confidence intervals for each model.
+# Then, add a 'landmark' column to identify which model the results came from.
+tidy_d100 <- tidy(model_d100, conf.int = TRUE) %>%
+  mutate(landmark = "Day 100")
 
-# Get a summary of the model to extract statistics
-model_summary <- summary(correlation_model)
+tidy_d180 <- tidy(model_d180, conf.int = TRUE) %>%
+  mutate(landmark = "Day 180")
+
+# Combine the tidy results into a single data frame for plotting.
+combined_models <- bind_rows(tidy_d100, tidy_d180) %>%
+  # Filter out the intercept term as it's typically not shown in coefficient plots.
+  filter(term != "(Intercept)") %>%
+  # Clean up the predictor names for better plot labels.
+  mutate(term = str_remove_all(term, "source_and_gvhdppx")) 
+
+# --- Step 3: Create Individual Plots ---
+
+# Plot for Day 100 (with Y-axis labels)
+p1 <- combined_models %>%
+  filter(landmark == "Day 100") %>%
+  ggplot(aes(x = estimate, y = fct_rev(term))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, size = 1, color = "coral") +
+  geom_point(size = 3, color = "coral") +
+  labs(
+    title = "Day 100",
+    x = "Coefficient Estimate",
+    y = "Predictor Variable"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# Plot for Day 180 (WITHOUT Y-axis labels)
+p2 <- combined_models %>%
+  filter(landmark == "Day 180") %>%
+  ggplot(aes(x = estimate, y = fct_rev(term))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, size = 1, color = "turquoise3") +
+  geom_point(size = 3, color = "turquoise3") +
+  labs(
+    title = "Day 180",
+    x = "Coefficient Estimate",
+    y = NULL # Remove the y-axis title
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_blank(), # Remove y-axis text/ticks
+    panel.grid.major.y = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# --- Step 4: Combine Plots with Patchwork ---
+# The '+' operator from patchwork places the plots side-by-side.
+# plot_annotation adds a single, overarching title to the combined figure.
+coeff_plot <- p1 + p2 
 
 ```
 
+# assemble 
 
+```{r}
+final_plot <-  plot_grid(scatter_plot,
+                        coeff_plot,
+                         rel_heights = c(1.5,1.5),
+                 label_size = 12, ncol  = 1,
+                labels = "auto", 
+                align = 'vh', axis = 'rtb')
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R28_patients_IR_CD4_and_peri_diversity.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
+```
