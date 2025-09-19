@@ -1,0 +1,204 @@
+---
+title: "Timepoint bias in sampling"
+output: html_document
+date: "2025-09-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(broom.mixed)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(cowplot)
+library(brmstools)
+library(bayesplot)
+library(ggtext)
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+ncores <- parallel::detectCores()
+```
+The reviewer's question in simple words : Is the diversity low because of the antibiotics, or is it low simply because you measured that group at an early time point when everyone's diversity was low anyway?
+
+# model Replace Weekly Bins with a Continuous Time Variable
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100))
+```
+
+
+```{r}
+all_food_vars <- meta %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + s(sdrt)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = meta,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 2, cores = 6,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE) %>% 
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
+```
+
+## sdrt plot
+
+```{r}
+# The primary and best way to see the spline effect
+time_effect_plot <- conditional_effects(model_fit, effects = "sdrt")
+
+# Display the plot
+timeplot <- plot(time_effect_plot, plot = FALSE)[[1]] + # The [[1]] selects the specific plot
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.8) +
+  labs(
+    title = "Estimated effect of stool sample\ncollection time on microbiome diversity",
+    x = "Day Relative to Transplant",
+    y = "Predicted Log(Diversity)"
+  ) +
+  theme_minimal()
+
+timeplot
+```
+
+## forest figure
+
+```{r}
+# the above figure but make it the way the other figure look like 
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+level_order <- rev(c(
+    "abx", "EN", "TPN",
+    "abx * Sweets", "Sweets",
+    "abx * Grains", "Grains",
+    "abx * Milk", "Milk",
+    "abx * Eggs", "Eggs",
+    "abx * Legumes", "Legumes",
+    "abx * Meats", "Meats",
+    "abx * Fruits", "Fruits",
+    "abx * Oils", "Oils",
+    "abx * Vegetables", "Vegetables"
+))
+
+cleaned_effects <- results_df %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>% 
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")
+  ) %>% 
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) >= 0) %>% 
+  mutate(clean_term = factor(clean_term, levels = level_order))
+
+shading_df <- cleaned_effects %>%
+  mutate(y_numeric = as.numeric(clean_term)) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+plot_temporal <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#FBEADC", # A light orange/peach color like the example
+    alpha = 0.7,
+    inherit.aes = FALSE
+   ) +
+   # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  # Add labels and a clean theme
+  labs(
+    x = "ln(diversity) change",
+    title = "Predictor effects on diversity,\nindependent of transplant day",
+    y = ''
+  ) +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown())
+  
+plot_temporal  
+```
+# assemble 
+
+```{r}
+temporal_plot <-  plot_grid(timeplot,
+                          plot_temporal,
+                 label_size = 12, ncol  = 2,
+                 #rel_heights = c(1,2),
+                labels = 'auto')
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, temporal_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.2, 1)
+) +theme(plot.margin = unit(c(1,1,13,1), "cm"))
+
+ggsave('../data/R40_temporal_bias.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
+```
+
