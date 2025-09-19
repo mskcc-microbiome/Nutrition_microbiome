@@ -32,19 +32,19 @@ What Oriana's dataline pull has :
 
 ```{r}
 # below is all the counts from the pt that I have also included stool samples in this cohort 
-dat <- readxl::read_excel('/Volumes/vandenBrinkLab/Oriana/IR/data_pull/MED30338 DataLine Results.xlsx', sheet = 2) %>% 
-  mutate(mrn = as.numeric(MRN)) %>% 
-  inner_join(link) %>% 
-  filter(pid %in% meta$pid) %>% 
-  left_join(ptb %>% mutate(source_and_gvhdppx = str_glue('{source}+{gvhd_ppx}')) %>%  select(mrn, hct, source_and_gvhdppx, day_exposed)) %>% 
+dat <- readxl::read_excel('/Volumes/vandenBrinkLab/Oriana/IR/data_pull/MED30338 DataLine Results.xlsx', sheet = 2) %>%
+  mutate(mrn = as.numeric(MRN)) %>%
+  inner_join(link) %>%
+  filter(pid %in% meta$pid) %>%
+  left_join(ptb %>% mutate(source_and_gvhdppx = str_glue('{source}+{gvhd_ppx}')) %>%  select(mrn, hct, source_and_gvhdppx, day_exposed)) %>%
   mutate(test_date = ymd(LR_PERFORMED_DTE),
          test_day = as.numeric(test_date - hct),
          source_and_gvhdppx = factor(source_and_gvhdppx ),
-        LR_RESULT_VALUE = as.numeric(LR_RESULT_VALUE) ) %>% 
-  select(mrn, pid,  hct, test_day, LCI_SUBTEST_NAME, LR_RESULT_VALUE, source_and_gvhdppx, day_exposed) %>% 
+        LR_RESULT_VALUE = as.numeric(LR_RESULT_VALUE) ) %>%
+  select(mrn, pid,  hct, test_day, LCI_SUBTEST_NAME, LR_RESULT_VALUE, source_and_gvhdppx, day_exposed) %>%
   janitor::clean_names()
 
-dat %>% write_csv('../data/R28_IR_data_cleaned.csv')
+dat %>% write_rds('../data/R28_IR_data_cleaned.rds')
 ```
 
 # CD4
@@ -52,7 +52,8 @@ dat %>% write_csv('../data/R28_IR_data_cleaned.csv')
 peri-engraftment diversity and the day 100/day 180 CD4 using +/- 30 days as the window  
 
 ```{r}
-#Day 100: Look for a measurement between Day +70 and Day +130.
+dat <- read_rds('../data/R28_IR_data_cleaned.rds')
+#Day 10read_rds()#Day 100: Look for a measurement between Day +70 and Day +130.
 #Day 180: Look for a measurement between Day +150 and Day +210." 
 #and For any patient who has multiple CD4 measurements within your chosen window, you should select the one that is closest in time to the landmark day (i.e., closest to Day 100 or Day 180).
 cd4_day100 <- dat %>%
@@ -150,6 +151,13 @@ combined_df <- bind_rows(d100_df, d180_df) %>%
   # Make 'landmark' a factor with specified levels to ensure Day 100 is on the left.
   mutate(landmark = factor(landmark, levels = c("Day_100", "Day_180")))
 
+# Group by the faceting variables and count the number of observations (n).
+# Then, create a label string like "n = 15".
+count_labels <- combined_df %>%
+  group_by(landmark, source_and_gvhdppx) %>%
+  summarise(n = n(), .groups = 'drop') %>% # Use .groups = 'drop' to avoid grouping issues later
+  mutate(label = paste("n =", n))
+
 # Define a color palette for the landmark days.
 # Using ggplot's standard teal and red for contrast.
 landmark_colors <- c(
@@ -169,6 +177,21 @@ scatter_plot <- ggplot(combined_df, aes(x = peri_engraftment_diversity, y = log1
    # The regression line and confidence interval are also colored by landmark.
   # The fill aesthetic is used for the confidence ribbon's color.
   geom_smooth( method = "lm", se = TRUE, alpha = 0.15, formula = y ~ x) +
+  
+  # Add the count annotations using geom_text.
+  # 'data = count_labels' tells this layer to use our pre-calculated counts.
+  # x = Inf and y = Inf place the label in the top-right corner.
+  # hjust and vjust are used to nudge the text so it's not cut off.
+  geom_text(
+    data = count_labels, 
+    aes(label = label), 
+    x = Inf, 
+    y = Inf, 
+    hjust = 1.1, 
+    vjust = 1.5, 
+    size = 3, 
+    color = "black"
+  ) +
   
   # Use ggh4x::facet_wrap2 to apply the custom colors to the facet strips.
   ggh4x::facet_wrap2(
@@ -193,7 +216,7 @@ scatter_plot <- ggplot(combined_df, aes(x = peri_engraftment_diversity, y = log1
   ) +
   
    scale_x_continuous(
-    breaks = seq(0, 25, 7)
+    breaks = seq(0, 25, 9)
   ) +
   # Use a minimal, clean theme suitable for publication.
   theme_minimal() +
