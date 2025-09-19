@@ -60,6 +60,12 @@ meds_updated <- bind_rows(
 
 
 meds_updated %>% write_csv('../data/R21_meds_updated_all_medication_classified.csv')
+
+# add the mrn back to the above table
+meds_updated_has_mrn <- meds_updated %>% 
+  left_join(link)
+
+meds_updated_has_mrn %>% write_csv('../data/R21_meds_updated_all_medication_classified_has_mrn.csv')
 ```
 
 ```{r}

@@ -45,6 +45,9 @@ get_table_from_database('asv_sequences_ag')
 #   select(asv_key, sampleid,  count, count_relative, genus)
 # 
 # cts_e %>% write_csv('../data/R25_all_enterococcus_asv_in_sample.csv')
+
+# save the asv counts data 
+cts %>% select(asv_key, sampleid,  count, count_relative) %>% write_csv('../data/R25_asv_counts.csv')
 ```
 
 ```{r}
