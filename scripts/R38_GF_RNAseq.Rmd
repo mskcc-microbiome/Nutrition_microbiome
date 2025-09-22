@@ -370,8 +370,6 @@ print(sucrose_plot)
 
 ```
 
-
-
 # Differential gene expression analysis
 
 ## LI
@@ -807,6 +805,126 @@ SI_Serpina10 <- ggplot(si_counts, aes(x = treatment, y = count, fill = treatment
   ) 
 
 SI_Serpina10
+```
+# gene symbol and normalized counts flat df
+
+```{r}
+# --- Step 1: Define a Function to Extract and Tidy Normalized Counts ---
+
+# This function takes a dds object and its tissue name, then returns a tidy dataframe.
+get_tidy_normalized_counts <- function(dds_object, tissue_name) {
+  
+  # Extract the normalized counts from the DESeqDataSet object
+  normalized_counts_matrix <- counts(dds_object, normalized = TRUE)
+  
+  # Convert the matrix to a long-format (tidy) tibble
+  tidy_counts <- as.data.frame(normalized_counts_matrix) %>%
+    rownames_to_column("ensembl_version") %>%
+    pivot_longer(
+      cols = -ensembl_version,
+      names_to = "sample_id",
+      values_to = "normalized_count"
+    ) %>%
+    as_tibble()
+  
+  # Clean the Ensembl IDs by removing the version number (.1, .5, etc.)
+  # This is crucial for matching with the annotation database.
+  tidy_counts <- tidy_counts %>%
+    mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
+  
+  # Add gene symbols by mapping the clean Ensembl IDs
+  # It's efficient to map only the unique IDs to avoid redundant lookups.
+  unique_ensembl_ids <- unique(tidy_counts$ensembl_id)
+  gene_symbols <- mapIds(
+    org.Mm.eg.db,
+    keys = unique_ensembl_ids,
+    column = "SYMBOL",
+    keytype = "ENSEMBL",
+    multiVals = "first"
+  )
+  
+  # Create a small lookup table to join the symbols back to the main dataframe
+  symbol_map <- tibble(ensembl_id = names(gene_symbols), symbol = gene_symbols)
+  
+  # Join the symbols and add the tissue annotation
+  final_df <- tidy_counts %>%
+    left_join(symbol_map, by = "ensembl_id") %>%
+    mutate(tissue = tissue_name) %>%
+    # Select and reorder columns for a clean final output
+    select(ensembl_id, symbol, sample_id, normalized_count, tissue)
+  
+  return(final_df)
+}
+
+
+# --- Step 2: Apply the Function and Combine the Results ---
+
+# Process the Large Intestine data
+counts_li_tidy <- get_tidy_normalized_counts(dds_li, "Large_Intestine")
+
+# Process the Small Intestine data
+counts_si_tidy <- get_tidy_normalized_counts(dds_si, "Small_Intestine")
+
+# Combine the two tidy dataframes into a single one
+combined_counts_df <- bind_rows(counts_li_tidy, counts_si_tidy)
+
+# --- Step 3: View the Results ---
+unique_symbols <- combined_counts_df %>% distinct(symbol) 
+```
+
+```{r}
+# why I didn't see the IP-10 gene  
+# to see if I can find that gene in the counts before filtering
+raw_counts_matrix_df <- raw_counts_matrix %>% 
+  as.data.frame() %>% 
+  rownames_to_column('ensembl_version') %>% 
+  mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
+
+
+unique_ensembl_ids <- unique(raw_counts_matrix_df$ensembl_id)
+  gene_symbols <- mapIds(
+    org.Mm.eg.db,
+    keys = unique_ensembl_ids,
+    column = "SYMBOL",
+    keytype = "ENSEMBL",
+    multiVals = "first"
+  )
+  
+# Create a small lookup table to join the symbols back to the main dataframe
+symbol_map <- tibble(ensembl_id = names(gene_symbols), symbol = gene_symbols)
+  
+# The gene is there simpy too low to even pass the filtering
+```
+```{r}
+# what are the gene counts of the other genes in the same family: Cxcl16, Cxcr4 and Cxcl12
+three <- c('Cxcl16', 'Cxcr4' , 'Cxcl12')
+three_gene_counts <- three %>% set_names(three) %>% 
+  imap(function(gene_, name_){
+    get_gene_counts(dds_li, gene_, "Large Intestine") %>% 
+        ggplot( aes(x = treatment, y = count, fill = treatment)) +
+          geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+          geom_jitter(width = 0.2, alpha = 0.8, height = 0) + # Overlay individual data points
+          #facet_wrap(~tissue, scales = "free_y") + # Create separate plots for LI and SI
+          
+          # Use the same colors as the previous plot for consistency
+          scale_fill_manual(values = color_palette) +
+          scale_y_sqrt() +
+          labs(
+            title = str_glue('{name_}'),
+            x = "",
+            y = "Normalized Gene Count"
+          ) +
+          theme_minimal(base_size = 11) +
+          theme(
+            legend.position = "none",
+            strip.text = element_text(face = "bold", size = 12), # Style the facet titles
+            #axis.text.x = element_blank(),
+            plot.title = element_text(hjust = 0.5, face = "bold.italic")
+          ) 
+  })
+
+three_gene_counts_plot <- plot_grid(plotlist = three_gene_counts, nrow = 3)
+ggsave('../data/R38_three_gene_counts_plot.pdf', height = 10)
 ```
 
 
