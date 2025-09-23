@@ -18,7 +18,6 @@ library(tidybayes)
 library(brmstools)
 library(bayesplot)
 library(gt)
-library(gtExtras)
 library(ggtext)
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
@@ -171,10 +170,23 @@ table_data <- stratified_tally_detailed %>%
   mutate(exposure_type = factor(exposure_type, levels = c("Empiric only", "No broad-spectrum exposure"))) %>%
   arrange(exposure_type)
 
+# Calculate totals for the filtered data to compute percentages.
+total_samples <- sum(stratified_tally_detailed$number_of_samples)
+total_patients <- sum(stratified_tally_detailed$number_of_patients)
+
+# Create new columns that combine the count and the calculated percentage.
+table_data_with_pct <- table_data %>%
+  mutate(
+    samples_display = sprintf("%d (%.1f%%)", number_of_samples, (number_of_samples / total_samples) * 100),
+    patients_display = sprintf("%d (%.1f%%)", number_of_patients, (number_of_patients / total_patients) * 100)
+  )
+
 
 # --- Table Creation and Styling ---
 # Use the gt package to build and format the table from the prepared data.
-exposure_table_tally <- table_data %>%
+exposure_table_tally <- table_data_with_pct %>%
+  # Select only the columns needed for the final table.
+  select(exposure_type, samples_display, patients_display) %>%
   gt() %>%
   # Add a main title to the table.
   # tab_header(
@@ -183,7 +195,7 @@ exposure_table_tally <- table_data %>%
   # ) %>%
   # Apply the light pink fill to the entire row for 'Empiric only'.
   tab_style(
-    style = cell_text(color = "maroon"),
+    style = cell_text(color = "gray20"),
     locations = cells_body(
       rows = exposure_type == "Empiric only"
     )
@@ -198,13 +210,13 @@ exposure_table_tally <- table_data %>%
   # Make the column headers more descriptive.
   cols_label(
     exposure_type = "Exposure Type",
-    number_of_samples = "Number of Samples",
-    number_of_patients = "Number of Patients"
+    samples_display = "Number of Samples",
+    patients_display = "Number of Patients"
   ) %>%
   # Center the numeric values for better readability.
   cols_align(
     align = "center",
-    columns = c(number_of_samples, number_of_patients)
+    columns = c(samples_display, patients_display)
   ) %>%
     # Style the column headers to be bold.
   tab_style(
@@ -215,9 +227,6 @@ exposure_table_tally <- table_data %>%
   opt_table_font(font = "sans-serif") %>%
   opt_table_outline() %>% 
   gt::gtsave(filename = "../data/R41_number_tally.png") 
-
-
-
 ```
 
 # remove the bsi_treatment and cdiff_treatment exposed samples and do the model
@@ -391,12 +400,12 @@ sweets_raw
 ## assemble 
 
 ```{r}
-table_tally <- ggdraw() + draw_image("../data/R41_number_tally.png", scale = 1)
+table_tally <- ggdraw() + draw_image("../data/R41_number_tally.png", scale = 1.2)
 
 
-final_plot <- plot_grid( table_tally , sweets_raw  , plot_stratify , 
+final_plot <- plot_grid( table_tally ,  plot_stratify , 
                 nrow  =3,
-                 rel_heights = c(0.9,1.3,2),
+                 rel_heights = c(.9,2),
                 labels = 'auto',
                 align = 'vh', axis = 'lrtb')
 
@@ -410,7 +419,7 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,5,1,1), "cm"))
+) +theme(plot.margin = unit(c(1,6,1,1), "cm"))
 
 ggsave('../data/R41_remove_2_abx_stratification.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
