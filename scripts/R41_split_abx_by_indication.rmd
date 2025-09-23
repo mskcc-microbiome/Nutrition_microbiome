@@ -17,6 +17,8 @@ library(ggpubr)
 library(tidybayes)
 library(brmstools)
 library(bayesplot)
+library(gt)
+library(gtExtras)
 library(ggtext)
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
@@ -155,6 +157,69 @@ stratified_tally_detailed <- stratified_exposure %>%
 
 stratified_tally_detailed
 ```
+## tally two abx categories
+
+```{r}
+# Filter for the relevant exposure types and make the names more presentable for the table.
+table_data <- stratified_tally_detailed %>%
+  filter(exposure_type %in% c("empiric", "no_broad_spectrum_exposure")) %>%
+  mutate(exposure_type = case_when(
+    exposure_type == "empiric" ~ "Empiric only",
+    exposure_type == "no_broad_spectrum_exposure" ~ "No broad-spectrum exposure"
+    # Reorder the levels for the table display
+  )) %>%
+  mutate(exposure_type = factor(exposure_type, levels = c("Empiric only", "No broad-spectrum exposure"))) %>%
+  arrange(exposure_type)
+
+
+# --- Table Creation and Styling ---
+# Use the gt package to build and format the table from the prepared data.
+exposure_table_tally <- table_data %>%
+  gt() %>%
+  # Add a main title to the table.
+  # tab_header(
+  #   title = md("**Antibiotic Exposure Summary**"),
+  #   subtitle = "Samples and patients in the empiric vs. no-exposure groups"
+  # ) %>%
+  # Apply the light pink fill to the entire row for 'Empiric only'.
+  tab_style(
+    style = cell_text(color = "maroon"),
+    locations = cells_body(
+      rows = exposure_type == "Empiric only"
+    )
+  ) %>%
+  # Apply the light gray fill to the entire row for 'No broad-spectrum exposure'.
+  tab_style(
+    style = cell_text(color = "gray20"),
+    locations = cells_body(
+      rows = exposure_type == "No broad-spectrum exposure"
+    )
+  ) %>%
+  # Make the column headers more descriptive.
+  cols_label(
+    exposure_type = "Exposure Type",
+    number_of_samples = "Number of Samples",
+    number_of_patients = "Number of Patients"
+  ) %>%
+  # Center the numeric values for better readability.
+  cols_align(
+    align = "center",
+    columns = c(number_of_samples, number_of_patients)
+  ) %>%
+    # Style the column headers to be bold.
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(columns = everything())
+  ) %>%
+  # Add some final styling options for a polished look.
+  opt_table_font(font = "sans-serif") %>%
+  opt_table_outline() %>% 
+  gt::gtsave(filename = "../data/R41_number_tally.png") 
+
+
+
+```
+
 # remove the bsi_treatment and cdiff_treatment exposed samples and do the model
 
 ```{r}
@@ -295,3 +360,60 @@ plot_stratify <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
   
 plot_stratify  
 ```
+## sweets_raw of the included samples 
+
+```{r}
+sweets_raw <- meta %>% 
+  mutate(log_div = log(simpson_reciprocal)) %>% 
+  ggscatter(x = 'fg_sweets', y = 'log_div', color = 'exposure_type',
+            ylab = 'log(diversity)',xlab = 'Sweets consumed (grams)',
+            alpha = 0.35, shape = 16, size = 1,
+            add = "reg.line",  # Add regressin line
+           add.params = list(color = 'exposure_type', fill = 'exposure_type', alpha = 0.3, size = 1.5), # Customize line
+           conf.int = TRUE, # Add confidence interval
+           cor.coef = TRUE, # Add correlation coefficient.
+           cor.coeff.args = list(method = "spearman",  label.sep = "\n", cor.coef.name = c("rho"),p.accuracy = 0.01, r.accuracy = 0.01,label.x.npc = .7, label.y.npc = "bottom", size = 3.5)) +
+  scale_x_sqrt() +
+  scale_y_sqrt() +
+  scale_fill_manual('antibiotics', values = c('gray20','maroon'), labels=c('No broad-spectrum abx exposure', 'Empiric only')) +
+  scale_colour_manual('antibiotics',values = c('gray20','maroon'), labels=c('No broad-spectrum abx exposure', 'Empiric only')) +
+  facet_wrap(~ exposure_type, labeller = 'label_both', dir = 'h') +
+  theme(aspect.ratio = 1/1.15, 
+        legend.position = 'top',
+         strip.background = element_blank(),
+        strip.text.x = element_blank(), 
+     axis.text=element_text(size=9), axis.title=element_text(size=9)) 
+
+sweets_raw
+```
+
+
+## assemble 
+
+```{r}
+table_tally <- ggdraw() + draw_image("../data/R41_number_tally.png", scale = 1)
+
+
+final_plot <- plot_grid( table_tally , sweets_raw  , plot_stratify , 
+                nrow  =3,
+                 rel_heights = c(0.9,1.3,2),
+                labels = 'auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,5,1,1), "cm"))
+
+ggsave('../data/R41_remove_2_abx_stratification.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)       
+```
+
