@@ -13,6 +13,8 @@ library(tidyverse)
 library(ggpubr)
 library(gtsummary)
 library(cowplot)
+library(vdbR)
+connect_database()
 ```
 
 ```{r}
@@ -116,7 +118,6 @@ ggsave('../results/Table_1_patient_summary_003.pdf',
 # Table S1
 
 ```{r}
-
 meta <- read_csv('../data/153_combined_META.csv')
 ```
 

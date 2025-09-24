@@ -19,6 +19,7 @@ library(cowplot)
 library(ggridges)
 library(brmstools)
 library(bayesplot)
+library(gt)
 options(mc.cores = parallel::detectCores())
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
@@ -37,9 +38,11 @@ ncores <- parallel::detectCores()
 I am testing if the effect of sweets * abx depends on the intensity level. In statistical terms, you are testing for an interaction between (sweets * abx) and intensity.
 
 ```{r}
-meta <- read_csv('../data/153_combined_META.csv')
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100))      
 ```
-
 
 ```{r}
 # Combine the main food groups and the current sweet variable
@@ -97,7 +100,7 @@ posterior_draws <- as_draws_df(model_fit)
 conditional_effects_draws <- posterior_draws %>%
   transmute(
     # The effect for the Ablative group is just its own coefficient.
-    `Ablative (High Intensity)` = `b_fg_sweets:empiricalTRUE`,
+    `Ablative` = `b_fg_sweets:empiricalTRUE`,
     
     # The effect for the Reduced group is the baseline effect + its interaction term.
     `Reduced Intensity` = `b_fg_sweets:empiricalTRUE` + `b_fg_sweets:empiricalTRUE:intensityreduced`,
@@ -124,12 +127,12 @@ plot_data <- conditional_effects_draws %>%
   # Rename columns to match the plotting code below
   rename(conf.low = .lower, conf.high = .upper) %>%
   # Make the labels a factor to control their order on the plot
-  mutate(term_label = fct_relevel(term_label, "Ablative (High Intensity)", "Reduced Intensity", "Non-Ablative")) %>% 
+  mutate(term_label = fct_relevel(term_label, "Non-Ablative", "Reduced Intensity", "Ablative")) %>% 
   mutate(is_significant = (conf.low * conf.high) > 0)
 
 
 # --- 4. Create the More Intuitive Coefficient Plot ---
-ggplot(plot_data, aes(x = estimate, y = term_label)) +
+results <- ggplot(plot_data, aes(x = estimate, y = term_label)) +
   # Add a vertical line at zero. If a credible interval crosses this line,
   # the effect is not statistically significant.
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey70") +
@@ -143,9 +146,9 @@ ggplot(plot_data, aes(x = estimate, y = term_label)) +
   
   # Add labels and a title
   labs(
-    title = "Effect of Sweets + Antibiotics on Microbiome Diversity",
-    subtitle = "Shown for each conditioning intensity group",
-    x = "Estimated Change in Log(Alpha Diversity)",
+    title = "\nEffect of Sweets + Antibiotics on Microbiome Diversity",
+    subtitle = "for each conditioning intensity group",
+    x = "Estimated Change in log(Diversity)",
     y = "" # No y-axis label needed
   ) +
   
@@ -156,5 +159,100 @@ ggplot(plot_data, aes(x = estimate, y = term_label)) +
     plot.title.position = "plot"
   )
 
+results
+```
+
+# include the tally of the patients and samples in the three intensity again
+
+```{r}
+# --- Generate the summary table ---
+sample_data <- meta
+# Calculate total number of unique patients and samples for percentage calculations
+total_patients <- n_distinct(sample_data$pid)
+total_samples <- nrow(sample_data)
+
+summary_table <- sample_data %>%
+  # Group data by the conditioning intensity
+  group_by(intensity) %>%
+  # Calculate counts for patients (distinct) and samples (all rows)
+  summarise(
+    patient_n = n_distinct(pid),
+    sample_n = n(),
+    .groups = 'drop' # Drop grouping for the next steps
+  ) %>%
+  # Calculate the percentage relative to the total
+  mutate(
+    patient_pct = patient_n / total_patients,
+    sample_pct = sample_n / total_samples,
+    # Reformat intensity names 
+    intensity = case_when(
+      intensity == "ablative" ~ "Ablative",
+      intensity == "reduced" ~ "Reduced Intensity",
+      intensity == "nonablative" ~ "Non-Ablative"
+    )
+  ) %>% 
+  arrange(factor(intensity, levels = c("Ablative", "Reduced Intensity", "Non-Ablative"))) 
+
+# --- Format the table with the 'gt' package ---
+summary_table %>%
+  gt() %>%
+  # Re-label the columns for clarity
+  cols_label(
+    intensity = "Conditioning Intensity",
+    patient_n = "Patients (n)",
+    patient_pct = "Patients (%)",
+    sample_n = "Samples (n)",
+    sample_pct = "Samples (%)"
+  ) %>%
+  # Format the percentage columns
+  fmt_percent(
+    columns = c(patient_pct, sample_pct),
+    decimals = 1
+  ) %>%
+  # Add a source note
+  tab_source_note(
+    source_note = md(paste0("Based on a total of **", total_samples, "** samples from **", total_patients, "** patients."))
+  ) %>%
+  # Add a spanning header to group related columns
+  tab_spanner(
+    label = md("**Patient Counts**"),
+    columns = c(patient_n, patient_pct)
+  ) %>%
+  tab_spanner(
+    label = md("**Sample Counts**"),
+    columns = c(sample_n, sample_pct)
+  )%>%
+  # Add some final styling options for a polished look.
+  opt_table_font(font = "sans-serif") %>%
+  gt::gtsave(filename = "../data/R36_number_tally_intensity.png") 
+```
+
+# assemble 
+
+```{r}
+table_tally_intensity <- ggdraw() + draw_image("../data/R36_number_tally_intensity.png", scale = 1)
+
+
+final_plot <- plot_grid( table_tally_intensity ,  results , 
+                nrow  =2,
+                 rel_heights = c(.9,1.5),
+                labels = 'auto',
+                align = 'h', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,3,1,1), "cm"))
+
+ggsave('../data/R36_threeway_intensity.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)     
 ```
 
