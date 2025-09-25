@@ -13,6 +13,7 @@ library(tidyverse)
 library(ggpubr)
 library(vegan)
 library(cowplot)
+library(patchwork)
 ```
 
 Use the prior two day summary of the data, meaning count the average of the prior two day and their distance to the earliest 
@@ -223,7 +224,6 @@ Partial_residual <- joined %>%
 Partial_residual
 ```
 
-
 # sbeta_example
 
 ```{r}
@@ -366,5 +366,73 @@ combined <- plot_grid(
 
 ggsave('../results//S03_distance_to_earliest_R06.pdf',           
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)   
+```
+
+# because I am an employee
+
+```{r}
+merged_beta <- beta_ %>% full_join(meta)
+
+merged_beta %>% write_csv('../data/R06_merged_pcoa_bray_curtis.csv')
+```
+
+```{r}
+# First, we need to reshape the data from a wide format to a long format.
+# This makes it easy for ggplot to create a separate plot (a "facet") for each food group.
+df_long_fg <- merged_beta %>%
+  pivot_longer(
+    cols = starts_with("fg_"), # Select all columns that start with "fg_"
+    names_to = "food_group",   # The new column for the food group names
+    values_to = "consumption"  # The new column for the consumption values
+  ) %>%
+  # A little cleaning to make the labels look nicer
+  mutate(
+    food_group = str_remove(food_group, "fg_"),
+    # Log-transform the consumption. We add 1 to handle cases where consumption is 0.
+    log_consumption = log10(consumption + 1)
+    )
+
+# Now, create the faceted scatter plot for the food groups.
+# Note the color aesthetic now uses the new 'log_consumption' column.
+p_food_groups <- ggplot(df_long_fg, aes(x = PC1, y = PC2, color = log_consumption)) +
+  geom_point(alpha = 0.6) +
+  # This creates the grid of plots, with one for each food group.
+  facet_wrap(~ food_group, ncol = 3) +
+  # A nice color scale for continuous data.
+  scale_color_viridis_c(option = "plasma") +
+  labs(
+    title = "PCoA Colored by Food Group Consumption",
+    color = "log10(Consumption (g) + 1)" # Update the legend title
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+
+```{r}
+# --- Plot 2: A single plot for the 'empirical' column ---
+
+# This plot uses the original 'df' data frame.
+p_empirical <- ggplot(merged_beta, aes(x = PC1, y = PC2, color = empirical)) +
+  geom_point(alpha = 0.8) +
+  # A specific color scale for the TRUE/FALSE values.
+  scale_color_manual(values = c("TRUE" = "dodgerblue", "FALSE" = "tomato")) +
+  labs(
+    title = "PCoA Colored by Antibiotic Exposure (Empirical)",
+    color = "Antibiotic Exposure"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+# --- Combine the plots ---
+# The patchwork package lets you combine plots with simple operators.
+# Here, we stack the empirical plot on top of the food group plots.
+final_plot <- p_empirical / p_food_groups
+
+# Display the final combined figure
+final_plot
+
+ggsave('../data/R06_pcoa.pdf', width = 10, height = 12)
 ```
 

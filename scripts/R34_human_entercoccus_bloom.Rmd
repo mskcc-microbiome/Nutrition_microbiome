@@ -266,7 +266,27 @@ duration_days_estimate <- ggplot(combined_summary, aes(x = "", y = duration_days
     strip.text = element_text(face = "bold") # Make facet labels bold
   )
 
+duration_days_estimate
 ```
+
+```{r}
+# Calculate the median and IQR for duration_days, grouped by the threshold label
+summary_table <- combined_summary %>%
+  group_by(threshold_label) %>%
+  summarise(
+    # Calculate the 25th percentile and convert to an integer
+    q25_duration = as.integer(quantile(duration_days, probs = 0.25, na.rm = TRUE)),
+    # Calculate the median (50th percentile) and convert to an integer
+    median_duration = as.integer(median(duration_days, na.rm = TRUE)),
+    # Calculate the 75th percentile and convert to an integer
+    q75_duration = as.integer(quantile(duration_days, probs = 0.75, na.rm = TRUE)),
+    .groups = 'drop' # Drop the grouping for a clean final table
+  )
+
+summary_table
+```
+
+
 ```{r}
 # looking at the few patients that had the duration >= 20 days for the threshold of 0.3
 # Define the list of patients to be plotted.
@@ -308,7 +328,6 @@ ggplot(plot_data, aes(x = sdrt, y = Enterococcus_relab)) +
 # assemble 
 
 ```{r}
-
 final_plot <-  plot_grid( duration_days_estimate , combined_plot,
                  label_size = 12, nrow  =2,
                  rel_heights = c(1.2,2),labels = "auto", 

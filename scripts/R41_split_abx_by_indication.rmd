@@ -161,13 +161,14 @@ stratified_tally_detailed
 ```{r}
 # Filter for the relevant exposure types and make the names more presentable for the table.
 table_data <- stratified_tally_detailed %>%
-  filter(exposure_type %in% c("empiric", "no_broad_spectrum_exposure")) %>%
   mutate(exposure_type = case_when(
     exposure_type == "empiric" ~ "Empiric only",
-    exposure_type == "no_broad_spectrum_exposure" ~ "No broad-spectrum exposure"
+    exposure_type == "no_broad_spectrum_exposure" ~ "No broad-spectrum exposure",
+    exposure_type == "bsi_treatment" ~ "BSI treatment",
+    exposure_type == "cdiff_treatment" ~ "C. diff treatment"
     # Reorder the levels for the table display
   )) %>%
-  mutate(exposure_type = factor(exposure_type, levels = c("Empiric only", "No broad-spectrum exposure"))) %>%
+  mutate(exposure_type = factor(exposure_type, levels = c("Empiric only", "No broad-spectrum exposure",'C. diff treatment','BSI treatment'))) %>%
   arrange(exposure_type)
 
 # Calculate totals for the filtered data to compute percentages.
@@ -404,7 +405,7 @@ table_tally <- ggdraw() + draw_image("../data/R41_number_tally.png", scale = 1.2
 
 
 final_plot <- plot_grid( table_tally ,  plot_stratify , 
-                nrow  =3,
+                nrow  =2,
                  rel_heights = c(.9,2),
                 labels = 'auto',
                 align = 'vh', axis = 'lrtb')
@@ -419,7 +420,7 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,6,1,1), "cm"))
+) +theme(plot.margin = unit(c(1,6,3,1), "cm"))
 
 ggsave('../data/R41_remove_2_abx_stratification.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 

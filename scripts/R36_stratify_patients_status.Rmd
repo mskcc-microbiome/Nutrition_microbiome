@@ -25,6 +25,7 @@ rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
 ncores <- parallel::detectCores()
 ```
+
 - Why Not to Split the Data     
   
 - Loss of Power

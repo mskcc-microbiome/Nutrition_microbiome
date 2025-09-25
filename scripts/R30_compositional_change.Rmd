@@ -23,7 +23,11 @@ Model the magnitude of compositional disruption itself. This is done by using a 
 ```{r}
 joined <- read_csv('../data/R06_joined_diet_stool_distance_to_earliest.csv')
 
-meta <- read_csv('../data/153_combined_META.csv')
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100))
 
 # find the meta data of the following stool samples (not the earliest one)
 

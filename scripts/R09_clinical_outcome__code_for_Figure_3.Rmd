@@ -27,7 +27,7 @@ library(geepack)
 # load the cleaned data
 
 ```{r}
-# load("../data/df_main_Dec10.Rdata") 
+load("../data/df_main_Dec10.Rdata") 
 # link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
 # 
 # df_main <- df_main |>
