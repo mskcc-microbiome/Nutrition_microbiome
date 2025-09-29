@@ -1,0 +1,1064 @@
+---
+title: "FQ battel"
+output: html_document
+date: "2025-01-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(cowplot)
+library(brmstools)
+library(bayesplot)
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+```
+
+
+```{r}
+library(vdbR)
+connect_database()
+list_table_from_database('mmf')
+get_table_from_database('samples_mmf')
+```
+
+```{r}
+med <- read_csv('../data/191_medication_cleaned_all_with_type.csv') %>% distinct(sampleid, med_exposure_type)
+
+fq_exposed <- med %>% filter(med_exposure_type =='fluoroquinolones') %>% pull(sampleid)
+
+fg_and_other <- med %>% filter(med_exposure_type =='fluoroquinolones' | med_exposure_type == 'other_antibacterial') %>% pull(sampleid)
+```
+
+# no interaction
+
+## diversity
+
+```{r}
+# meta <- read_csv('../data/153_combined_META.csv') %>% 
+#   mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+#   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+#   mutate(pid = factor(pid)) %>% 
+#   mutate(fg_egg = fg_egg/100,
+#          fg_fruit = fg_fruit/100,
+#          fg_grain = fg_grain/100,
+#          fg_legume = fg_legume/100,
+#          fg_meat = fg_meat/100,
+#          fg_milk = fg_milk/100,
+#          fg_oils = fg_oils/100,
+#          fg_sweets = fg_sweets/100,
+#          fg_veggie = fg_veggie/100) %>% 
+#   mutate(abx = if_else(empirical == 'TRUE', 'broad', if_else(sampleid %in% fq_exposed, 'FQ','no'))) %>% 
+#   mutate(abx = factor(abx, levels = c('no','FQ','broad')))
+
+# div_model  <- log(simpson_reciprocal) ~ 0 +
+#                 intensity+
+#                 abx+
+#                fg_fruit+
+#                 fg_meat+
+#                 fg_milk+
+#                 fg_oils+
+#                 fg_egg+
+#                 fg_grain+
+#                 fg_sweets+
+#                 fg_legume+
+#                 fg_veggie+
+#                 TPN+
+#                 EN+
+#                (1 | pid) +
+#                 (1 | timebin)
+# 
+# get_prior(div_model,  
+#               data = meta)
+```
+
+
+```{r} 
+# div_priors <- c(# for the food group variables
+#             prior(normal(0, 1), class = 'b', coef = "fg_egg"),
+#             prior(normal(0, 1), class = 'b', coef = "fg_fruit"),
+#             prior(normal(0, 1), class = 'b', coef = "fg_grain"),
+#             prior(normal(0, 1), class = 'b', coef = "fg_legume"),
+#             prior(normal(0, 1), class = 'b', coef = "fg_meat"),
+#             prior(normal(0, 1), class = 'b', coef = "fg_milk"),
+#             prior(normal(0, 1), class = 'b', coef = "fg_oils"),
+#             prior(normal(0, 1), class = 'b', coef = "fg_sweets"),
+#             prior(normal(0, 1), class = 'b', coef = "fg_veggie"),
+#        
+#             # for the TPN
+#             prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE"),
+#             # for the EN
+#             prior(normal(0, 0.1), class = 'b', coef = "ENTRUE"),
+#             # for the empirical
+#             prior(normal(0, 0.5), class = 'b', coef = "abxbroad"),
+#             prior(normal(0, 0.5), class = 'b', coef = "abxFQ"),
+#             # for the intensity
+#             prior(normal( 2, .1), class = 'b', coef = "intensityablative"),
+#             prior(normal( 2, .1), class = 'b', coef = "intensityreduced"),
+#             prior(normal( 2, .1), class = 'b', coef = "intensitynonablative")
+#             )
+
+# model_div <- brm( div_model,  
+#               data = meta, 
+#               warmup = 1000, iter = 3000, 
+#               prior = div_priors,
+#               cores = ncores, 
+#               chains = 2, 
+#                control = list(adapt_delta = 0.99),
+#               seed = 123, sample_prior = T) 
+# 
+# # save it for future use
+# post_res <- suppressWarnings(posterior_samples(model_div)) 
+# post_res %>%  write_csv('../data/18_div_model_fg_post.csv')
+```
+```{r}
+# post_res %>% 
+#   select(starts_with('b')) %>% 
+#   select(!contains('intensity')) %>% 
+#   gather('shortname','coeff') %>% 
+#   group_by(shortname) %>% # Group by shortname to calculate medians per group
+#   mutate(median_coeff = median(coeff)) %>% # Calculate median for each shortname
+#   ungroup() %>% # Important to ungroup after calculating the median
+#   mutate(shortname = fct_reorder(shortname, median_coeff)) %>% 
+#   ggplot() +
+#    stat_pointinterval(aes(x = coeff, y = shortname), .width = .95, fatten_point = 1.2) +
+#   geom_vline(xintercept = 0, col = 'blue', size = 0.5) 
+```
+
+## Enterococcus
+
+```{r}
+clr_res <- read_csv('../data/171_genus_CLR_res.csv')
+
+clr_wide <- clr_res %>% 
+  spread('genus','clr')
+
+extra_full <- meta %>% 
+  inner_join(clr_wide)  
+# 
+#   
+# entero_mod <- Enterococcus ~ 0 +
+#                 intensity+
+#                 abx+
+#                fg_fruit+
+#                 fg_meat+
+#                 fg_milk+
+#                 fg_oils+
+#                 fg_egg+
+#                 fg_grain+
+#                 fg_sweets+
+#                 fg_legume+
+#                 fg_veggie+
+#                 TPN+
+#                 EN+
+#                (1 | pid) +
+#                 (1 | timebin)
+# get_prior(entero_mod,  
+#               data = extra_full)
+```
+
+
+```{r}
+priors <- c(# for the food group variables
+            prior(normal(0, 1), class = 'b', coef = "fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "fg_veggie"),
+            # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "ENTRUE"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "abxbroad"),
+            prior(normal(0, 0.5), class = 'b', coef = "abxFQ")
+            )
+
+# mod_entero =  brm(entero_mod,  
+#                 data = extra_full, 
+#               warmup = 1000, iter = 3000, 
+#               prior = priors,
+#               cores = ncores, 
+#               chains = 2, 
+#               control = list(adapt_delta = 0.99),
+#               seed = 456)
+# 
+# # save it for future use
+# post_res <- suppressWarnings(posterior_samples(mod_entero)) 
+post_res %>%  write_csv('../data/18_entero_model_fg_post.csv')
+```
+     
+```{r}
+# post_res %>% 
+#   select(starts_with('b')) %>% 
+#   select(!contains('intensity')) %>% 
+#   gather('shortname','coeff') %>% 
+#   group_by(shortname) %>% # Group by shortname to calculate medians per group
+#   mutate(median_coeff = median(coeff)) %>% # Calculate median for each shortname
+#   ungroup() %>% # Important to ungroup after calculating the median
+#   mutate(shortname = fct_reorder(shortname, median_coeff)) %>% 
+#   ggplot() +
+#    stat_pointinterval(aes(x = coeff, y = shortname), .width = .95, fatten_point = 1.2) +
+#   geom_vline(xintercept = 0, col = 'blue', size = 0.5) 
+```
+
+# yes interaction
+
+## diversity
+
+```{r}
+# to put the other antibacterial into the FQ group
+      
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) %>% 
+  mutate(fg_egg = fg_egg/100,
+         fg_fruit = fg_fruit/100,
+         fg_grain = fg_grain/100,
+         fg_legume = fg_legume/100,
+         fg_meat = fg_meat/100,
+         fg_milk = fg_milk/100,
+         fg_oils = fg_oils/100,
+         fg_sweets = fg_sweets/100,
+         fg_veggie = fg_veggie/100) %>% 
+  full_join(exposures) %>% 
+  filter(exposure_category %in% c('no_abx','fluoroquinolones')) %>% 
+  mutate(abx = if_else(exposure_category == 'no_abx', '0_no_abx', '1_FQ'),abx = factor(abx)) %>% 
+  #mutate(abx = if_else(empirical == 'TRUE', '2_broad', if_else(sampleid %in% fg_and_other, '1_fq_and_other','0_no_abx')),abx = factor(abx)) %>% 
+  mutate(TPN = if_else(TPN == 'TRUE', 1, 0),
+         EN = if_else(EN == 'TRUE', 1, 0)) 
+
+num_annot <- meta %>% 
+  split(.$abx) %>% 
+  imap_dfr(function(df, name_) {
+    df %>% distinct(pid) %>% nrow
+  }) %>% gather('abx','pt_num') %>% 
+  full_join(meta %>% count(abx) %>% mutate(abx = as.character(abx))) %>% 
+  rename(sample_num = n) %>% 
+  #mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed')) %>% 
+  mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
+```
+ 
+```{r}
+mod_original <- log(simpson_reciprocal) ~ 0 +        
+                intensity+
+                abx+
+               fg_fruit:abx+
+                fg_meat:abx+
+                fg_milk:abx+
+                fg_oils:abx+
+                fg_egg:abx+
+                fg_grain:abx+
+                fg_sweets:abx+
+                fg_legume:abx+
+                fg_veggie:abx+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+get_prior(mod_original,data = meta )
+```
+
+```{r}
+div_priors_original <- c(# for the food group variables 
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_veggie"),
+            # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_veggie"),
+                      # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_veggie"),
+            # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "EN"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "abx1_fq_and_other"),
+            prior(normal(0, 0.5), class = 'b', coef = "abx2_broad"),
+            # for the intensity
+            prior(normal( 2, .1), class = 'b', coef = "intensityablative"),
+            prior(normal( 2, .1), class = 'b', coef = "intensityreduced"),
+            prior(normal( 2, .1), class = 'b', coef = "intensitynonablative")
+            )
+
+model_div_original <- brm( mod_original,  
+              data = meta, 
+              warmup = 1000, iter = 3000, 
+              prior = div_priors_original,
+              cores = ncores, 
+              chains = 2, 
+               control = list(adapt_delta = 0.99),
+              seed = 123, sample_prior = T)
+
+# save it for future use
+post_res <- suppressWarnings(posterior_samples(model_div_original)) 
+post_res %>%  write_csv('../data/18_model_div_original_three_abx_levels.csv')
+
+
+```
+
+```{r}
+post_res %>% 
+  select(starts_with('b')) %>% 
+  select(!contains('intensity')) %>% 
+  gather('shortname','coeff') %>% 
+  group_by(shortname) %>% # Group by shortname to calculate medians per group
+  mutate(median_coeff = median(coeff)) %>% # Calculate median for each shortname
+  ungroup() %>% # Important to ungroup after calculating the median
+  mutate(shortname = fct_reorder(shortname, median_coeff)) %>% 
+  group_by(shortname) %>% # Group again to get intervals
+  mutate(
+    lower = quantile(coeff, 0.025), # Calculate lower bound of the interval
+    upper = quantile(coeff, 0.975), # Calculate upper bound of the interval
+    significant = ifelse(lower > 0 | upper < 0, "Significant", "Not Significant")
+  ) %>%
+  ungroup() %>%
+  ggplot() +
+    stat_pointinterval(
+      aes(x = coeff, y = shortname, color = significant), # Color by significance
+      .width = .95,
+      fatten_point = 1.2
+    ) +
+    geom_vline(xintercept = 0, col = 'blue', size = 0.5) +
+    scale_color_manual(values = c("Significant" = "red", "Not Significant" = "black")) + # Set colors
+    labs(x = "Coefficient", y = "Shortname", color = "95% CI") + # Improved labels
+    theme_bw()
+ggsave('../data/18_three_abx.pdf', width = 7)
+```
+```{r}
+library(wesanderson) 
+
+dat_conditional <- conditional_effects(model_div_original, surface = T)
+
+condi_dat <- dat_conditional %>% 
+  keep(.p = str_detect(names(.), ':')) %>% 
+  bind_rows(.id = 'grp')
+```
+
+
+```{r}
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+conditional <- condi_dat %>% 
+  mutate(grp = str_replace(grp, '\\:empirical','')) %>% 
+  left_join(key %>% select(grp = fg1_name, shortname)) %>% 
+  mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
+                 'Oils',
+                 'Fruits',
+                 'Meats',
+                 'Legumes',
+                 'Eggs',
+                 'Milk',
+                 'Grains',
+                 'Sweets'))))
+palette <- wes_palette("Royal1", 4)[c(1,2,4)]
+# the color for the strip background
+strip_color <- wes_palette("Royal1", 3)[3]
+
+conditional9 <- conditional %>%   
+  ggplot() +
+  geom_smooth(aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
+              stat = "identity",
+              alpha = .3, linewidth = 1.5)+ 
+  scale_fill_manual('antibiotics', values = palette) +
+  scale_colour_manual('antibiotics', values = palette) +
+  facet_wrap(~ shortname, nrow = 2, scales = 'free_x') +
+  ylim(0, 3.3) +
+  labs(y = 'Predicted log(diversity)', x = 'Food group consumed (grams)') +
+  theme_classic() +
+  theme(legend.position = 'bottom', legend.title = element_text(size = 8, face="bold"),
+        legend.text = element_text( size=8, face="bold"),
+        panel.background = element_rect(fill = "#FAEFD140"),
+        legend.background=element_rect(fill = alpha("white", 0)),
+       legend.key=element_rect(fill = alpha("white", 0)),
+        aspect.ratio = 1/1.5, 
+        strip.background = element_rect(color="white", fill='#ffecdc', size=1.5,linetype="solid"),
+     axis.text=element_text(size=8), axis.title=element_text(size=10))    +
+  guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
+conditional9
+```
+
+## Enterococcus 
+
+```{r}
+clr_res <- read_csv('../data/171_genus_CLR_res.csv')
+clr_Enterococcus <- clr_res %>% 
+  filter(genus %in% c('Enterococcus')) %>%
+  spread('genus','clr')
+
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) %>% 
+  inner_join(clr_Enterococcus)%>% 
+  mutate(empirical = if_else(empirical == 'TRUE', '2_broad', if_else(sampleid %in% fg_and_other, '1_fq_and_other','0_no_abx')),
+         empirical = factor(empirical)) 
+
+entero_model_original <- Enterococcus ~ 0 +
+             intensity+
+                empirical+
+               fg_fruit:empirical+
+                fg_meat:empirical+
+                fg_milk:empirical+
+                fg_oils:empirical+
+                fg_egg:empirical+
+                fg_grain:empirical+
+                fg_sweets:empirical+
+                fg_legume:empirical+
+                fg_veggie:empirical+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+get_prior(formula = entero_model_original, data = meta)
+```
+
+
+```{r}
+priors_enterococcus_original <- c(# for the food group variables
+         prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empirical0_no_abx:fg_veggie"),
+            # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empirical1_fq_and_other:fg_veggie"),
+                      # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "empirical2_broad:fg_veggie"),
+            # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "ENTRUE"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "empirical1_fq_and_other"),
+            prior(normal(0, 0.5), class = 'b', coef = "empirical2_broad")
+            
+            )
+
+mod_entero =  brm(entero_model_original,  
+                data = meta, 
+              warmup = 1000, iter = 3000, 
+              prior = priors_enterococcus_original,
+              cores = ncores, 
+              chains = 2, 
+              control = list(adapt_delta = 0.99),
+              seed = 456)
+
+post_res <- suppressWarnings(posterior_samples(mod_entero)) 
+```
+```{r}
+post_res %>% 
+  select(starts_with('b')) %>% 
+  select(!contains('intensity')) %>% 
+  gather('shortname','coeff') %>% 
+  #filter(!shortname %in% c('b_empirical2_broad','b_empirical1_fq_and_other', 'b_ENTRUE', 'b_TPNTRUE')) %>% 
+  group_by(shortname) %>% # Group by shortname to calculate medians per group
+  mutate(median_coeff = median(coeff)) %>% # Calculate median for each shortname
+  ungroup() %>% # Important to ungroup after calculating the median
+  mutate(shortname = fct_reorder(shortname, median_coeff)) %>% 
+  group_by(shortname) %>% # Group again to get intervals
+  mutate(
+    lower = quantile(coeff, 0.025), # Calculate lower bound of the interval
+    upper = quantile(coeff, 0.975), # Calculate upper bound of the interval
+    significant = ifelse(lower > 0 | upper < 0, "Significant", "Not Significant")
+  ) %>%
+  ungroup() %>%
+  ggplot() +
+    stat_pointinterval(
+      aes(x = coeff, y = shortname, color = significant), # Color by significance
+      .width = .95,
+      fatten_point = 1.2
+    ) +
+    geom_vline(xintercept = 0, col = 'blue', size = 0.5) +
+    scale_color_manual(values = c("Significant" = "red", "Not Significant" = "black")) + # Set colors
+    labs(x = "Coefficient", y = "Shortname", color = "95% CI") + # Improved labels
+    theme_bw()
+```
+# reclassifiy the sample exposure type using the newly cleaned med data
+
+```{r}
+exposures <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_all_medication_overlapping_with_prior_2_day_of_stool_samples_upated.csv') %>%    group_by(sampleid, sdrt, pid) %>%
+  summarize(
+    exposure_category = case_when(
+      any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",
+      any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
+      any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterial",
+      TRUE ~ "no_abx"  # Default case if neither "apple" nor "orange" is found
+    )
+  ) 
+ 
+exposures %>% count(exposure_category!= med_exposure_type)
+
+no_abx_and_fq <- exposures %>% 
+  filter(exposure_category %in% c('fluoroquinolones','no_abx'))
+
+
+```
+
+```{r}
+expodat <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_all_medication_overlapping_with_prior_2_day_of_stool_samples_upated_2.csv') 
+
+```
+
+# no_abx VS FQ
+
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) %>% 
+  mutate(fg_egg = fg_egg/100,
+         fg_fruit = fg_fruit/100,
+         fg_grain = fg_grain/100,
+         fg_legume = fg_legume/100,
+         fg_meat = fg_meat/100,
+         fg_milk = fg_milk/100,
+         fg_oils = fg_oils/100,
+         fg_sweets = fg_sweets/100,
+         fg_veggie = fg_veggie/100) %>% 
+  full_join(exposures) %>% 
+  filter(exposure_category %in% c('no_abx','fluoroquinolones')) %>% 
+  mutate(abx = if_else(exposure_category == 'no_abx', '0_no_abx', '1_FQ'),abx = factor(abx)) %>% 
+  #mutate(abx = if_else(empirical == 'TRUE', '2_broad', if_else(sampleid %in% fg_and_other, '1_fq_and_other','0_no_abx')),abx = factor(abx)) %>% 
+  mutate(TPN = if_else(TPN == 'TRUE', 1, 0),
+         EN = if_else(EN == 'TRUE', 1, 0)) 
+
+num_annot <- meta %>% 
+  split(.$abx) %>% 
+  imap_dfr(function(df, name_) {
+    df %>% distinct(pid) %>% nrow
+  }) %>% gather('abx','pt_num') %>% 
+  full_join(meta %>% count(abx) %>% mutate(abx = as.character(abx))) %>% 
+  rename(sample_num = n) %>% 
+  #mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed')) %>% 
+  mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
+
+mod_original <- log(simpson_reciprocal) ~ 0 +        
+                intensity+
+                abx+
+               fg_fruit:abx+
+                fg_meat:abx+
+                fg_milk:abx+
+                fg_oils:abx+
+                fg_egg:abx+
+                fg_grain:abx+
+                fg_sweets:abx+
+                fg_legume:abx+
+                fg_veggie:abx+
+                TPN+
+                EN+
+               (1 | pid) +
+                (1 | timebin)
+get_prior(mod_original,data = meta )
+```
+
+
+```{r}
+div_priors_original <- c(# for the food group variables 
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_veggie"),
+            # interaction terms
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_egg"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_fruit"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_grain"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_legume"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_meat"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_milk"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_oils"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_sweets"),
+            prior(normal(0, 1), class = 'b', coef = "abx1_FQ:fg_veggie"),
+    
+            # for the TPN
+            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
+            # for the EN
+            prior(normal(0, 0.1), class = 'b', coef = "EN"),
+            # for the empirical
+            prior(normal(0, 0.5), class = 'b', coef = "abx1_FQ"),
+            # for the intensity
+            prior(normal( 2, .1), class = 'b', coef = "intensityablative"),
+            prior(normal( 2, .1), class = 'b', coef = "intensityreduced"),
+            prior(normal( 2, .1), class = 'b', coef = "intensitynonablative")
+            )
+
+model_div_original <- brm( mod_original,  
+              data = meta, 
+              warmup = 1000, iter = 3000, 
+              prior = div_priors_original,
+              cores = ncores, 
+              chains = 2, 
+               control = list(adapt_delta = 0.99),
+              seed = 123, sample_prior = T)
+
+# save it for future use
+post_res <- suppressWarnings(posterior_samples(model_div_original)) 
+post_res %>%  write_csv('../data/18_model_div_original_no_abx_and_FQ.csv')
+
+
+```
+
+```{r}
+post_res <- read_csv('../data/18_model_div_original_no_abx_and_FQ.csv') %>% 
+   select(starts_with('b')) %>% 
+  select(!contains('intensity')) %>% 
+  gather('shortname','coeff') %>% 
+  mutate(shortname = str_replace(shortname, 'b_abx._',''))
+
+post_res %>% 
+  group_by(shortname) %>% # Group by shortname to calculate medians per group
+  mutate(median_coeff = median(coeff)) %>% # Calculate median for each shortname
+  ungroup() %>% # Important to ungroup after calculating the median
+  mutate(shortname = fct_reorder(shortname, median_coeff)) %>% 
+  group_by(shortname) %>% # Group again to get intervals
+  mutate(
+    lower = quantile(coeff, 0.025), # Calculate lower bound of the interval
+    upper = quantile(coeff, 0.975), # Calculate upper bound of the interval
+    significant = ifelse(lower >= 0 | upper <= 0, "Significant", "Not Significant")
+  ) %>%
+  ungroup() %>%
+  ggplot() +
+    stat_pointinterval(
+      aes(x = coeff, y = shortname, color = significant), # Color by significance
+      .width = .95,
+      fatten_point = 1.2
+    ) +
+    geom_vline(xintercept = 0, col = 'blue', size = 0.5) +
+    scale_color_manual(values = c("Significant" = "red", "Not Significant" = "black")) + # Set colors
+    labs(x = "Coefficient", y = "Shortname", color = "95% CI") + # Improved labels
+    theme_bw()
+ggsave('../data/18_model_div_original_no_abx_and_FQ.pdf', width = 7)  
+```
+```{r}
+# for the above model I also wanna show that what time were they collected     
+meta %>%  
+  mutate(log_div = log(simpson_reciprocal)) %>% 
+  mutate(antibiotics = if_else(exposure_category == 'no_abx', 'not exposed', 'exposed'),
+         antibiotics = factor(antibiotics, levels = c('not exposed','exposed'))) %>% 
+  ggscatter(x = 'sdrt', y = 'log_div', color = 'antibiotics',
+            ylab = 'log(diversity)',xlab = 'sdrt',
+            alpha = 0.35, shape = 16, size = 1,
+            add = "reg.line",  # Add regressin line
+           add.params = list(color = 'antibiotics', fill = 'antibiotics', alpha = 0.3, size = 1.5), # Customize line
+           conf.int = TRUE, # Add confidence interval
+           cor.coef = TRUE, # Add correlation coefficient.
+           cor.coeff.args = list(method = "spearman",  label.sep = "\n", cor.coef.name = c("rho"),p.accuracy = 0.01, r.accuracy = 0.01,label.x.npc = "left", label.y.npc = "bottom", size = 3.5)) +
+  #geom_text(data = num_annot, aes(label = lbl), 
+   #           x = Inf, y = Inf, hjust = 0.6, vjust = 1.5) +
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics',values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ antibiotics, labeller = 'label_both', dir = 'h') +
+  theme(aspect.ratio = 1/1.15,   
+        #legend.position = 'none', 
+          strip.background = element_blank(),
+        strip.text.x = element_blank(), 
+     axis.text=element_text(size=9), axis.title=element_text(size=9)) 
+```
+```{r}
+# what if only limiting the above model to pre transplant             
+```
+
+# heatmap how the switch happened 
+
+Heatmap: Rows could represent patients, columns represent days, and cells could be colored to indicate the antibiotic status (e.g., FQ = blue, Empiric = red, Both = purple, Neither = white).
+
+```{r}
+#Data Preparation: You need your data in a format where, for each patient, you have:
+# 
+# Patient_ID: A unique identifier for each patient.
+# Day: The day relative to transplant (e.g., -2, -1, 0, 1, 2...).
+# FQ_Exposure: A binary variable (0 or 1) indicating whether the patient received fluoroquinolones on that day. Crucially, this should be coded as 1 only if they received FQ and not empiric antibiotics.
+# Empiric_Antibiotic_Exposure: A binary variable (0 or 1) indicating whether the patient received empiric broad-spectrum antibiotics on that day. Again, be precise in your definition of "empiric."
+# 
+
+
+# I think I need to do this from the patient all med data itself and not the stool sample overlapped 
+
+```
+
+```{r}
+# classify all of the meds the pt had into the categories
+route_clean <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/routes_simple_2025-01-29.csv')
+
+ptb <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/156_combined_PTB.csv')
+
+types <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_types_of_medication.csv') 
+```
+
+
+```{r}
+meds <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/169_all_medication.csv')  %>% 
+  select(mrn, drug_name_clean,class,  route,together, start_date, stop_date  ) %>% 
+  mutate(drug_name_clean = if_else(drug_name_clean == 'levofloxacin (levaquin)', 'levofloxacin', drug_name_clean)) %>% 
+  left_join(route_clean %>% select(-n)) %>% 
+  left_join(ptb %>% select(mrn, hct)) %>% 
+  mutate(startday = as.numeric(start_date - hct), stopday = as.numeric(stop_date - hct)) %>% 
+  filter(stopday > -5 & startday < 40) %>% 
+  filter(startday > -20 & stopday < 40) %>% 
+  left_join(types %>% select(-n, -class)) %>% 
+  select(-c(start_date, stop_date, hct, route)) %>% 
+  mutate(together = str_glue('{drug_name_clean}__{route_clean}'))
+
+# annotate the medication that are NA
+what <- meds %>% 
+  filter(is.na(drug_category_for_this_study)) %>% distinct(drug_name_clean, route_clean, class)
+
+# ertapenem  
+# the most important few
+few <- what %>% 
+  mutate(together = str_glue('{drug_name_clean}__{route_clean}')) %>%  
+  mutate(drug_category_for_this_study = if_else(together %in% c('amikacin__IV','gentamicin__IV','ampicillin__IV','penicillin v potassium__oral','cefdinir__oral','cephalexin__oral', 'azithromycin__IV', 'azithromycin__oral'), 'other_antibacterials', if_else(together == 'ertapenem__IV', 'broad_spectrum','not_antibacterial')))
+
+link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
+meds_updated <- bind_rows(
+  meds %>% filter(is.na(drug_category_for_this_study)) %>% select(-drug_category_for_this_study) %>% left_join(few  ),
+  meds %>% filter(!is.na(drug_category_for_this_study))
+) %>% select(-class, -route_clean) %>%
+   full_join(link) %>% select(-mrn) %>% relocate(pid, .before = 'drug_name_clean')
+
+```
+
+```{r}
+# make the df with day exposure type 
+meds_expanded <- meds_updated %>%
+    distinct() %>% 
+    group_by(pid, drug_name_clean, together, startday, stopday, drug_category_for_this_study) %>%
+    summarize(day = seq(startday, stopday), .groups = "drop") %>% 
+    group_by(pid, day) %>%
+  summarise(
+    exposure_category = case_when(
+      any(drug_category_for_this_study == "broad_spectrum") & any(drug_category_for_this_study == "fluoroquinolones") ~ "both",  # Both present
+      any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",  # Only broad_spectrum
+      any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
+      any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterials",
+      TRUE ~ "not_antibacterial"
+    ), .groups = "drop"
+  )
+
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  select(pid, sdrt)
+
+# what are in the other_antibacterials
+other_antibacterials <- meds_updated %>%
+  filter(drug_category_for_this_study == 'other_antibacterials') %>% 
+  distinct(drug_name_clean, together) %>% 
+  summarise(text = str_c(drug_name_clean, collapse = ', '))
+other_antibacterials$text
+```
+
+
+```{r}
+# heatmap
+df<- meds_expanded
+
+
+# 2. Find the first broad-spectrum day for each patient
+first_broad_spectrum <- df %>%
+  filter(exposure_category == "broad_spectrum") %>%
+  group_by(pid) %>%
+  summarize(FirstBroadSpectrumDay = min(day), .groups = 'drop') %>% 
+  full_join(df %>% distinct(pid)) %>% 
+  mutate(FirstBroadSpectrumDay = if_else(is.na(FirstBroadSpectrumDay), 40, FirstBroadSpectrumDay))
+
+# 3. Sort PatientIDs based on the first broad-spectrum day
+sorted_patient_ids <- first_broad_spectrum %>%
+  arrange(FirstBroadSpectrumDay) %>%
+  pull(pid)
+```
+
+```{r}
+# 1. Ensure 'pid' is a factor (for proper ordering on the y-axis)
+df$pid <- factor(df$pid)
+
+# 2. Create a complete grid of pid and day combinations
+#    This is *crucial* to handle missing days and ensure consistent plotting
+df_complete <- df %>%
+  complete(pid, day = full_seq(day, 1), fill = list(exposure_category = "not_antibacterial")) %>% 
+  mutate(has_stool = if_else(paste(pid, day) %in% paste(meta$pid, meta$sdrt), T, F)) %>% 
+  mutate(pid = factor(pid, levels = sorted_patient_ids)) 
+#df_complete <- df
+ 
+# 3. Define the color palette
+color_palette <- c(
+  "broad_spectrum" = "#FF000070",
+  "fluoroquinolones" = "#0000FF70",
+  "both" = "#A020F090",
+  "not_antibacterial" = "#FFFFFF70",
+  "other_antibacterials" = "#80808070"
+)
+ 
+# --- Create the Heatmap using ggplot2 ---
+heatmap <- ggplot(df_complete, aes(x = day, y = pid, fill = exposure_category)) +
+  geom_tile(aes(fill = exposure_category, color = has_stool),  linewidth = 0.7, show.legend = FALSE     )+  
+  scale_fill_manual(values = color_palette) +  # Apply the defined color palette
+  scale_color_manual(values = c(NA,'brown')) + 
+  scale_x_continuous(breaks = seq(min(df_complete$day), max(df_complete$day), by = 5),
+                     minor_breaks = seq(min(df_complete$day),max(df_complete$day), by = 1)) + # Show every 5th day, with minor breaks
+  labs(title = "",
+       x = "Transplant day",   
+       y = "Patient ID",
+       fill = "Exposure Category") +  # Add labels and title
+  theme_minimal() +  # Use a cleaner theme
+  geom_vline(xintercept = 0,  # The x-value where the line should be
+                   linetype = "dashed",  # Optional: Line style (solid, dashed, dotted, etc.)
+                   color = "black",     # Optional: Line color
+                   linewidth = 1)  +
+  theme(
+    panel.grid.major = element_blank(),    # Remove major grid lines
+    panel.grid.minor = element_blank(), 
+    legend.position = "bottom"   ,      # Place the legend at the bottom
+    axis.text.x = element_text(size = 6, angle = 0, hjust = 1, vjust=0.5),
+  axis.text.y = element_blank(),
+  axis.title = element_text(size = 8),
+  legend.text = element_text(size = 6),
+  legend.title = element_text(size = 8)
+  )
+      
+#ggsave('../data/18_heatmpa_both.pdf', width = 9, height = 18)
+title <- ggdraw() + 
+  draw_label(
+    "Fig. S4",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+combined <- plot_grid(
+  title, heatmap,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.01, 1)
+)+theme(plot.margin = unit(c(6.5,6.5,6.5,6.5), "cm"))
+
+ggsave('../data/S04_abx_heatmap.pdf',
+      width = 215.9, height = 279.4, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+```
+
+```{r}
+# Phi Coefficient (φ): This is the most appropriate measure of association for two binary variables. It's mathematically equivalent to Pearson's correlation when applied to two binary variables, but it's conceptually clearer.  You can easily calculate this in most statistical software (R, Python, etc.). A negative phi coefficient indicates the negative association you expect.
+# 
+# Contingency Table and Chi-Squared Test: Create a 2x2 contingency table:
+# 
+#               | Empiric Antibiotic = 1 | Empiric Antibiotic = 0 |
+# -------------------------------------------------------------------
+# FQ = 1        |          a              |           b             |
+# -------------------------------------------------------------------
+# FQ = 0        |          c              |           d             |
+# a: Number of patient-days with both FQ and empiric antibiotics. This should be relatively low, ideally zero, if your definitions are exclusive.
+# b: Number of patient-days with FQ but no empiric antibiotics.
+# c: Number of patient-days with empiric antibiotics but no FQ.
+# d: Number of patient-days with neither FQ nor empiric antibiotics.
+# You can then perform a chi-squared test of independence. A significant p-value indicates that the two variables are not independent (i.e., they are associated).  The direction of the association (positive or negative) is determined by examining the table itself.  You'd expect b and c to be larger than a and d if there's a negative association, as it means one treatment tends to preclude the other.
+
+# to justify that they are correlated and we choose to include one that has more effects on the patients microbiome        
+```
+
+```{r}
+num_days <- meds_expanded %>% 
+  count(exposure_category)
+
+# perform the chi squared test of independence  
+```
+
+```{r}
+# --- Input: Your a, b, c, d values ---
+# Replace these with your *actual* counts
+a <- 183  # Example: Both FQ and empiric
+b <- 1512  # Example: FQ only
+c <- 1849  # Example: Empiric only
+d <- 3007 # Example: Neither
+
+# --- Create the Contingency Table ---
+contingency_table <- matrix(c(a, b, c, d),
+                           nrow = 2,
+                           byrow = TRUE,
+                           dimnames = list(c("FQ = 1", "FQ = 0"),
+                                           c("Empiric = 1", "Empiric = 0")))
+
+print(contingency_table)
+```
+
+
+```{r}
+# --- Perform the Chi-Squared Test ---
+chi_squared_result <- chisq.test(contingency_table)
+
+# --- Print the Results ---
+print(chi_squared_result)
+
+# --- Extract and Interpret Key Values ---
+cat("\n--- Interpretation ---\n")
+
+# 1. Chi-squared statistic
+cat("Chi-squared statistic:", chi_squared_result$statistic, "\n")
+
+# 2. Degrees of freedom
+cat("Degrees of freedom:", chi_squared_result$parameter, "\n")
+
+# 3. P-value
+cat("P-value:", chi_squared_result$p.value, "\n")
+
+# 4. Interpretation of the p-value
+if (chi_squared_result$p.value < 0.05) {
+  cat("The p-value is less than 0.05.  There is a statistically significant association between FQ use and empiric antibiotic use.\n")
+  # Additional analysis (Odds Ratio) would be needed here to determine the *direction* of the association.
+
+} else {
+  cat("The p-value is greater than or equal to 0.05. There is no statistically significant association between FQ use and empiric antibiotic use.\n")
+}
+
+
+
+# 6. Odds Ratio and Confidence Interval (for direction and strength of association)
+
+# Calculate Odds Ratio (OR)
+odds_ratio <- (a * d) / (b * c)
+cat("\nOdds Ratio for direction and strength of association:", odds_ratio, "\n")
+
+# Calculate 95% Confidence Interval for OR
+# We use the log odds ratio for the CI calculation, then exponentiate
+log_or <- log(odds_ratio)
+se_log_or <- sqrt(1/a + 1/b + 1/c + 1/d)  # Standard error of log OR
+lower_ci_log <- log_or - 1.96 * se_log_or
+upper_ci_log <- log_or + 1.96 * se_log_or
+
+lower_ci <- exp(lower_ci_log)
+upper_ci <- exp(upper_ci_log)
+
+cat("95% Confidence Interval for Odds Ratio: [", lower_ci, ", ", upper_ci, "]\n", sep="")
+
+# Interpret the Odds Ratio and CI:
+if (odds_ratio > 1) {
+    cat("An odds ratio greater than 1 suggests a positive association.\n")
+} else if (odds_ratio < 1) {
+    cat("An odds ratio less than 1 suggests a negative association.\n")
+} else {
+    cat("An odds ratio of 1 suggests no association.\n")
+}
+
+if (lower_ci > 1 | upper_ci < 1) { # Check that interval does *not* include 1.
+  cat("The 95% confidence interval does *not* include 1, supporting the statistical significance of the association.\n")
+} else{
+    cat("The 95% CI includes 1. The association is not significant at p<0.05.\n")
+}
+```
+
+
+```{r}
+library(lme4)
+
+# Create the long-format data frame (as before)
+df_long <- meds_expanded %>%
+    mutate(EmpiricUse = ifelse(exposure_category %in% c("broad_spectrum", "both"), 1, 0),
+           FQUse = ifelse(exposure_category %in% c("fluoroquinolones", "both"), 1, 0))
+
+# Fit the mixed-effects model (FQ use as outcome)
+model_fq <- glmer(FQUse ~ EmpiricUse + (1 | pid), data = df_long, family = binomial)
+summary(model_fq)
+```
+
+
+```{r}
+# Fit the mixed-effects model (Empiric use as outcome) - for completeness
+model_empiric <- glmer(EmpiricUse ~ FQUse + (1 | pid), data = df_long, family = binomial)
+summary(model_empiric)
+```
+
+```{r} 
+# fishers <- meds_expanded %>% 
+#   split(.$pid) %>% 
+#   map(function(df){
+#   keep(~ nrow(.x) > 0) %>% 
+#     df_days <- df %>% count(exposure_category) %>% 
+#                       full_join(tibble(exposure_category = c('broad_spectrum','not_antibacterial','fluoroquinolones','both')), by = join_by(exposure_category)) %>% 
+#                       mutate(n = if_else(is.na(n), 0, n))
+#     a = df_days %>% filter(exposure_category == 'both') %>% pull(n)
+#     b = df_days %>% filter(exposure_category == 'fluoroquinolones') %>% pull(n)
+#     c = df_days %>% filter(exposure_category == 'broad_spectrum') %>% pull(n)
+#     d = df_days %>% filter(exposure_category == 'not_antibacterial') %>% pull(n)
+#     
+#     contingency_table = matrix(c(a, b, c, d),
+#                            nrow = 2,
+#                            byrow = TRUE,
+#                            dimnames = list(c("FQ = 1", "FQ = 0"),
+#                                            c("Empiric = 1", "Empiric = 0")))
+#     
+#     test_result = fisher.test(contingency_table)
+#     return(test_result$p.value)
+#   }) %>% bind_rows(.id = 'pid') %>% 
+#   gather('pid','pvalue') %>% 
+#   mutate(padj =  p.adjust(pvalue))
+
+
+
+```
+ 
+```{r}
+questions <- link %>% 
+  filter(pid %in% c('P45','P94','P147','P87','P127', 'P11'))
+
+ questions %>% write_csv('../data/18_check_medication.csv')
+```
+
+  
