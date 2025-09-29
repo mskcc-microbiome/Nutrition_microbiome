@@ -1,0 +1,354 @@
+---
+title: "Over-represented patients"
+output: html_document
+date: "2025-09-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(cowplot)
+library(broom.mixed)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(brmstools)
+library(bayesplot)
+library(gt)
+library(ggtext)
+library(future)    # For setting up parallel processing
+library(furrr)     # For running loops in parallel
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+ncores <- parallel::detectCores()
+```
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100))
+
+median_samples <- meta %>%
+  # Count the number of rows (samples) for each patient ('pid').
+  count(pid) %>%
+
+  # From that list of counts, calculate the median.
+  summarise(median_n = median(n)) %>% 
+  pull(median_n)
+
+```
+
+```{r}
+subsampled_df <- meta %>%
+
+  # First, group all the rows by the patient identifier ('pid').
+  # This tells dplyr to perform the next step separately for each patient.
+  group_by(pid) %>%
+
+  # 'slice_sample' is the key function here. It randomly selects rows from each group.
+  # By setting n = 5, it will pick 5 samples for patients who have more than 5.
+  # A great feature is that if a patient has 5 or fewer samples, it just keeps all of them.
+  slice_sample(n = median_samples) %>%
+
+  # It's good practice to ungroup after the grouped operation is finished.
+  ungroup()
+```
+
+# model 
+
+```{r}
+all_food_vars <- subsampled_df %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+# Fit the model (using fewer iterations for this example to run quickly)
+# model_fit <- brm(
+#   formula = formula,
+#   data = subsampled_df,
+#   prior = priors,
+#     warmup = 1000, iter = 3000,
+#     chains = 2, cores = 6,
+#     seed = 123,
+#     silent = 2,
+#   control = list(adapt_delta = 0.99)
+# )
+# 
+# results_df <- tidy(model_fit, conf.int = TRUE) %>% 
+#   mutate(conf.low = round(conf.low, 2),
+#          conf.high = round(conf.high, 2))
+```
+
+## forest figure
+
+```{r}
+# # the above figure but make it the way the other figure look like 
+# key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+# 
+# replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+# 
+# level_order <- rev(c(
+#     "abx", "EN", "TPN",
+#     "abx * Sweets", "Sweets",
+#     "abx * Grains", "Grains",
+#     "abx * Milk", "Milk",
+#     "abx * Eggs", "Eggs",
+#     "abx * Legumes", "Legumes",
+#     "abx * Meats", "Meats",
+#     "abx * Fruits", "Fruits",
+#     "abx * Oils", "Oils",
+#     "abx * Vegetables", "Vegetables"
+# ))
+# 
+# cleaned_effects <- results_df %>%
+#   # Keep only the fixed effects
+#   filter(effect == "fixed") %>%
+#   # Create a new column to distinguish main effects from interactions
+#   mutate(
+#     effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+#     # Create clean labels for plotting
+#     clean_term = term %>%
+#       str_replace("empiricalTRUE$", "abx") %>%
+#       str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+#       str_replace_all( replacement_dictionary) %>% 
+#       str_replace("empiricalTRUE:", "abx * ") %>%
+#       str_replace_all("_", " ")
+#   ) %>% 
+#   filter(!str_detect(clean_term, 'intensity')) %>%
+#   # Create a new column to identify significant results
+#   # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+#   mutate(is_significant = (conf.low * conf.high) >= 0) %>% 
+#   mutate(clean_term = factor(clean_term, levels = level_order))
+# 
+# shading_df <- cleaned_effects %>%
+#   mutate(y_numeric = as.numeric(clean_term)) %>%
+#   filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+# 
+# plot_subset <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+#   geom_rect(
+#     data = shading_df,
+#     aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+#     fill = "#FBEADC", # A light orange/peach color like the example
+#     alpha = 0.7,
+#     inherit.aes = FALSE
+#    ) +
+#    # Add a vertical line at zero, which represents "no effect"
+#   geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+#    # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+#    geom_pointrange(
+#    aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+#      size = 0.25,linewidth = 1,
+#   ) +
+#   scale_color_manual(
+#     values = c(
+#       "TRUE" = "red",
+#       "FALSE" = "black"
+#     ), name = "Effect Status" # Legend title
+#   ) +
+#   scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+#   # Add labels and a clean theme
+#   labs(
+#     x = "ln(diversity) change",
+#     title = "Predictor effects on diversity",
+#     subtitle = "Sensitivity Analysis: Capped at max 5 samples per patient",
+#     y = ''
+#   ) +
+#   theme_classic(base_size = 11) +
+#   theme(legend.position = "none", axis.text.y = element_markdown())
+#   
+# plot_subset  
+# Partial Pooling (Original Model): It's a volume knob. It turns down the influence of patients with many samples so they don't dominate.
+# 
+# Subsampling (Sensitivity Test): It's a mute button. It completely caps their excess influence.
+# 
+# We performed a sensitivity analysis by repeatedly subsampling the data to control for participant overrepresentation. The negative association between microbiome diversity and the co-exposure to antibiotics and sweets was a robust finding, remaining significant across all subsamples. In contrast, other potential associations (e.g., with meats and vegetables) were not stable and appeared only inconsistently, suggesting they are likely artifacts of sampling variability rather than robust biological signals.
+```
+# Robustness Check via Iterative Subsampling
+
+```{r}
+# --- Robustness Check via Iterative Subsampling ---
+# This script formalizes the sensitivity analysis by running it many times
+# in parallel to see how consistently each predictor is significant.
+
+# By setting a seed here, the entire set of "random" runs can be
+# reproduced perfectly later on.
+set.seed(1101)
+
+# --- Configuration ---
+# Set the number of times to run the simulation. 50 is a good number.
+N_ITERATIONS <- 50
+# Set the number of cores for parallel processing. A good rule of thumb is
+# your total cores minus 2. For a 10-core machine, 8 is a good choice.
+N_CORES <- 8
+
+
+# --- Setup Parallel Processing ---
+# This tells R to set up 8 parallel sessions in the background.
+plan(multisession, workers = N_CORES)
+
+
+# --- Main Parallel Execution ---
+# Instead of a for-loop, future_map_dfr runs each iteration in parallel on a
+# different core and combines the results into a single data frame at the end.
+final_tally <- future_map_dfr(1:N_ITERATIONS, ~{
+  
+  # Print progress to the console (progress may appear out of order)
+  cat("Starting iteration", .x, "...\n")
+
+  # 1. Subsample the data for this specific iteration.
+  subsampled_df <- subsampled_df %>%
+    group_by(pid) %>%
+    slice_sample(n = median_samples) %>%
+    ungroup()
+
+  # 2. Fit the Bayesian model on the subsampled data.
+  # Note: Since the outer loop is parallel, we set cores inside brm to 1.
+  fit <- brm(
+    formula = formula,
+    data = subsampled_df,
+    prior = priors,
+    iter = 2000, warmup = 1000, chains = 2,
+    # Adding control for adapt_delta can help with divergent transitions.
+    control = list(adapt_delta = 0.99),
+    # Each iteration runs on its own core, so we tell brm to only use 1.
+    cores = 1,
+    silent = 2, refresh = 0
+  )
+  
+
+  # 3. Extract results for ALL fixed effects, EXCLUDING intensity.
+  # **THE FIX**: Get parameter names directly from the model fit object.
+  # This is much more reliable than the previous methods.
+  all_pars <- variables(fit)
+  all_b_vars <- all_pars[startsWith(all_pars, "b_")]
+  fixed_effect_names <- all_b_vars[!startsWith(all_b_vars, "b_intensity")]
+
+
+  fit %>%
+    gather_draws(!!!syms(fixed_effect_names)) %>%
+    median_qi(.width = 0.95) %>%
+    mutate(
+      iteration = .x,
+      is_significant = !(.lower < 0 & .upper > 0)
+    )
+}, .options = furrr_options(seed = TRUE))
+```
+
+
+
+
+```{r}
+# --- Tally and Clean the Final Results ---
+# Count how many times each term was significant
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+
+significance_report <- final_tally %>%
+  group_by(.variable) %>%
+  summarise(
+    significant_runs = sum(is_significant),
+    total_runs = N_ITERATIONS,
+    proportion_significant = significant_runs / total_runs
+  ) %>%
+  # Clean up the variable names for plotting
+   mutate(
+    clean_variable = .variable %>%
+      str_replace("^b_", "") %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>% 
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")
+  ) %>% 
+  ungroup()
+
+
+# Print the final report table to the console
+cat("\n--- Robustness Report ---\n")
+print(significance_report)
+```
+
+
+```{r}
+# --- Generate the Bar Plot ---
+robustness_plot <- ggplot(significance_report,
+                          aes(x = reorder(clean_variable, proportion_significant),
+                              y = proportion_significant)) +
+  geom_col(fill = "#0072B2", alpha = 0.8) +
+  coord_flip() + # Makes the bar chart horizontal for easy reading
+  scale_y_continuous(labels = scales::percent_format(), expand = c(0, 0.01)) +
+  labs(
+    title = "\n\nRobustness of Predictor Effects on Microbiome Diversity",
+    subtitle = paste("Based on", N_ITERATIONS, "random subsamples (capped at 5 samples per patient)"),
+    x = "Model Predictor",
+    y = "Proportion of Runs Where Effect Was Significant (95% CI)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    plot.title.position = "plot"
+  )
+
+# Print the plot
+print(robustness_plot)
+
+# Clean up parallel workers
+plan(sequential)
+
+
+```
+
+## assemble 
+
+```{r}
+final_plot <- plot_grid(robustness_plot , 
+                ncol  = 1,
+                labels = 'auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,10,11,1), "cm"))
+
+ggsave('../data/R42_cap_5_samples_per_pt.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)       
+```
