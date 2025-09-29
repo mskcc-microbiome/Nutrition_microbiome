@@ -29,6 +29,7 @@ annotated_df <- read_rds('../data/meds_annotated_2025-09-20.rds') %>% select(-mr
 
 stool_samples_df <- read_csv('../data/153_combined_META.csv') %>% select(pid, sdrt, sampleid)
 ```
+
 ```{r}
 # This chain of operations checks each stool sample to see if there was an
 # exposure to *any* drug category in the two days prior to collection.
@@ -233,6 +234,12 @@ exposure_table_tally <- table_data_with_pct %>%
 # remove the bsi_treatment and cdiff_treatment exposed samples and do the model
 
 ```{r}
+clr_res <- read_csv('../data/R29_all_ASV_CLR_counts.csv')
+
+clr_wide <- clr_res %>% 
+   select(sampleid, asv_1) %>% rename(asv_1_CLR = asv_1)
+
+
 meta <- read_csv('../data/153_combined_META.csv') %>% 
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
   mutate(pid = factor(pid)) %>%
@@ -240,9 +247,10 @@ meta <- read_csv('../data/153_combined_META.csv') %>%
   mutate(across(starts_with("fg_"), ~ .x / 100)) %>% 
   inner_join(stratified_exposure %>% filter(exposure_type %in% c('empiric','no_broad_spectrum_exposure')) %>% select(sampleid, exposure_type)) %>% 
   mutate(exposure_type = factor(exposure_type, levels = c('no_broad_spectrum_exposure','empiric'))) %>% 
-  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  inner_join(clr_wide)
 ```
-
+## diversity model
 
 ```{r}
 # Get all food group variable names
@@ -292,6 +300,7 @@ results_df <- tidy(model_fit, conf.int = TRUE) %>%
   mutate(conf.low = round(conf.low, 2),
          conf.high = round(conf.high, 2))
 ```
+
 ## forest figure
 
 ```{r}
@@ -425,5 +434,135 @@ combined <- plot_grid(
 ggsave('../data/R41_remove_2_abx_stratification.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300)       
+```
+
+
+# Enterococcus as outcome 
+
+```{r}
+formula_string_Enterococcus <- paste(
+  "asv_1_CLR ~ 0 + intensity + exposure_type + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula_Enterococcus <- brms::bf(as.formula(formula_string_Enterococcus))
+
+# Build the priors.
+priors_Enterococcus <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "exposure_typeempiric") 
+
+# Fit the model
+model_fit_Enterococcus <- brm(
+  formula = formula_Enterococcus,
+  data = meta,
+  prior = priors_Enterococcus,
+  warmup = 1000, iter = 3000,
+  chains = 4, cores = 4,
+  seed = 123,
+  silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df_Enterococcus <- tidy(model_fit_Enterococcus, conf.int = TRUE) %>% 
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
+# The main way brms speeds things up is by running each of the model's independent simulations (the "chains") on a separate CPU core. Think of it like having multiple checkout lanes at a grocery store; if you have four lanes open for four customers, things move much faster than having just one lane open.
+# The most effective way to speed up your model is to run more chains in parallel. A good rule of thumb is to set the number of chains equal to the number of cores you want to use. Running at least 4 chains is also generally recommended for checking that the model has converged properly.
+# 8 chains : 15s, 2 chains: 12s, 4 chains : 13.5s
+# For models that are already very fast, the time cost of setting up parallel chains can be greater than the time saved. Your 2-chain model is faster because the overhead is lower. However, you should still use 4 chains, as it is the gold standard for verifying that your model has run correctly, and that diagnostic confidence is worth the extra 1.5 seconds.
+```
+
+```{r}
+cleaned_effects_Enterococcus <- results_df_Enterococcus %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_replace("exposure_typeempiric$", "empiric_only") %>%
+      str_remove_all("exposure_typeno_broad_spectrum_exposure:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>% 
+      str_replace("exposure_typeempiric:", "empiric_only * ") %>%
+      str_replace_all("_", " ")
+  ) %>% 
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) >= 0) %>% 
+  mutate(clean_term = factor(clean_term, levels = level_order))
+
+shading_df <- cleaned_effects_Enterococcus %>%
+  mutate(y_numeric = as.numeric(clean_term)) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+plot_stratify_ASV1 <- ggplot(cleaned_effects_Enterococcus, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#FBEADC", # A light orange/peach color like the example
+    alpha = 0.7,
+    inherit.aes = FALSE
+   ) +
+   # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  # Add labels and a clean theme
+  labs(
+    x = "CLR(ASV_1) change",
+    title = "Predictor effects on ASV 1 (E. faecium),\nexcluding samples exposed to C. diff and BSI treatment",
+    y = ''
+  ) +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown())
+  
+plot_stratify_ASV1  
+```
+
+## asv1 assemble 
+
+```{r}
+table_tally <- ggdraw() + draw_image("../data/R41_number_tally.png", scale = 1.2)
+
+
+final_plot <- plot_grid( table_tally ,  plot_stratify_ASV1 , 
+                nrow  =2,
+                 rel_heights = c(.9,2),
+                labels = 'auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,6,3,1), "cm"))
+
+ggsave('../data/R41_ASV1__remove_2_abx_stratification.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)
 ```
 

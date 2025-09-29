@@ -68,6 +68,8 @@ clr_res <- clr(cts_all + 0.5) %>%
   t() %>% 
   as.data.frame()  %>% 
   rownames_to_column('sampleid')
+
+clr_res %>% write_csv('../data/R29_all_ASV_CLR_counts.csv')
 ```
 
 ```{r}
