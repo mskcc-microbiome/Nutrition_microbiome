@@ -1,0 +1,99 @@
+---
+title: "Adjust for cancer type, transplant origin, and baseline health status"
+output: html_document
+date: "2025-09-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(cowplot)
+library(broom.mixed)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(brmstools)
+library(bayesplot)
+library(gt)
+library(ggtext)
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+```
+
+# correlation between
+
+```{r}
+df_pt <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>% select(pid, source, intensity, gvhd_ppx, disease.simple) %>% janitor::clean_names()
+
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100))
+
+ptb <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/156_combined_PTB_original.csv')
+```
+
+```{r}
+# to see if I have the HCT CI data 
+# HCT-CI is a well-validated scoring system designed specifically to predict outcomes in HCT patients by quantifying pre-transplant comorbidities. It is the standard in the field.
+library(vdbR) 
+connect_database()
+link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
+list_table_from_database('Comorbidity')
+get_table_from_database('comorbidity_index_ag')
+get_table_from_database('patients_msk_comorbidity_index_ag')
+get_table_from_database('clinical_pull_July2024')
+```
+
+# HCT CI
+
+```{r}
+df_ci <- patients_msk_comorbidity_index_ag %>% 
+  inner_join(ptb %>% select(mrn, hct)) %>% 
+  select(mrn:ci_age_adjusted)
+```
+
+
+```{r}
+msk_multi <- comorbidity_index_ag %>% 
+  filter(institution == 'MSKCC') %>% 
+  mutate(mrn = as.numeric(patient_id)) %>% 
+  inner_join(ptb %>% select(mrn, hct))
+
+length(intersect(msk_multi$mrn, df_ci$mrn))
+```
+
+
+```{r}
+found <- clinical_pull_July2024 %>% 
+  mutate(mrn = as.numeric(MRN)) %>% 
+  inner_join(ptb %>% select(mrn, hct)) %>% 
+  distinct(mrn,  HCT_CI_FROM_GVHD_SUMMARY) %>% 
+  inner_join(link) %>% 
+  filter(pid %in% meta$pid) %>% 
+  left_join(df_ci) %>% 
+  arrange(pid)
+
+found %>% write_csv('../data/R43_diet_pt_CI_needed.csv')
+
+found$pid[duplicated(found$pid)]
+
+
+
+df_ci %>% distinct(mrn)
+
+# 59 ones I already have age adjusted CI
+```
+
+# correlation between intensity, graft source,  gvhd ppx
+
+```{r}
+df_pt_stool <- df_pt %>% 
+  filter(pid %in% meta$pid)
+```
+
