@@ -102,35 +102,53 @@ few <- read_csv('../data/still_missing_hct_ci_2025-10-01_manually_reviewed.csv')
 
 cleaned_ci_data <- found %>%
   left_join(few) %>% 
+  # Part 1: Create the cleaned CI column from the three sources.
   mutate(
-    # Ensure columns are the correct type before comparing.
-    # This handles cases where numbers might be read as text.
     hct_ci_total_score = as.character(hct_ci_total_score),
     ci = as.character(ci),
+    hct_ci_tsoni_manual = as.character(hct_ci_tsoni_manual),
 
     ci_cleaned = case_when(
       # Rule 1: Prioritize a valid number from 'hct_ci_total_score'.
-      # `as.numeric()` will convert number-like text to a number, and return NA for non-numbers.
       !is.na(as.numeric(hct_ci_total_score)) ~ hct_ci_total_score,
-      
       # Rule 2: If the above is false, check for a valid number in 'ci'.
       !is.na(as.numeric(ci)) ~ ci,
-
       # Rule 3: If the above are false, check for a valid number in 'hct_ci_tsoni_manual'.
       !is.na(as.numeric(hct_ci_tsoni_manual)) ~ hct_ci_tsoni_manual,
-      
       # Rule 4: ONLY if no number is found, check if a column contains "missing data".
-      # Using tolower() makes the check case-insensitive (handles "Missing Data" and "missing data").
-      !is.na(hct_ci_total_score) & tolower(hct_ci_total_score)  == "missing data" ~ "missing",
-      
+      !is.na(hct_ci_total_score) & tolower(hct_ci_total_score) == "missing data" ~ "missing",
       # Rule 5 (Default): If none of the above rules are met, the value is NA.
       TRUE ~ NA_character_
     )
   ) %>%
-  # Optional: Convert the final cleaned column to numeric, if appropriate.
-  # This will turn "missing" into NA, which may be desired for modeling.
-  # If you want to keep "missing" as a category, skip this line.
-  mutate(ci_cleaned_numeric = as.numeric(ci_cleaned)) 
+  select(-age) %>% 
+  inner_join(ptb %>% select(mrn, age)) %>% 
+  # Part 2: Add the Age-Adjusted Column.
+  # This calculates the age-adjusted score based on the cleaned CI value.
+  mutate(
+    # First, ensure both the cleaned CI and age columns are numeric for calculations.
+    ci_cleaned_numeric = as.numeric(ci_cleaned),
+    age = as.numeric(age),
+
+    # Now, create the age-adjusted score using a case_when() statement.
+    ci_age_adjusted = case_when(
+      # If either the cleaned score or age is NA, the result is NA.
+      is.na(ci_cleaned_numeric) | is.na(age) ~ NA_real_,
+
+      # Add 3 points for patients aged 60 or older.
+      age >= 60 ~ ci_cleaned_numeric + 3,
+      
+      # Add 2 points for patients aged 50-59.
+      age >= 50 ~ ci_cleaned_numeric + 2,
+      
+      # Add 1 point for patients aged 40-49.
+      age >= 40 ~ ci_cleaned_numeric + 1,
+      
+      # For patients under 40, the score is not adjusted (it's the same as the cleaned score).
+      TRUE ~ ci_cleaned_numeric
+    )
+  )
+
   
 ```
 
