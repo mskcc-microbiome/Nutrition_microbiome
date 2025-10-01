@@ -19,6 +19,8 @@ library(tidybayes)
 library(brmstools)
 library(bayesplot)
 library(gt)
+library(rcompanion)
+library(janitor)
 library(ggtext)
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
@@ -47,7 +49,7 @@ link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
 list_table_from_database('Comorbidity')
 get_table_from_database('comorbidity_index_ag')
 get_table_from_database('patients_msk_comorbidity_index_ag')
-get_table_from_database('clinical_pull_July2024')
+get_table_from_database('current_clinical_pull_through_2024')
 ```
 
 # HCT CI
@@ -70,10 +72,10 @@ length(intersect(msk_multi$mrn, df_ci$mrn))
 
 
 ```{r}
-found <- clinical_pull_July2024 %>% 
-  mutate(mrn = as.numeric(MRN)) %>% 
+found <- current_clinical_pull_through_2024 %>% clean_names() %>% 
+  mutate(mrn = as.numeric(mrn)) %>% 
+  select(mrn, hct,hct_ci_total_score ) %>% 
   inner_join(ptb %>% select(mrn, hct)) %>% 
-  distinct(mrn,  HCT_CI_FROM_GVHD_SUMMARY) %>% 
   inner_join(link) %>% 
   filter(pid %in% meta$pid) %>% 
   left_join(df_ci) %>% 
@@ -83,17 +85,113 @@ found %>% write_csv('../data/R43_diet_pt_CI_needed.csv')
 
 found$pid[duplicated(found$pid)]
 
+found %>% 
+  filter(is.na(hct_ci_total_score) & is.na(ci))
 
+found %>% distinct(mrn)
 
-df_ci %>% distinct(mrn)
-
-# 59 ones I already have age adjusted CI
 ```
+
+## merging the CI from several sources 
+
+```{r}
+# merging in the few patients tsoni did the manual pull from chart
+few <- read_csv('../data/still_missing_hct_ci_2025-10-01_manually_reviewed.csv') %>% 
+  mutate(mrn = as.numeric(mrn), hct = mdy(hct), hct_ci_tsoni_manual = as.character(hct_ci_tsoni_manual))
+
+
+cleaned_ci_data <- found %>%
+  left_join(few) %>% 
+  mutate(
+    # Ensure columns are the correct type before comparing.
+    # This handles cases where numbers might be read as text.
+    hct_ci_total_score = as.character(hct_ci_total_score),
+    ci = as.character(ci),
+
+    ci_cleaned = case_when(
+      # Rule 1: Prioritize a valid number from 'hct_ci_total_score'.
+      # `as.numeric()` will convert number-like text to a number, and return NA for non-numbers.
+      !is.na(as.numeric(hct_ci_total_score)) ~ hct_ci_total_score,
+      
+      # Rule 2: If the above is false, check for a valid number in 'ci'.
+      !is.na(as.numeric(ci)) ~ ci,
+
+      # Rule 3: If the above are false, check for a valid number in 'hct_ci_tsoni_manual'.
+      !is.na(as.numeric(hct_ci_tsoni_manual)) ~ hct_ci_tsoni_manual,
+      
+      # Rule 4: ONLY if no number is found, check if a column contains "missing data".
+      # Using tolower() makes the check case-insensitive (handles "Missing Data" and "missing data").
+      !is.na(hct_ci_total_score) & tolower(hct_ci_total_score)  == "missing data" ~ "missing",
+      
+      # Rule 5 (Default): If none of the above rules are met, the value is NA.
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # Optional: Convert the final cleaned column to numeric, if appropriate.
+  # This will turn "missing" into NA, which may be desired for modeling.
+  # If you want to keep "missing" as a category, skip this line.
+  mutate(ci_cleaned_numeric = as.numeric(ci_cleaned)) 
+  
+```
+
+
+
 
 # correlation between intensity, graft source,  gvhd ppx
 
 ```{r}
 df_pt_stool <- df_pt %>% 
   filter(pid %in% meta$pid)
+
+
+# --- Association Analysis ---
+# Get the names of the columns to analyze, excluding the patient ID.
+cols_to_compare <- df_pt_stool %>%
+  select(-pid, -disease_simple) %>%
+  names()
+
+# Generate all unique pairs of these column names.
+# For 3 columns {A, B, C}, this creates pairs {A,B}, {A,C}, {B,C}.
+column_pairs <- combn(cols_to_compare, 2, simplify = FALSE)
+
+# Iterate over each pair of columns to calculate the association statistics.
+# map_dfr automatically combines the results for each pair into a single data frame.
+pairwise_associations <- map_dfr(column_pairs, ~{
+  
+  # Assign the column names for the current pair to var1 and var2 for clarity.
+  var1 <- .x[1]
+  var2 <- .x[2]
+  
+  # A Chi-squared test requires a contingency table (a frequency count of each combination).
+  contingency_table <- table(df_pt_stool[[var1]], df_pt_stool[[var2]])
+  
+  # Switched to Fisher's Exact Test because of low expected counts in some cells,
+  # which makes the Chi-squared approximation unreliable (and produces a warning).
+  # Fisher's test calculates the exact p-value and is more accurate for small samples.
+  # We use simulate.p.value for tables larger than 2x2 to get an accurate estimate.
+  stat_test <- fisher.test(contingency_table, simulate.p.value = TRUE)
+  
+  # Calculate Cramér's V to measure the strength of the association.
+  # This remains a valid and useful metric alongside Fisher's test.
+  cramer_val <- cramerV(contingency_table)
+  
+  # Return the results for this pair as a single-row tibble (a modern data frame).
+  tibble(
+    Variable_1 = var1,
+    Variable_2 = var2,
+    p_value = stat_test$p.value,
+    Cramers_V_Strength = cramer_val
+  )
+})
+
+# --- Display Results ---
+# Print the final table with all pairwise associations.
+print(pairwise_associations)
+```
+
+# cancer type (disease)
+
+```{r}
+df_pt_stool %>% count(disease_simple, sort = T)
 ```
 
