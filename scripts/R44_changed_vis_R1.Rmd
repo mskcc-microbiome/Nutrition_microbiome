@@ -11,26 +11,34 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(ggbeeswarm)
+library(cowplot)
 ```
 
 ```{r}
 meta <- read_csv('../data/153_combined_META.csv')
+
+points_alpha <- 0.2
 ```
 
-```{r}
-# Assuming `model_data` has columns:
-# - alpha_diversity (your diversity metric, e.g., inverse Simpson)
-# - conditioning_intensity ("Ablative", "Reduced", "Nonablative")
+# microbiome diversity across different conditioning regimen intensities.
 
-meta %>%
+```{r}
+intensity_break <- meta %>%
   # Reorder the levels for a more logical plot
   mutate(intensity = factor(intensity, levels = c("nonablative", "reduced", "ablative"))) %>%
+  # Add a count for each group for plotting
+  add_count(intensity, name = "n_samples") %>% 
   ggplot(aes(x = intensity, y = log(simpson_reciprocal))) +
   # A narrow boxplot is overlaid to show key summary statistics (median, quartiles).
   # The outline is now red and thicker to make it more prominent.
   geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1.7, outlier.shape = NA, alpha = 0.7) +
   # geom_jitter adds the raw points. geom_quasirandom is often tidier.
-  geom_quasirandom(alpha = 0.3, width = 0.2) +
+  geom_quasirandom(alpha = points_alpha, width = 0.2) +
+  geom_text(
+    aes(label = paste("n =", n_samples), y = -0.5), # Adjust y-position as needed
+    stat = "unique", size = 3.5
+  ) +
+  
   # This is the key function to flip the plot 90 degrees.
   coord_flip() +
   labs(
@@ -39,6 +47,127 @@ meta %>%
     y = "log(Inverse Simpson Diversity)"
   ) +
   theme_minimal()
+intensity_break
 ```
 
+# "Abx, No Sweets", "No Abx, Sweets",  "Abx, No Sweets", "Abx, Sweets"
 
+```{r}
+# First, create the four categories and get sample sizes
+plot_data <- meta %>%
+  mutate(
+    # Create a simple binary for sweets consumption
+    sweets_exposure = fg_sweets > 0,
+    # Create the four-level group factor using case_when
+    exposure_group = case_when(
+      !empirical & !sweets_exposure ~ "No Abx, No Sweets",
+      !empirical &  sweets_exposure ~ "No Abx, Sweets",
+       empirical & !sweets_exposure ~ "Abx, No Sweets",
+       empirical &  sweets_exposure ~ "Abx, Sweets"
+    )
+  ) %>%
+  # Reorder factors for the plot
+  mutate(exposure_group = factor(exposure_group, levels = c(
+    "No Abx, No Sweets", "No Abx, Sweets",
+    "Abx, No Sweets", "Abx, Sweets"
+  ))) %>%
+  # Add a count for each group for plotting
+  add_count(exposure_group, name = "n_samples")
+
+# Now, create the plot
+g4_break_abx <- ggplot(plot_data, aes(x = exposure_group, y = log(simpson_reciprocal))) +
+  geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1.7, outlier.shape = NA, alpha = 0.7) +
+  geom_quasirandom(alpha = points_alpha, width = 0.25) +
+  # Add the sample size labels
+  geom_text(
+    aes(label = paste("n =", n_samples), y = -0.5), # Adjust y-position as needed
+    stat = "unique", size = 3.5
+  ) +
+  coord_flip() +
+  labs(
+    title = "Unadjusted α-Diversity by Broad-Spectrum Antibiotic and Sweets Exposure",
+    x = "Exposure Group\n(in 2 days prior to sample)",
+    y = "log(Inverse Simpson Diversity)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text( hjust = 1)) # Angle labels if they overlap
+
+g4_break_abx
+
+```
+# break down TPN and sweets, need to exclude the EN exposed samples since that is considered to be sweets 
+
+```{r}
+plot_tpn <- meta %>% 
+  filter(!EN) %>% 
+  select(pid, sampleid, TPN, fg_sweets, simpson_reciprocal) %>%
+  mutate(
+    # Define sweets exposure as consuming any amount > 0.
+    sweets_exposure = fg_sweets > 0,
+    # Use case_when for clear, readable logic to create the four groups.
+    exposure_group = case_when(
+      !TPN & !sweets_exposure ~ "No TPN, No Sweets",
+      !TPN &  sweets_exposure ~ "No TPN, Sweets",
+       TPN & !sweets_exposure ~ "TPN, No Sweets",
+       TPN &  sweets_exposure ~ "TPN, Sweets"
+    )
+  ) %>%
+  # Add a count of samples for each group.
+  add_count(exposure_group, name = "n_samples") %>%
+  # Create a new label that includes the group name and sample size.
+  mutate(group_label = paste0(exposure_group, " (n=", n_samples, ")")) %>%
+  # Convert the new label to a factor to control the plotting order.
+  # The order is reversed because coord_flip() plots from bottom to top.
+  mutate(group_label = factor(group_label, levels = rev(c(
+    "No TPN, No Sweets", "No TPN, Sweets",
+    "TPN, No Sweets", "TPN, Sweets"
+  ))))
+
+# --- Plot Generation ---
+tpn_break <- ggplot(plot_tpn, aes(x = exposure_group, y = log(simpson_reciprocal))) +
+  geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1.7, outlier.shape = NA, alpha = 0.7) +
+  geom_quasirandom(alpha = points_alpha, width = 0.25) +
+  # Add the sample size labels
+  geom_text(
+    aes(label = paste("n =", n_samples), y = -0.5), # Adjust y-position as needed
+    stat = "unique", size = 3.5
+  ) +
+  coord_flip() +
+
+  # Add clear, descriptive labels.
+  labs(
+    title = "Unadjusted α-Diversity by Total Parenteral Nutrition and Sweets",
+    x = "Exposure Group\n(in 2 days prior to sample)",
+    y = "log(Inverse Simpson Diversity)"
+  ) +
+
+  theme_minimal() +
+  theme(axis.text.x = element_text( hjust = 1)) # Angle labels if they overlap
+tpn_break
+```
+
+# assemble 
+
+```{r}
+final_plot <- plot_grid(intensity_break, g4_break_abx , tpn_break,
+                ncol  = 1,
+                #rel_heights = c(.6,1),
+                labels ='auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R44_breakdown_beeswarm.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)       
+```
