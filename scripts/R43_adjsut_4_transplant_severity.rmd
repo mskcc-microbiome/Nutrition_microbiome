@@ -26,7 +26,7 @@ rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
 ```
 
-# correlation between
+
 
 ```{r}
 df_pt <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>% select(pid, source, intensity, gvhd_ppx, disease.simple) %>% janitor::clean_names()
@@ -92,7 +92,7 @@ found %>% distinct(mrn)
 
 ```
 
-## merging the CI from several sources 
+## merging the CI from several sources   
 
 ```{r}
 # merging in the few patients tsoni did the manual pull from chart
@@ -131,7 +131,7 @@ cleaned_ci_data <- found %>%
     age = as.numeric(age),
 
     # Now, create the age-adjusted score using a case_when() statement.
-    ci_age_adjusted = case_when(
+    Age_adjusted_CI = case_when(
       # If either the cleaned score or age is NA, the result is NA.
       is.na(ci_cleaned_numeric) | is.na(age) ~ NA_real_,
 
@@ -148,11 +148,147 @@ cleaned_ci_data <- found %>%
       TRUE ~ ci_cleaned_numeric
     )
   )
-
-  
 ```
 
+## model with CI included as a fixed effect
 
+```{r}
+# the meta table should remove the few patients that we don't have CI data 
+meta_CI <- meta %>%
+  left_join(cleaned_ci_data %>% select(pid, ci_cleaned, age, ci_cleaned_numeric, Age_adjusted_CI)) %>% 
+  filter(!is.na(Age_adjusted_CI))
+
+# how many samples from how many patients are removed 
+rm_pt_num <- cleaned_ci_data %>% filter(is.na(ci_cleaned_numeric)) 
+rm_pt_num %>% nrow
+
+rm_samples_num <- meta %>% filter(pid %in% rm_pt_num$pid) 
+```
+
+```{r}
+all_food_vars <- meta_CI %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN + Age_adjusted_CI +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+#Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = meta_CI,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
+```
+
+## forest figure 
+
+```{r}
+# the above figure but make it the way the other figure look like
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+level_order <- rev(c(
+    "abx", "EN", "TPN", "Age adjusted CI",
+    "abx * Sweets", "Sweets",
+    "abx * Grains", "Grains",
+    "abx * Milk", "Milk",
+    "abx * Eggs", "Eggs",
+    "abx * Legumes", "Legumes",
+    "abx * Meats", "Meats",
+    "abx * Fruits", "Fruits",
+    "abx * Oils", "Oils",
+    "abx * Vegetables", "Vegetables"
+))
+
+cleaned_effects <- results_df %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>%
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")
+  ) %>%
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) >= 0) %>%
+  mutate(clean_term = factor(clean_term, levels = level_order))
+
+shading_df <- cleaned_effects %>%
+  mutate(y_numeric = as.numeric(clean_term)) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+plot_CI <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#FBEADC", # A light orange/peach color like the example
+    alpha = 0.7,
+    inherit.aes = FALSE
+   ) +
+   # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  # Add labels and a clean theme
+  labs(
+    x = "ln(diversity) change",
+    title = "Predictor effects on diversity",
+    subtitle = "Sensitivity Analysis:\nControl for baseline health status by including the age-adjusted comorbidity index",
+    y = ''
+  ) +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown())
+
+plot_CI
+```
 
 
 # correlation between intensity, graft source,  gvhd ppx
@@ -198,13 +334,78 @@ pairwise_associations <- map_dfr(column_pairs, ~{
     Variable_1 = var1,
     Variable_2 = var2,
     p_value = stat_test$p.value,
-    Cramers_V_Strength = cramer_val
+    Cramers_V = cramer_val
   )
 })
 
 # --- Display Results ---
 # Print the final table with all pairwise associations.
 print(pairwise_associations)
+```
+
+## gt table 
+
+```{r}
+# --- Create the Polished GT Table ---
+# This section takes the raw results and makes them publication-ready.
+
+# Define the formal names for the variables.
+formal_names <- c(
+  "source" = "Graft Source",
+  "intensity" = "Conditioning Intensity",
+  "gvhd_ppx" = "GVHD Prophylaxis"
+)
+
+# Build the table.
+association_gt_table <- pairwise_associations %>%
+  # Clean up the variable names and manually format the p-value.
+  mutate(
+    Variable_1 = recode(Variable_1, !!!formal_names),
+    Variable_2 = recode(Variable_2, !!!formal_names),
+    # This replaces the numeric p-value with a formatted character string.
+    p_value = if_else(p_value < 0.001, "<0.001", as.character(round(p_value, 3)))
+  ) %>%
+  # Start the gt table creation process.
+  gt() %>%
+  # Set the main title and subtitle.
+  tab_header(
+    title = md("**Association Between Clinical Transplant Variables**"),
+    subtitle = "Assessing multicollinearity between key predictors"
+  ) %>%
+  # Define the column labels.
+  cols_label(
+    Variable_1 = md("**Variable 1**"),
+    Variable_2 = md("**Variable 2**"),
+    p_value = md("**p-value***"),
+    Cramers_V = md("**Cramér's V**")
+  ) %>%
+  # Format the numeric columns for better readability.
+  fmt_number(
+    columns = Cramers_V,
+    decimals = 3
+  ) %>%
+  # Add a source note to explain the statistics.
+  tab_source_note(
+    source_note = md("*p-value calculated using Fisher's Exact Test. Cramér's V measures the strength of association from 0 (none) to 1 (perfect).")
+  ) %>%
+  # Apply a clean, professional theme using a more compatible function.
+  tab_options(
+    table.border.top.style = "hidden",
+    column_labels.border.bottom.style = "solid",
+    column_labels.border.bottom.width = px(1.5),
+    column_labels.border.bottom.color = "gray80",
+    table_body.border.bottom.color = "gray80"
+  ) %>%
+  # Center the text in the columns.
+  cols_align(
+      align = "center",
+      columns = everything()
+  )
+
+# --- Display the Final Table ---
+association_gt_table
+
+
 ```
 
 # cancer type (disease)
