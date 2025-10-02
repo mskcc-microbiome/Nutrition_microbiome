@@ -1,0 +1,44 @@
+---
+title: "Changed visualization per R1 request"
+output: html_document
+date: "2025-10-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggbeeswarm)
+```
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv')
+```
+
+```{r}
+# Assuming `model_data` has columns:
+# - alpha_diversity (your diversity metric, e.g., inverse Simpson)
+# - conditioning_intensity ("Ablative", "Reduced", "Nonablative")
+
+meta %>%
+  # Reorder the levels for a more logical plot
+  mutate(intensity = factor(intensity, levels = c("nonablative", "reduced", "ablative"))) %>%
+  ggplot(aes(x = intensity, y = log(simpson_reciprocal))) +
+  # A narrow boxplot is overlaid to show key summary statistics (median, quartiles).
+  # The outline is now red and thicker to make it more prominent.
+  geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1.7, outlier.shape = NA, alpha = 0.7) +
+  # geom_jitter adds the raw points. geom_quasirandom is often tidier.
+  geom_quasirandom(alpha = 0.3, width = 0.2) +
+  # This is the key function to flip the plot 90 degrees.
+  coord_flip() +
+  labs(
+    title = "Unadjusted Microbiome α-Diversity by Conditioning Intensity",
+    x = "Conditioning Regimen Intensity",
+    y = "log(Inverse Simpson Diversity)"
+  ) +
+  theme_minimal()
+```
+
+

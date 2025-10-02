@@ -135,7 +135,10 @@ cleaned_ci_data <- found %>%
       # For patients under 40, the score is not adjusted (it's the same as the cleaned score).
       TRUE ~ ci_cleaned_numeric
     )
-  )
+  ) %>% 
+  relocate(Age_adjusted_CI, .after = 'ci_cleaned_numeric')
+
+cleaned_ci_data %>% write_csv('../data/R43_cleaned_ci_data_diet.csv')
 ```
 
 ## model with CI included as a fixed effect
