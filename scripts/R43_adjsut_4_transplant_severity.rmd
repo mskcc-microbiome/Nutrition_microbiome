@@ -58,20 +58,14 @@ get_table_from_database('current_clinical_pull_through_2024')
 df_ci <- patients_msk_comorbidity_index_ag %>% 
   inner_join(ptb %>% select(mrn, hct)) %>% 
   select(mrn:ci_age_adjusted)
-```
 
-
-```{r}
 msk_multi <- comorbidity_index_ag %>% 
   filter(institution == 'MSKCC') %>% 
   mutate(mrn = as.numeric(patient_id)) %>% 
   inner_join(ptb %>% select(mrn, hct))
 
 length(intersect(msk_multi$mrn, df_ci$mrn))
-```
 
-
-```{r}
 found <- current_clinical_pull_through_2024 %>% clean_names() %>% 
   mutate(mrn = as.numeric(mrn)) %>% 
   select(mrn, hct,hct_ci_total_score ) %>% 
@@ -81,14 +75,8 @@ found <- current_clinical_pull_through_2024 %>% clean_names() %>%
   left_join(df_ci) %>% 
   arrange(pid)
 
-found %>% write_csv('../data/R43_diet_pt_CI_needed.csv')
+# found %>% write_csv('../data/R43_diet_pt_CI_needed.csv')
 
-found$pid[duplicated(found$pid)]
-
-found %>% 
-  filter(is.na(hct_ci_total_score) & is.na(ci))
-
-found %>% distinct(mrn)
 
 ```
 
@@ -283,7 +271,7 @@ plot_CI <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
   labs(
     x = "ln(diversity) change",
     title = "Predictor effects on diversity",
-    subtitle = "Sensitivity Analysis:\nControl for baseline health status by including the age-adjusted comorbidity index",
+    subtitle = "Sensitivity Analysis:\nControl for baseline health status\nby including the age-adjusted\ncomorbidity index",
     y = ''
   ) +
   theme_classic(base_size = 11) +
@@ -402,10 +390,10 @@ association_gt_table <- pairwise_associations %>%
   cols_align(
       align = "center",
       columns = everything()
-  )
+  )%>% 
+  gt::gtsave(filename = "../data/R43_three_var_correlation.png") 
 
-# --- Display the Final Table ---
-association_gt_table
+
 ```
 
 # cancer type (disease)
@@ -499,7 +487,7 @@ key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
 replacement_dictionary <- setNames(key$shortname, key$fg1_name)
 
 level_order <- rev(c(
-    "abx", "EN", "TPN", "disease lineageMyeloid",
+    "abx", "EN", "TPN", "Disease: Myeloid",
     "abx * Sweets", "Sweets",
     "abx * Grains", "Grains",
     "abx * Milk", "Milk",
@@ -523,7 +511,8 @@ cleaned_effects <- results_df_disease %>%
       str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
       str_replace_all( replacement_dictionary) %>%
       str_replace("empiricalTRUE:", "abx * ") %>%
-      str_replace_all("_", " ")
+      str_replace_all("_", " ") %>% 
+      str_replace("disease lineageMyeloid", "Disease: Myeloid")
   ) %>%
   filter(!str_detect(clean_term, 'intensity')) %>%
   # Create a new column to identify significant results
@@ -561,11 +550,44 @@ plot_disease <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
   labs(
     x = "ln(diversity) change",
     title = "Predictor effects on diversity",
-    subtitle = "Sensitivity Analysis:\nControl for disease lineage - Myeloid or Lymphoid",
+    subtitle = "Sensitivity Analysis:\nControl for disease lineage\n- Myeloid or Lymphoid\n",
     y = ''
   ) +
   theme_classic(base_size = 11) +
   theme(legend.position = "none", axis.text.y = element_markdown())
 
 plot_disease
+```
+
+# assemble 
+
+```{r}
+table_cor <- ggdraw() + draw_image("../data/R43_three_var_correlation.png", scale = 1)
+
+bottom <- plot_grid(plot_disease , plot_CI,
+                ncol  = 2,
+                labels = c('b', 'c'),
+                align = 'vh', axis = 'lrtb')
+
+final_plot <- plot_grid(table_cor , bottom,
+                ncol  = 1,
+                rel_heights = c(.6,1),
+                labels = c('a', NA),
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R43_control_4_transplant_var.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)       
 ```
