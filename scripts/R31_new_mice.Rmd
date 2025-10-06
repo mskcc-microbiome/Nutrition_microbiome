@@ -578,6 +578,7 @@ ggplot(processed_data, aes(x = plot_group, y = logCFU, fill = diet_treatment)) +
   # Extend the plot margin to make room for the annotations.
   coord_cartesian( clip = "off")
 ```
+
 # EM07: 7_25
 
 ```{r}

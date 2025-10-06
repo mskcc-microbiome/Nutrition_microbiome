@@ -42,7 +42,7 @@ intensity_break <- meta %>%
   # This is the key function to flip the plot 90 degrees.
   coord_flip() +
   labs(
-    title = "Unadjusted Microbiome α-Diversity by Conditioning Intensity",
+    title = bquote("Unadjusted "~alpha*"-Diversity by Conditioning Intensity"),
     x = "Conditioning Regimen Intensity",
     y = "log(Inverse Simpson Diversity)"
   ) +
@@ -85,7 +85,7 @@ g4_break_abx <- ggplot(plot_data, aes(x = exposure_group, y = log(simpson_recipr
   ) +
   coord_flip() +
   labs(
-    title = "Unadjusted α-Diversity by Broad-Spectrum Antibiotic and Sweets Exposure",
+    title = bquote("Unadjusted "~alpha*"-Diversity by Broad-Spectrum Antibiotic and Sweets Exposure"),
     x = "Exposure Group\n(in 2 days prior to sample)",
     y = "log(Inverse Simpson Diversity)"
   ) +
@@ -136,7 +136,7 @@ tpn_break <- ggplot(plot_tpn, aes(x = exposure_group, y = log(simpson_reciprocal
 
   # Add clear, descriptive labels.
   labs(
-    title = "Unadjusted α-Diversity by Total Parenteral Nutrition and Sweets",
+    title = bquote("Unadjusted "~alpha*"-Diversity by Total Parenteral Nutrition and Sweets"),
     x = "Exposure Group\n(in 2 days prior to sample)",
     y = "log(Inverse Simpson Diversity)"
   ) +

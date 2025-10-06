@@ -1,0 +1,143 @@
+---
+title: "Mixed sugar (smoothie) mouse experiment"
+output: html_document
+date: "2025-10-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+```
+
+```{r}
+experiment_data <- read_csv('../data/124_smoothie_mouse_experiment_data.csv') %>% 
+  mutate(Day = if_else(Day == 0, 1, Day)) %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/(Stool_weight_g * 1000))+1) %>% 
+  janitor::clean_names()
+```
+
+
+```{r}
+processed_data <- experiment_data %>%
+  # Create separate columns for 'antibiotic_treatment' and 'diet_treatment' from the 'group' column.
+  mutate(
+    antibiotic_treatment = case_when(
+      str_detect(treatment, "Biapenam") ~ "biapenem",
+      str_detect(treatment, "Vehicle$") ~ "PBS",
+      TRUE ~ "Unknown"
+    ),
+    diet_treatment = case_when(
+      str_detect(treatment, "Naked Smoothie") ~ "smoothie",
+      str_detect(treatment, "Plain Hydrogel") ~ "vehicle",
+      TRUE ~ "Unknown"
+    ),
+    # Ensure the treatments are ordered correctly for the plot layout.
+    antibiotic_treatment = factor(antibiotic_treatment, levels = c("PBS", "biapenem")),
+    diet_treatment = factor(diet_treatment, levels = c("vehicle", "smoothie"))
+  ) %>%
+  # Create a single grouping variable for the x-axis by combining the treatment and day information.
+  mutate(
+    plot_group = paste(antibiotic_treatment, diet_treatment, day, sep = "_"),
+    # Create a unique ID for each mouse's trajectory within its specific treatment group.
+    trajectory_group = paste(antibiotic_treatment, diet_treatment, mouse_identifier, sep = "_"),
+    treatment_group = paste(antibiotic_treatment, diet_treatment,  sep = "_"),
+    treatment_group = factor(treatment_group, levels = c('PBS_vehicle','PBS_smoothie','biapenem_vehicle','biapenem_smoothie'))
+  ) %>%
+  # Convert the new grouping variable to a factor and set the levels to enforce the desired plot order.
+  mutate(
+    plot_group = factor(plot_group, levels = c(
+      "PBS_vehicle_1", "PBS_vehicle_3", "PBS_vehicle_6", 
+      "PBS_smoothie_1", "PBS_smoothie_3", "PBS_smoothie_6", 
+      "biapenem_vehicle_1", "biapenem_vehicle_3", "biapenem_vehicle_6", 
+      "biapenem_smoothie_1", "biapenem_smoothie_3", "biapenem_smoothie_6"
+    ))
+  ) %>% 
+  select(plot_group, cf_us_per_gram_stool, day, antibiotic_treatment, diet_treatment, trajectory_group, treatment_group)
+```
+
+```{r}
+smoothie_longitudinal <- ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool, color = treatment_group)) +
+  
+  # Add vertical lines to visually separate the main treatment blocks.
+  geom_vline(xintercept = c(3.5, 6.5, 9.5), color = "gray80", linetype = "dashed") +
+
+  # Add boxplots. The fill color is mapped to the diet treatment.
+  # Outliers are not plotted here as geom_jitter will show all individual points.
+  geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  
+   # Add thin lines to track the trajectory of each individual mouse.
+  geom_line(aes(group = trajectory_group), color = "gray80", linewidth = 0.5, alpha = 0.5) +
+  
+  # Add individual data points with some horizontal jitter to prevent overlap.
+  geom_point(aes(color = treatment_group), width = 0.2, size = 2) +
+  
+  # Use a logarithmic scale for the y-axis, which is essential for this type of CFU data.
+  # We customize the labels to show scientific notation (10^2, 10^3, etc.).
+  scale_y_log10(
+    breaks = scales::trans_breaks("log10", function(x) 10^x, n = 9),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
+  
+  scale_color_manual(values = c('gray76','bisque2','gray32','darkorange3')) +
+  
+  # Add labels for the axes and title.
+  labs(
+    y = "Enterococcal\nCFU/gram",
+    x = "",
+    title = "A complex dietary sugar source (fruit smoothie)\nprolongs antibiotic-driven Enterococcus blooms"
+  ) +
+   
+  # Apply a clean, classic theme suitable for publication.
+  theme_classic() +
+  
+  scale_x_discrete(labels=rep(c(1,3,6),4)) + 
+  
+  stat_compare_means(comparisons = list(
+    c('biapenem_vehicle_3','biapenem_smoothie_3'), 
+    c('biapenem_vehicle_6','biapenem_smoothie_6')
+  ),
+    label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T, step.increase = 0.2, label.size = 1) +
+   
+  # Further theme adjustments for a polished look.
+  theme(
+    axis.title = element_text(size = 12),
+    axis.text.x = element_text(size = 10, vjust = 0, angle = 0), # Adjust position of day numbers
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "none" # Hide the legend as the colors are explained by the fill.
+  ) +
+  # Extend the plot margin to make room for the annotations.
+  coord_cartesian( clip = "off")
+
+smoothie_longitudinal
+```
+
+# assemble 
+
+```{r}
+final_plot <- plot_grid(smoothie_longitudinal,
+                #rel_heights = c(.6,1),
+                labels ='auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,5,18,1), "cm"))
+
+ggsave('../data/R45_smoothie_longitudinal.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)       
+```
