@@ -1,0 +1,185 @@
+---
+title: "Covariates contribution to the total variation"
+output: html_document
+date: "2025-10-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vegan)
+library(tidyverse)
+library(forcats)
+library(cowplot)
+source("../functions/identify_covariates.R")
+```
+
+```{r}
+proj_home <- '..'
+# Load and Prep data:
+
+otu_table <- read.csv(paste0(proj_home, "/data/R25_asv_counts.csv")) %>%
+  select(-count_relative) %>%
+  pivot_wider(values_from = "count", names_from = "sampleid") %>%
+  column_to_rownames("asv_key") 
+otu_table[is.na(otu_table)] <- 0
+dist_mat <- as.matrix(vegdist(t(otu_table), method = "bray")) # this step will take quite some time
+
+clinical_cov <- readRDS(paste0(proj_home, "/data/R02_cleaned_clinical_outcome.rds")) %>%
+  select(c(source,intensity, age, sex, disease.simple, pid))
+
+metadata <- read.csv(paste0(proj_home, "/data/153_combined_META.csv")) %>% 
+  select(c(sampleid, empirical, timebin, fg_egg, fg_fruit, fg_grain, fg_legume, fg_meat, fg_milk, fg_oils, fg_sweets, fg_veggie, TPN, EN, pid)) %>%
+  left_join(clinical_cov, by = "pid") %>%
+  #select(-pid) %>%
+  mutate(disease.simple = if_else(disease.simple == "AML", "AML", "all others"))
+    
+
+# make sure sample order is the same:
+reorder_indices <- match(rownames(dist_mat), metadata$sampleid)
+metadata <- metadata[reorder_indices,] %>%
+  remove_rownames() %>%
+  column_to_rownames("sampleid")
+
+metadata %>%
+  select(c(pid, disease.simple)) %>%
+  unique() %>%
+  select(-pid) %>%
+  mutate(fill = disease.simple == "AML") %>%
+  ggplot(aes(x = fct_infreq(disease.simple), fill = fill)) +
+  geom_bar() + 
+  theme_classic() +
+  labs(
+      x = "",
+      y = "Number of Patients"
+      
+    ) + 
+  theme(
+    legend.position = "none"
+  )
+
+print(table(metadata$disease.simple))
+threshold = 0.05
+factor_fit <- vegan::envfit(as.data.frame(dist_mat), metadata, perms=1000)
+plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(dist_mat, metadata, threshold = threshold, perms = 10000)
+```
+
+
+
+
+```{r}
+covariate_data <- plotting_data_frame %>%
+   filter(significant) %>% 
+  mutate(variable_name = case_when(
+    variable_name == "timebin" ~ "Week Relative to Transplant",
+    variable_name == "disease.simple" ~ "Disease (Broad Category)",
+    variable_name == "empirical" ~ "ABX exposure (last 2 days)",
+    variable_name == "modal diet" ~ "Dietary Pattern",
+    variable_name == "source" ~ "Graft Source",
+    variable_name == "intensity" ~ "Conditioning Intensity",
+    variable_name == "EN" ~ "Enteral Nutrition",
+    variable_name == "TPN" ~ "Total Parenteral Nutrition",
+    variable_name == "sex" ~ "Sex",
+    variable_name == "age" ~ "Age",
+    .default = variable_name
+  ))
+```
+
+
+```{r}
+# Now, let's process the data to make it plot-ready.
+# This involves adding categories for color-coding and cleaning up the names for clarity.
+plot_data <- covariate_data |>
+  # The mutate() function adds new columns or changes existing ones.
+  # Here, case_when() is used to assign a category based on the variable name.
+  # This is important for grouping related factors visually.
+  mutate(
+    category = case_when(
+      variable_name == "pid" ~ "Inter-Patient Variability",
+      str_starts(variable_name, "fg") ~ "Dietary Factors",
+      # TRUE ~ ... acts as a catch-all for anything not matched above.
+      TRUE ~ "Clinical Factors"
+    ),
+    # Let's make the variable names more descriptive for the publication.
+    # `str_replace_all` helps clean up the labels.
+    variable_name = str_replace_all(variable_name,
+      c(
+        "pid" = "Patient ID (pid)",
+        "fg " = "Food Group: "
+      )
+    )
+  )
+
+# --- Plot 1: All Covariates ---
+# This first plot is designed to show the big picture: the massive influence of
+# individual patient differences compared to everything else.
+plot_all_covariates <- plot_data |>
+  # The aesthetic `aes()` maps data to visual properties.
+  # `fct_reorder()` is a key function that arranges the covariates on the y-axis
+  # from smallest to largest effect size, making the plot intuitive.
+  ggplot(aes(x = effect_size, y = fct_reorder(variable_name, effect_size), fill = category)) +
+  geom_col() + # This creates the bar chart.
+  labs(
+    subtitle = "Patient Individuality is the Main Driver\nof Microbiome Variation",
+    x = "Variance Explained",
+    y = "Covariate",
+    fill = "Covariate Category"
+  ) +
+  theme_minimal(base_size = 14) + # A clean theme is good for publications.
+  theme(legend.position = "bottom") # Place legend at the bottom for a wider plot.
+
+# --- Plot 2: "Zoomed-in" View ---
+# The second plot answers the reviewer's specific question about the relative
+# contribution of diet vs. other disruptors. By removing the dominant 'pid'
+# factor, the scale is adjusted to make the other effects comparable.
+plot_zoomed_in <- plot_data |>
+  # We filter out the 'Patient ID (pid)' to "zoom in" on the other factors.
+  filter(variable_name != "Patient ID (pid)") |>
+  ggplot(aes(x = effect_size, y = fct_reorder(variable_name, effect_size), fill = category)) +
+  geom_col(show.legend = FALSE) + # Hide the legend; it's redundant with the first plot.
+  # Adding text labels helps the reader see the precise R² value for each bar.
+  #geom_text(aes(label = round(effect_size, 3)), hjust = -0.2, size = 3.5) +
+  # Explicitly setting the x-axis limit ensures there's space for the text labels.
+  scale_x_continuous(limits = c(0, 0.08)) +
+  labs(
+    #title = "Clinical Factors Explain More Variation than Diet",
+    subtitle = "Relative contribution of covariates after excluding Patient ID",
+    x = "Variance Explained",
+    y = "" # An empty label here cleans up the combined plot.
+  ) +
+  theme_minimal(base_size = 14)
+
+
+print(plot_all_covariates)
+print(plot_zoomed_in)
+
+
+```
+
+# assemble 
+
+```{r}
+final_plot <- plot_grid(plot_all_covariates,plot_zoomed_in,
+                        nrow = 2,
+                #rel_heights = c(.6,1),
+                labels ='auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,4,1,1), "cm"))
+
+ggsave('../data/R37_covariates_contribution.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)       
+```
