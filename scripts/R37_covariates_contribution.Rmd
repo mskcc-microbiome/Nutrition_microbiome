@@ -106,6 +106,7 @@ plot_data <- covariate_data |>
       variable_name %in% c("pid", "Sex") ~ "Inter-Patient Variability",
       variable_name %in% c("ABX exposure (last 2 days)", "Week Relative to Transplant") ~ "Sample-Level Non-Diet Metadata",
       str_starts(variable_name, "fg") ~ "Dietary Factors",
+      variable_name == "Enteral Nutrition" ~ "Dietary Factors",
       # TRUE ~ ... acts as a catch-all for anything not matched above.
       TRUE ~ "Clinical Factors"
     ),
