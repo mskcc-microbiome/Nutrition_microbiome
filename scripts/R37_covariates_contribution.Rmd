@@ -34,7 +34,13 @@ metadata <- read.csv(paste0(proj_home, "/data/153_combined_META.csv")) %>%
   select(c(sampleid, empirical, timebin, fg_egg, fg_fruit, fg_grain, fg_legume, fg_meat, fg_milk, fg_oils, fg_sweets, fg_veggie, TPN, EN, pid)) %>%
   left_join(clinical_cov, by = "pid") %>%
   #select(-pid) %>%
-  mutate(disease.simple = if_else(disease.simple == "AML", "AML", "all others"))
+  mutate(
+    disease.simple = case_when(
+      disease.simple %in% c("AML", "MDS/MPN", "CML") ~ "Myeloid",
+      disease.simple %in% c("NHL", "ALL", "Myeloma", "CLL", "Hodgkins") ~ "Lymphoid",
+      TRUE ~ "Other"
+    )
+  ) 
     
 
 # make sure sample order is the same:
@@ -97,7 +103,8 @@ plot_data <- covariate_data |>
   # This is important for grouping related factors visually.
   mutate(
     category = case_when(
-      variable_name == "pid" ~ "Inter-Patient Variability",
+      variable_name %in% c("pid", "Sex") ~ "Inter-Patient Variability",
+      variable_name %in% c("ABX exposure (last 2 days)", "Week Relative to Transplant") ~ "Sample-Level Non-Diet Metadata",
       str_starts(variable_name, "fg") ~ "Dietary Factors",
       # TRUE ~ ... acts as a catch-all for anything not matched above.
       TRUE ~ "Clinical Factors"
