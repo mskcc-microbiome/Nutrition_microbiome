@@ -41,8 +41,117 @@ exposures <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_all_medica
 exposures %>% count(exposure_category)
 ```
 
+## tally the exposure numbers
+
 ```{r}
-# to put the other antibacterial into the FQ group
+# Calculate the total number of unique patients and samples for percentages.
+total_samples <- nrow(exposures)
+total_patients <- n_distinct(exposures$pid)
+
+# First, create the summary data, including clean labels for the final table.
+summary_data <- exposures %>%
+  group_by(exposure_category) %>%
+  summarise(
+    n_samples = n(),
+    n_patients = n_distinct(pid),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    percent_samples = (n_samples / total_samples) * 100,
+    percent_patients = (n_patients / total_patients) * 100,
+    # Create the clean, descriptive labels for the final table rows.
+    exposure_category_label = recode(exposure_category,
+                                    "no_abx" = "No Antibiotics",
+                                    "fluoroquinolones" = "Fluoroquinolones (Prophylactic)",
+                                    "broad_spectrum" = "Broad-spectrum",
+                                    "other_antibacterial" = "Other antibacterial")
+  )
+
+# Next, create the final table structure with the 'Total' row.
+summary_table_for_gt <- summary_data %>%
+  # Arrange the data in the desired order before adding the total row.
+  arrange(factor(exposure_category, levels = c("no_abx", "fluoroquinolones", "broad_spectrum", "other_antibacterial"))) %>%
+  # Add the final 'Total' row.
+  bind_rows(
+    summarise(
+      .,
+      # Summing n_samples is correct.
+      n_samples = sum(n_samples),
+      # For patients, we use the pre-calculated total of *unique* patients.
+      n_patients = total_patients,
+      # Percentages for the total row should be 100.
+      percent_samples = 100,
+      percent_patients = 100,
+      # Add the label for the total row.
+      exposure_category_label = "Total"
+    )
+  ) %>%
+  # Select and reorder the final columns for the table.
+  select(exposure_category_label, n_samples, percent_samples, n_patients, percent_patients)
+
+
+# --- Create the Publication-Ready Table with gt ---
+gt_table <- summary_table_for_gt %>%
+  # Initialize the gt object, using the label column for row names.
+  gt(rowname_col = "exposure_category_label") %>%
+  
+  # Add a main title for the table.
+  tab_header(
+    title = 'Cohort Antibiotic Exposure Summary'
+  ) %>%
+  
+  # Create spanner headings to group related columns together.
+  tab_spanner(
+    label = md("**Samples**"),
+    columns = c(n_samples, percent_samples)
+  ) %>%
+  tab_spanner(
+    label = md("**Patients**"),
+    columns = c(n_patients, percent_patients)
+  ) %>%
+  
+  # Customize the final column labels.
+  cols_label(
+    n_samples = "N",
+    percent_samples = "%",
+    n_patients = "N",
+    percent_patients = "%"
+  ) %>%
+  
+  # Format the large count numbers to use comma separators.
+  fmt_number(
+    columns = c(n_samples, n_patients),
+    decimals = 0
+  ) %>%
+  
+  # Format the percentage columns to one decimal place.
+  fmt_number(
+    columns = c(percent_samples, percent_patients),
+    decimals = 1
+  ) %>%
+  
+  # Center align the content of all numeric columns.
+  cols_align(
+    align = "center",
+    columns = where(is.numeric)
+  ) %>%
+  
+  # Add a separator line and bold text to the 'Total' row for emphasis.
+  tab_style(
+    style = list(
+      cell_borders(sides = "top", color = "black", weight = px(2)),
+      cell_text(weight = "bold")
+    ),
+    locations = cells_body(rows = exposure_category_label == "Total")
+  ) %>%
+  # Add some final styling options for a polished look.
+  opt_table_font(font = "sans-serif") %>%
+  opt_table_outline() %>% 
+  gt::gtsave(filename = "../data/R18_number_tally_abx_exposure.png") 
+```
+
+
+```{r}
       
 meta <- read_csv('../data/153_combined_META.csv') %>% 
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
@@ -148,7 +257,7 @@ plot_data <- results_df %>%
 
 # --- Plotting ---
 # Create the faceted dot-and-whisker plot.
-ggplot(plot_data, aes(x = estimate, y = food_group_ordered)) +
+plot_stratify_abx <- ggplot(plot_data, aes(x = estimate, y = food_group_ordered)) +
   # Add the horizontal line for the confidence interval.
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "gray50") +
    # Use geom_pointrange to show the estimate (point) and confidence interval (line)
@@ -181,16 +290,17 @@ ggplot(plot_data, aes(x = estimate, y = food_group_ordered)) +
     axis.text.y = element_text(size = 11)
   )
 
+plot_stratify_abx
 ```
 ## assemble 
 
 ```{r}
-table_tally <- ggdraw() + draw_image("../data/R41_number_tally.png", scale = 1.2)
+table_tally <- ggdraw() + draw_image("../data/R18_number_tally_abx_exposure.png", scale = 1)
 
 
-final_plot <- plot_grid( table_tally ,  plot_stratify , 
-                nrow  =2,
-                 rel_heights = c(.9,2),
+final_plot <- plot_grid( table_tally ,  plot_stratify_abx , 
+                nrow  = 2,
+                 rel_heights = c(1.6,2),
                 labels = 'auto',
                 align = 'vh', axis = 'lrtb')
 
@@ -203,10 +313,10 @@ combined <- plot_grid(
   title, final_plot,
   ncol = 1,
   # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,6,3,1), "cm"))
+  rel_heights = c(0.05, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/R41_remove_2_abx_stratification.pdf',
+ggsave('../data/R18_abx_three_levels_stratification.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300)       
 ```
