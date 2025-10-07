@@ -1,7 +1,7 @@
 ---
-title: "FQ battel"
+title: "FQ battle"
 output: html_document
-date: "2025-01-27"
+date: "2025-01-27" 
 ---
 
 ```{r setup, include=FALSE}
@@ -10,231 +10,208 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(cowplot)
+library(broom.mixed)
 library(brms)   
 library(ggpubr)
 library(tidybayes)
-library(cowplot)
 library(brmstools)
 library(bayesplot)
+library(gt)
+library(ggtext)
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
 ```
 
+# diversity
 
 ```{r}
-library(vdbR)
-connect_database()
-list_table_from_database('mmf')
-get_table_from_database('samples_mmf')
+# abx in three levels: no abx, FQ only and broad-spectrum
+exposures <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_all_medication_overlapping_with_prior_2_day_of_stool_samples_upated_2.csv') %>%    
+  group_by(sampleid, sdrt, pid) %>%
+  summarize(
+    exposure_category = case_when(
+      any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",
+      any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
+      any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterial",
+      TRUE ~ "no_abx"  # Default case if neither "apple" nor "orange" is found
+    )
+  ) %>% ungroup()
+
+exposures %>% count(exposure_category)
 ```
-
-```{r}
-med <- read_csv('../data/191_medication_cleaned_all_with_type.csv') %>% distinct(sampleid, med_exposure_type)
-
-fq_exposed <- med %>% filter(med_exposure_type =='fluoroquinolones') %>% pull(sampleid)
-
-fg_and_other <- med %>% filter(med_exposure_type =='fluoroquinolones' | med_exposure_type == 'other_antibacterial') %>% pull(sampleid)
-```
-
-# with interaction and abx in three levels: no abx, FQ only and broad-spectrum
-
-## diversity
 
 ```{r}
 # to put the other antibacterial into the FQ group
       
 meta <- read_csv('../data/153_combined_META.csv') %>% 
-  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
-  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
-  mutate(pid = factor(pid)) %>% 
-  mutate(fg_egg = fg_egg/100,
-         fg_fruit = fg_fruit/100,
-         fg_grain = fg_grain/100,
-         fg_legume = fg_legume/100,
-         fg_meat = fg_meat/100,
-         fg_milk = fg_milk/100,
-         fg_oils = fg_oils/100,
-         fg_sweets = fg_sweets/100,
-         fg_veggie = fg_veggie/100) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100)) %>% 
   full_join(exposures) %>% 
-  filter(exposure_category %in% c('no_abx','fluoroquinolones')) %>% 
-  mutate(abx = if_else(exposure_category == 'no_abx', '0_no_abx', '1_FQ'),abx = factor(abx)) %>% 
-  #mutate(abx = if_else(empirical == 'TRUE', '2_broad', if_else(sampleid %in% fg_and_other, '1_fq_and_other','0_no_abx')),abx = factor(abx)) %>% 
-  mutate(TPN = if_else(TPN == 'TRUE', 1, 0),
-         EN = if_else(EN == 'TRUE', 1, 0)) 
-
-num_annot <- meta %>% 
-  split(.$abx) %>% 
-  imap_dfr(function(df, name_) {
-    df %>% distinct(pid) %>% nrow
-  }) %>% gather('abx','pt_num') %>% 
-  full_join(meta %>% count(abx) %>% mutate(abx = as.character(abx))) %>% 
-  rename(sample_num = n) %>% 
-  #mutate(antibiotics = if_else(empirical == 'FALSE', 'not exposed', 'exposed')) %>% 
-  mutate(lbl = str_glue('{sample_num} samples\nfrom {pt_num} patients'))
+  # removing the other_antibacterial group
+  filter(!exposure_category %in% c('other_antibacterial')) %>% 
+  mutate(exposure_category = factor(exposure_category, levels = c("no_abx", "fluoroquinolones", "broad_spectrum"))) 
 ```
- 
-```{r}
-mod_original <- log(simpson_reciprocal) ~ 0 +        
-                intensity+
-                abx+
-               fg_fruit:abx+
-                fg_meat:abx+
-                fg_milk:abx+
-                fg_oils:abx+
-                fg_egg:abx+
-                fg_grain:abx+
-                fg_sweets:abx+
-                fg_legume:abx+
-                fg_veggie:abx+
-                TPN+
-                EN+
-               (1 | pid) +
-                (1 | timebin)
-get_prior(mod_original,data = meta )
-```
+## model 
 
 ```{r}
-div_priors_original <- c(# for the food group variables 
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_egg"),
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_fruit"),
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_grain"),
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_legume"),
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_meat"),
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_milk"),
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_oils"),
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_sweets"),
-            prior(normal(0, 1), class = 'b', coef = "abx0_no_abx:fg_veggie"),
-            # interaction terms
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_egg"),
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_fruit"),
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_grain"),
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_legume"),
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_meat"),
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_milk"),
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_oils"),
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_sweets"),
-            prior(normal(0, 1), class = 'b', coef = "abx1_fq_and_other:fg_veggie"),
-                      # interaction terms
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_egg"),
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_fruit"),
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_grain"),
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_legume"),
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_meat"),
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_milk"),
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_oils"),
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_sweets"),
-            prior(normal(0, 1), class = 'b', coef = "abx2_broad:fg_veggie"),
-            # for the TPN
-            prior(normal(0, 0.1), class = 'b', coef = "TPN"),
-            # for the EN
-            prior(normal(0, 0.1), class = 'b', coef = "EN"),
-            # for the empirical
-            prior(normal(0, 0.5), class = 'b', coef = "abx1_fq_and_other"),
-            prior(normal(0, 0.5), class = 'b', coef = "abx2_broad"),
-            # for the intensity
-            prior(normal( 2, .1), class = 'b', coef = "intensityablative"),
-            prior(normal( 2, .1), class = 'b', coef = "intensityreduced"),
-            prior(normal( 2, .1), class = 'b', coef = "intensitynonablative")
-            )
+all_food_vars <- meta %>% select(starts_with('fg')) %>% colnames()
 
-model_div_original <- brm( mod_original,  
-              data = meta, 
-              warmup = 1000, iter = 3000, 
-              prior = div_priors_original,
-              cores = ncores, 
-              chains = 2, 
-               control = list(adapt_delta = 0.99),
-              seed = 123, sample_prior = T)
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "exposure_category", sep = ":")
 
-# save it for future use
-post_res <- suppressWarnings(posterior_samples(model_div_original)) 
-post_res %>%  write_csv('../data/18_model_div_original_three_abx_levels.csv')
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + exposure_category + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
 
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "exposure_categorybroad_spectrum") +
+    prior(normal(0, 0.5), class = 'b', coef = "exposure_categoryfluoroquinolones") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = meta,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
 
 ```
 
+## forest plot
+
 ```{r}
-post_res %>% 
-  select(starts_with('b')) %>% 
-  select(!contains('intensity')) %>% 
-  gather('shortname','coeff') %>% 
-  group_by(shortname) %>% # Group by shortname to calculate medians per group
-  mutate(median_coeff = median(coeff)) %>% # Calculate median for each shortname
-  ungroup() %>% # Important to ungroup after calculating the median
-  mutate(shortname = fct_reorder(shortname, median_coeff)) %>% 
-  group_by(shortname) %>% # Group again to get intervals
+# --- Data Wrangling ---
+# Clean up the term names to make them usable for plotting.
+# This involves separating the food group from the antibiotic category.
+plot_data <- results_df %>%
+  # Filter out the main antibiotic effects for now, we're focusing on diet.
+  filter(str_detect(term, "fg_")) %>%
+  # Separate the 'term' column into two new columns: 'antibiotic_group' and 'food_group'.
+  separate(term, into = c("antibiotic_group", "food_group"), sep = ":fg_") %>%
+  # Clean up the names to be more readable for the plot labels.
   mutate(
-    lower = quantile(coeff, 0.025), # Calculate lower bound of the interval
-    upper = quantile(coeff, 0.975), # Calculate upper bound of the interval
-    significant = ifelse(lower > 0 | upper < 0, "Significant", "Not Significant")
+    antibiotic_group = str_remove(antibiotic_group, "exposure_category") %>%
+                       str_replace("no_abx", "No Antibiotics") %>%
+                       str_replace("fluoroquinolones", "Fluoroquinolones") %>%
+                       str_replace("broad_spectrum", "Broad-spectrum"),
+    
+    # Standardize the food group names to match the desired labels exactly.
+    food_group_clean = case_when(
+        food_group == "sweets" ~ "Sweets",
+        food_group == "grain"  ~ "Grains",
+        food_group == "milk"   ~ "Milk",
+        food_group == "egg"    ~ "Eggs",
+        food_group == "legume" ~ "Legumes",
+        food_group == "meat"   ~ "Meats",
+        food_group == "fruit"  ~ "Fruits",
+        food_group == "oils"   ~ "Oils",
+        food_group == "veggie" ~ "Vegetables",
+        TRUE ~ str_to_title(food_group) # A fallback for any other groups
+    )
   ) %>%
-  ungroup() %>%
-  ggplot() +
-    stat_pointinterval(
-      aes(x = coeff, y = shortname, color = significant), # Color by significance
-      .width = .95,
-      fatten_point = 1.2
-    ) +
-    geom_vline(xintercept = 0, col = 'blue', size = 0.5) +
-    scale_color_manual(values = c("Significant" = "red", "Not Significant" = "black")) + # Set colors
-    labs(x = "Coefficient", y = "Shortname", color = "95% CI") + # Improved labels
-    theme_bw()
-ggsave('../data/18_three_abx.pdf', width = 7)
+  # Set the order of the facets so "No Antibiotics" comes first.
+  mutate(food_group_ordered = factor(food_group_clean, levels = rev(c(
+        "Sweets", "Grains", "Milk", "Eggs", "Legumes", 
+        "Meats", "Fruits", "Oils", "Vegetables"
+    ))),
+    antibiotic_group = factor(antibiotic_group, 
+                                   levels = c("No Antibiotics", "Fluoroquinolones", "Broad-spectrum"))) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) > 0) 
+
+# --- Plotting ---
+# Create the faceted dot-and-whisker plot.
+ggplot(plot_data, aes(x = estimate, y = food_group_ordered)) +
+  # Add the horizontal line for the confidence interval.
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "gray50") +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  # Add a vertical line at zero, which is the "no effect" line.
+   geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+  # This is the key part: create the three separate panels.
+  facet_wrap(~antibiotic_group, ncol = 3) +
+  # Add labels and a title.
+  labs(
+    title = "Sweets Intake is Associated with Lower Microbiome Diversity\nPrimarily During Broad-spectrum Antibiotic Exposure",
+    x = "ln(diversity) Change per 100g Food Intake",
+    y = "Food Group"
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  # Use a clean, publication-ready theme.
+  theme_bw() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = 'none',
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 11)
+  )
+
 ```
+## assemble 
+
 ```{r}
-library(wesanderson) 
+table_tally <- ggdraw() + draw_image("../data/R41_number_tally.png", scale = 1.2)
 
-dat_conditional <- conditional_effects(model_div_original, surface = T)
 
-condi_dat <- dat_conditional %>% 
-  keep(.p = str_detect(names(.), ':')) %>% 
-  bind_rows(.id = 'grp')
+final_plot <- plot_grid( table_tally ,  plot_stratify , 
+                nrow  =2,
+                 rel_heights = c(.9,2),
+                labels = 'auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,6,3,1), "cm"))
+
+ggsave('../data/R41_remove_2_abx_stratification.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)       
 ```
 
-
-```{r}
-key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
-conditional <- condi_dat %>% 
-  mutate(grp = str_replace(grp, '\\:empirical','')) %>% 
-  left_join(key %>% select(grp = fg1_name, shortname)) %>% 
-  mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
-                 'Oils',
-                 'Fruits',
-                 'Meats',
-                 'Legumes',
-                 'Eggs',
-                 'Milk',
-                 'Grains',
-                 'Sweets'))))
-palette <- wes_palette("Royal1", 4)[c(1,2,4)]
-# the color for the strip background
-strip_color <- wes_palette("Royal1", 3)[3]
-
-conditional9 <- conditional %>%   
-  ggplot() +
-  geom_smooth(aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
-              stat = "identity",
-              alpha = .3, linewidth = 1.5)+ 
-  scale_fill_manual('antibiotics', values = palette) +
-  scale_colour_manual('antibiotics', values = palette) +
-  facet_wrap(~ shortname, nrow = 2, scales = 'free_x') +
-  ylim(0, 3.3) +
-  labs(y = 'Predicted log(diversity)', x = 'Food group consumed (grams)') +
-  theme_classic() +
-  theme(legend.position = 'bottom', legend.title = element_text(size = 8, face="bold"),
-        legend.text = element_text( size=8, face="bold"),
-        panel.background = element_rect(fill = "#FAEFD140"),
-        legend.background=element_rect(fill = alpha("white", 0)),
-       legend.key=element_rect(fill = alpha("white", 0)),
-        aspect.ratio = 1/1.5, 
-        strip.background = element_rect(color="white", fill='#ffecdc', size=1.5,linetype="solid"),
-     axis.text=element_text(size=8), axis.title=element_text(size=10))    +
-  guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
-conditional9
-```
-
-## Enterococcus with three levels of abx
+# Enterococcus with three levels of abx
 
 ```{r}
 # clr_res <- read_csv('../data/171_genus_CLR_res.csv')
@@ -349,33 +326,13 @@ conditional9
 #     theme_bw()
 ```
 
-# reclassifiy the sample exposure type using the newly cleaned med data
-
-```{r}
-exposures <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_all_medication_overlapping_with_prior_2_day_of_stool_samples_upated.csv') %>%    group_by(sampleid, sdrt, pid) %>%
-  summarize(
-    exposure_category = case_when(
-      any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",
-      any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
-      any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterial",
-      TRUE ~ "no_abx"  # Default case if neither "apple" nor "orange" is found
-    )
-  ) 
- 
-exposures %>% count(exposure_category!= med_exposure_type)
-
-no_abx_and_fq <- exposures %>% 
-  filter(exposure_category %in% c('fluoroquinolones','no_abx'))
-
-
-```
-
-```{r}
-expodat <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_all_medication_overlapping_with_prior_2_day_of_stool_samples_upated_2.csv') 
-
-```
 
 # no_abx VS FQ
+
+```{r}
+no_abx_and_fq <- exposures %>% 
+  filter(exposure_category %in% c('fluoroquinolones','no_abx'))
+```
 
 ```{r}
 meta <- read_csv('../data/153_combined_META.csv') %>% 
