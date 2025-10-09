@@ -27,7 +27,7 @@ library(geepack)
 # load the cleaned data
 
 ```{r}
-load("../data/df_main_Dec10.Rdata") 
+#load("../data/df_main_Dec10.Rdata") 
 # link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
 # 
 # df_main <- df_main |>
@@ -378,3 +378,75 @@ ggsave('../data/09_clinical_outcome.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
 
+# Sugar density and OS
+
+```{r}
+dtb <- read_csv('../data/152_combined_DTB.csv')
+```
+```{r}
+daily_intake <- dtb %>%
+  # Group by patient ID (pid) and day relative to transplant (fdrt)
+  group_by(pid, fdrt) %>%
+  # Calculate the sum of calories and sugar for each day
+  summarise(
+    total_caloric_intake = sum(Calories_kcal, na.rm = TRUE),
+    sugar_intake_grams = sum(Sugars_g, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# --- Step 2: Calculate Calorie-Adjusted Sugar Intake ---
+# This pipe will now take the aggregated daily data, calculate the average 
+# sugar density (grams per 1000 kcal), and prepare it for the model.
+patient_summary <- daily_intake %>%
+  # Filter for the specified time window of day -7 to day 12
+  filter(fdrt >= -7 & fdrt <= 12) %>%
+
+  # Calculate the daily sugar density (grams of sugar per 1000 kcal)
+  mutate(
+    daily_sugar_density = if_else(total_caloric_intake > 0,
+                                  sugar_intake_grams / (total_caloric_intake / 1000),
+                                  0) # If no calories, density is 0
+  ) %>%
+
+  # Group by patient to create a single summary row for each one
+  group_by(pid) %>%
+  summarise(
+    # Calculate the average of the daily sugar densities over the period
+    avg_sugar_density_per_1000kcal = mean(daily_sugar_density, na.rm = TRUE)
+    # NOTE: You will need to join this back with your antibiotic exposure data
+  ) %>%
+  ungroup() %>% 
+  inner_join(df_main %>% select(pid, OStime_30, OSevent, intensity, source_and_gvhdppx, day_exposed)) %>%
+  mutate(
+    # Create a factor "High" or "Low" based on the median of the cohort
+    SugarCal_cat_high = if_else(avg_sugar_density_per_1000kcal > median(avg_sugar_density_per_1000kcal, na.rm = TRUE),
+                                          "High", "Low"),
+    SugarCal_cat_high = factor(SugarCal_cat_high, levels = c('Low','High'))
+  )
+```
+
+```{r}
+# The '*' operator automatically includes the main effects and the interaction
+coxph(Surv(OStime_30, OSevent) ~ SugarCal_cat_high + day_exposed + 
+                                 source_and_gvhdppx + intensity ,
+      data = patient_summary |> filter(OStime_30 > 0))
+```
+Model 2: With Interaction (the non-significant one)
+Surv ~ SugarCal_cat_high * day_exposed + ...
+
+This model asks much more complex, conditional questions:
+
+"What is the survival difference between high-sugar and low-sugar groups specifically when antibiotic exposure is zero?" (This is the new meaning of the SugarCal_cat_highHigh term).
+
+"What is the effect of antibiotics specifically for the low-sugar group?" (This is the new meaning of the day_exposed term).
+
+"Is the effect of antibiotics different in the high-sugar group compared to the low-sugar group?" (This is the SugarCal_cat_highHigh:day_exposed interaction term).
+
+The Drastic Difference Explained
+Your results changed so dramatically because the interaction term re-defines the main effects.
+
+In the second model, the coefficient for SugarCal_cat_highHigh (p=0.64) is no longer measuring the overall effect of being in the high-sugar group. It's now measuring the effect only for a hypothetical patient who had zero days of antibiotic exposure. In your cohort, it's very likely that almost no one had zero exposure, so this coefficient is trying to estimate an effect in a situation with very little data, which is why it's not significant.
+
+Likewise, the effect of day_exposed (p=0.28) is now the effect only for the low-sugar group.
+
+The crucial term, SugarCal_cat_highHigh:day_exposed, is asking if the two "slopes" (the risk from antibiotics) are different between the sugar groups. With a p-value of 0.33, the model is telling you that it cannot confidently say the effect of antibiotics is statistically different between the two groups.
