@@ -46,8 +46,6 @@ ptb <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/156_combined_PTB_ori
 library(vdbR) 
 connect_database()
 link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
-list_table_from_database('Comorbidity')
-get_table_from_database('comorbidity_index_ag')
 get_table_from_database('patients_msk_comorbidity_index_ag')
 get_table_from_database('current_clinical_pull_through_2024')
 ```
@@ -59,12 +57,6 @@ df_ci <- patients_msk_comorbidity_index_ag %>%
   inner_join(ptb %>% select(mrn, hct)) %>% 
   select(mrn:ci_age_adjusted)
 
-msk_multi <- comorbidity_index_ag %>% 
-  filter(institution == 'MSKCC') %>% 
-  mutate(mrn = as.numeric(patient_id)) %>% 
-  inner_join(ptb %>% select(mrn, hct))
-
-length(intersect(msk_multi$mrn, df_ci$mrn))
 
 found <- current_clinical_pull_through_2024 %>% clean_names() %>% 
   mutate(mrn = as.numeric(mrn)) %>% 
@@ -111,32 +103,10 @@ cleaned_ci_data <- found %>%
   ) %>%
   select(-age) %>% 
   inner_join(ptb %>% select(mrn, age)) %>% 
-  # Part 2: Add the Age-Adjusted Column.
-  # This calculates the age-adjusted score based on the cleaned CI value.
   mutate(
     # First, ensure both the cleaned CI and age columns are numeric for calculations.
-    ci_cleaned_numeric = as.numeric(ci_cleaned),
-    age = as.numeric(age),
-
-    # Now, create the age-adjusted score using a case_when() statement.
-    Age_adjusted_CI = case_when(
-      # If either the cleaned score or age is NA, the result is NA.
-      is.na(ci_cleaned_numeric) | is.na(age) ~ NA_real_,
-
-      # Add 3 points for patients aged 60 or older.
-      age >= 60 ~ ci_cleaned_numeric + 3,
-      
-      # Add 2 points for patients aged 50-59.
-      age >= 50 ~ ci_cleaned_numeric + 2,
-      
-      # Add 1 point for patients aged 40-49.
-      age >= 40 ~ ci_cleaned_numeric + 1,
-      
-      # For patients under 40, the score is not adjusted (it's the same as the cleaned score).
-      TRUE ~ ci_cleaned_numeric
-    )
-  ) %>% 
-  relocate(Age_adjusted_CI, .after = 'ci_cleaned_numeric')
+    ci_cleaned_numeric = as.numeric(ci_cleaned)
+  ) 
 
 cleaned_ci_data %>% write_csv('../data/R43_cleaned_ci_data_diet.csv')
 ```
@@ -146,8 +116,8 @@ cleaned_ci_data %>% write_csv('../data/R43_cleaned_ci_data_diet.csv')
 ```{r}
 # the meta table should remove the few patients that we don't have CI data 
 meta_CI <- meta %>%
-  left_join(cleaned_ci_data %>% select(pid, ci_cleaned, age, ci_cleaned_numeric, Age_adjusted_CI)) %>% 
-  filter(!is.na(Age_adjusted_CI))
+  left_join(cleaned_ci_data %>% select(pid, ci_cleaned_numeric)) %>% 
+  filter(!is.na(ci_cleaned_numeric))
 
 # how many samples from how many patients are removed 
 rm_pt_num <- cleaned_ci_data %>% filter(is.na(ci_cleaned_numeric)) 
@@ -166,7 +136,7 @@ interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
 
 # Build the full formula string dynamically
 formula_string <- paste(
-  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN + Age_adjusted_CI +",
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN + ci_cleaned_numeric +",
   paste(interaction_terms, collapse = " + "),
   "+ (1 | pid) + (1 | timebin)"
 )
@@ -212,7 +182,7 @@ key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
 replacement_dictionary <- setNames(key$shortname, key$fg1_name)
 
 level_order <- rev(c(
-    "abx", "EN", "TPN", "Age adjusted CI",
+    "abx", "EN", "TPN", "ci cleaned numeric",
     "abx * Sweets", "Sweets",
     "abx * Grains", "Grains",
     "abx * Milk", "Milk",
@@ -274,7 +244,7 @@ plot_CI <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
   labs(
     x = "ln(diversity) change",
     title = "Predictor effects on diversity",
-    subtitle = "Sensitivity Analysis:\nControl for baseline health status\nby including the age-adjusted\ncomorbidity index",
+    subtitle = "Sensitivity Analysis:\nControl for baseline health status\nby including the comorbidity index",
     y = ''
   ) +
   theme_classic(base_size = 11) +
@@ -403,22 +373,19 @@ association_gt_table <- pairwise_associations %>%
 
 ```{r}
 df_pt_stool_grouped <- df_pt_stool %>% 
-  # Create a new column 'disease_lineage' based on the 'disease_simple' column.
   mutate(
     disease_lineage = case_when(
-      # If the disease is in this list, classify it as 'Myeloid'.
       disease_simple %in% c("AML", "MDS/MPN", "CML") ~ "Myeloid",
-      
-      # If it's in this list, classify it as 'Lymphoid'.
       disease_simple %in% c("NHL", "ALL", "Myeloma", "CLL", "Hodgkins") ~ "Lymphoid",
-      
-      # For any other disease (like 'AA' or 'other'), assign NA.
       TRUE ~ NA_character_
     )
   ) %>%
   # Remove the rows where 'disease_lineage' is NA.
-  # This cleanly excludes the patients you don't want in this specific analysis.
   filter(!is.na(disease_lineage))
+
+df_pt_stool_grouped %>% count(disease_lineage, intensity)
+
+
 ```
 
 ```{r}
