@@ -1,0 +1,369 @@
+---
+title: "Enterococcus -- stratify by abx class"
+output: html_document
+date: "2025-10-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(cowplot)
+library(broom.mixed)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(brmstools)
+library(bayesplot)
+library(gt)
+library(rcompanion)
+library(janitor)
+library(ggtext)
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+```
+
+Was the increased Enterococcus abundance also stratified by antibiotic class?
+
+# stratify fecal sample exposure by abx class like below:
+
+anaerobic-targeting broad-spectrum: piperacillin-tazobactam, carbapenems, metronidazole, linezolid, and oral vancomycin
+anaerobic-sparing broad-spectrum: cefepime
+
+```{r}
+# It's good practice to define these lists separately to make the code cleaner
+# and easier to update later.
+anaerobic_targeting <- c(
+  "piperacillin_tazobactam",
+  "meropenem", 
+  "metronidazole",
+  "linezolid"
+)
+
+anaerobic_sparing <- c("cefepime")
+
+exposures <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/191_all_medication_overlapping_with_prior_2_day_of_stool_samples_upated_2.csv') %>%
+  # Now, create the new classification column using conditional logic.
+  mutate(
+    broad_spectrum_subtype = case_when(
+      
+      # Rule 1: Handle the anaerobic-targeting drugs by name.
+      drug_name_clean %in% anaerobic_targeting ~ "anaerobic_targeting",
+      
+      # Rule 2: Handle the special case for oral vancomycin.
+      drug_name_clean == "vancomycin" & route_clean == "oral" ~ "anaerobic_targeting",
+      
+      # Rule 3: Handle the anaerobic-sparing drugs.
+      drug_name_clean %in% anaerobic_sparing ~ "anaerobic_sparing",
+      
+      # For any other drug that doesn't match the rules above,
+      # it will be assigned NA (Not Available).
+      TRUE ~ 'non_broad_spectrum'
+    )
+  )
+
+# take a look at the broad spectrum exposure : drug name and the route
+broad <- exposures %>% 
+  filter(drug_category_for_this_study == 'broad_spectrum') %>% distinct(drug_name_clean, route_clean)
+```
+```{r}
+# Now group_by(sampleid, sdrt, pid)  and if there is any anaerobic-targeting exposure then consider it anaerobic-targeting, otherwise if any  anaerobic-sparing, then consider the stool sample exposed to anaerobic-sparing, otherwise non-broad_spectrum
+sample_summary <- exposures %>%
+  group_by(sampleid, sdrt, pid) %>%
+  summarise(
+    # This logic establishes a hierarchy for classification.
+    # If any drug in the group is anaerobic-targeting, the whole sample is classified as such.
+    # Otherwise, if any is anaerobic-sparing, it's classified that way.
+    # If neither, it's considered non-broad spectrum.
+    exposure_class_category = case_when(
+      any(broad_spectrum_subtype == "anaerobic_targeting") ~ "anaerobic_targeting",
+      any(broad_spectrum_subtype == "anaerobic_sparing") ~ "anaerobic_sparing",
+      TRUE ~ "non_broad_spectrum"
+    ),
+    .groups = 'drop' # It's good practice to drop the grouping after summarizing.
+  )
+```
+
+## tally the exposure numbers to different class 
+
+```{r}
+# Calculate the total number of unique patients and samples for percentages.
+total_samples <- nrow(sample_summary)
+total_patients <- n_distinct(sample_summary$pid)
+
+# First, create the summary data, including clean labels for the final table.
+summary_data <- sample_summary %>%
+  group_by(exposure_class_category) %>%
+  summarise(
+    n_samples = n(),
+    n_patients = n_distinct(pid),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    percent_samples = (n_samples / total_samples) * 100,
+    percent_patients = (n_patients / total_patients) * 100,
+    # Create the clean, descriptive labels for the final table rows.
+    exposure_category_label = recode(exposure_class_category,
+                                    "anaerobic_targeting" = "Anaerobic-targeting",
+                                    "anaerobic_sparing" = "Anaerobic-sparing",
+                                    "non_broad_spectrum" = "Non-broad-spectrum")
+  )
+
+# Next, create the final table structure with the 'Total' row.
+summary_table_for_gt <- summary_data %>%
+  # Arrange the data in the desired order before adding the total row.
+  arrange(factor(exposure_class_category, levels = c("non_broad_spectrum", "anaerobic_sparing", "anaerobic_targeting"))) %>%
+  # Add the final 'Total' row.
+  bind_rows(
+    summarise(
+      .,
+      # Summing n_samples is correct.
+      n_samples = sum(n_samples),
+      # For patients, we use the pre-calculated total of *unique* patients.
+      n_patients = total_patients,
+      # Percentages for the total row should be 100.
+      percent_samples = 100,
+      percent_patients = 100,
+      # Add the label for the total row.
+      exposure_category_label = "Total"
+    )
+  ) %>%
+  # Select and reorder the final columns for the table.
+  select(exposure_category_label, n_samples, percent_samples, n_patients, percent_patients)
+
+
+# --- Create the Publication-Ready Table with gt ---
+gt_table <- summary_table_for_gt %>%
+  # Initialize the gt object, using the label column for row names.
+  gt(rowname_col = "exposure_category_label") %>%
+  
+  # Add a main title for the table.
+  tab_header(
+    title = 'Cohort Antibiotic Class Exposure Summary'
+  ) %>%
+  
+  # Create spanner headings to group related columns together.
+  tab_spanner(
+    label = md("**Samples**"),
+    columns = c(n_samples, percent_samples)
+  ) %>%
+  tab_spanner(
+    label = md("**Patients**"),
+    columns = c(n_patients, percent_patients)
+  ) %>%
+  
+  # Customize the final column labels.
+  cols_label(
+    n_samples = "N",
+    percent_samples = "%",
+    n_patients = "N",
+    percent_patients = "%"
+  ) %>%
+  
+  # Format the large count numbers to use comma separators.
+  fmt_number(
+    columns = c(n_samples, n_patients),
+    decimals = 0
+  ) %>%
+  
+  # Format the percentage columns to one decimal place.
+  fmt_number(
+    columns = c(percent_samples, percent_patients),
+    decimals = 1
+  ) %>%
+  
+  # Center align the content of all numeric columns.
+  cols_align(
+    align = "center",
+    columns = where(is.numeric)
+  ) %>%
+  
+  # Add a separator line and bold text to the 'Total' row for emphasis.
+  tab_style(
+    style = list(
+      cell_borders(sides = "top", color = "black", weight = px(2)),
+      cell_text(weight = "bold")
+    ),
+    locations = cells_body(rows = exposure_category_label == "Total")
+  ) %>%
+  # Add some final styling options for a polished look.
+  opt_table_font(font = "sans-serif") %>%
+  opt_table_outline() %>% 
+  gt::gtsave(filename = "../data/R46_number_tally_abx_exposure_class.png") 
+```
+
+# ASV1 model 
+
+```{r}
+clr_res <- read_csv('../data/R29_all_ASV_CLR_counts.csv')
+
+clr_wide <- clr_res %>% 
+   select(sampleid, asv_1) %>% rename(asv_1_CLR = asv_1)
+
+meta_ASV1 <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100)) %>% 
+  inner_join(sample_summary) %>% 
+  mutate(exposure_class_category = factor(exposure_class_category, levels = c("non_broad_spectrum", "anaerobic_sparing", "anaerobic_targeting"))) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  inner_join(clr_wide)
+```
+
+## model 
+
+```{r}
+all_food_vars <- meta_ASV1 %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "exposure_class_category", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "asv_1_CLR ~ 0 + intensity + exposure_class_category + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "exposure_class_categoryanaerobic_sparing") +
+    prior(normal(0, 0.5), class = 'b', coef = "exposure_class_categoryanaerobic_targeting") 
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = meta_ASV1,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
+
+```
+
+## forest plot
+
+```{r}
+# --- Data Wrangling ---
+# Clean up the term names to make them usable for plotting.
+# This involves separating the food group from the antibiotic category.
+plot_data <- results_df %>%
+  # Filter out the main antibiotic effects for now, we're focusing on diet.
+  filter(str_detect(term, "fg_")) %>%
+  # Separate the 'term' column into two new columns: 'antibiotic_group' and 'food_group'.
+  separate(term, into = c("antibiotic_group", "food_group"), sep = ":fg_") %>%
+  # Clean up the names to be more readable for the plot labels.
+  mutate(
+    antibiotic_group = str_remove(antibiotic_group, "exposure_class_category") %>%
+                       str_replace("non_broad_spectrum", "Non-broad-spectrum") %>%
+                       str_replace("anaerobic_targeting", "Anaerobic-targeting") %>%
+                       str_replace("anaerobic_sparing", "Anaerobic-sparing"),
+    
+    # Standardize the food group names to match the desired labels exactly.
+    food_group_clean = case_when(
+        food_group == "sweets" ~ "Sweets",
+        food_group == "grain"  ~ "Grains",
+        food_group == "milk"   ~ "Milk",
+        food_group == "egg"    ~ "Eggs",
+        food_group == "legume" ~ "Legumes",
+        food_group == "meat"   ~ "Meats",
+        food_group == "fruit"  ~ "Fruits",
+        food_group == "oils"   ~ "Oils",
+        food_group == "veggie" ~ "Vegetables",
+        TRUE ~ str_to_title(food_group) # A fallback for any other groups
+    )
+  ) %>%
+  # Set the order of the facets so "No Antibiotics" comes first.
+  mutate(food_group_ordered = factor(food_group_clean, levels = rev(c(
+        "Sweets", "Grains", "Milk", "Eggs", "Legumes", 
+        "Meats", "Fruits", "Oils", "Vegetables"
+    ))),
+    antibiotic_group = factor(antibiotic_group, 
+                                   levels = c("Non-broad-spectrum", "Anaerobic-sparing", "Anaerobic-targeting"))) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) > 0) 
+
+# --- Plotting ---
+# Create the faceted dot-and-whisker plot.
+plot_stratify_abx_class <- ggplot(plot_data, aes(x = estimate, y = food_group_ordered)) +
+  # Add the horizontal line for the confidence interval.
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "gray50") +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  # Add a vertical line at zero, which is the "no effect" line.
+   geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+  # This is the key part: create the three separate panels.
+  facet_wrap(~antibiotic_group, ncol = 3) +
+  # Add labels and a title.
+  labs(
+    title = "Diet Predictor effects on ASV 1 (E. faecium),\nstratifying samples by exposure to different antibiotcs class",
+    x = "CLR(ASV 1) Change per 100g Food Intake",
+    y = "Food Group"
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  # Use a clean, publication-ready theme.
+  theme_bw() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = 'none',
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 11)
+  )
+
+plot_stratify_abx_class
+```
+
+# assemble 
+
+```{r}
+table_tally <- ggdraw() + draw_image("../data/R46_number_tally_abx_exposure_class.png", scale = 1)
+
+final_plot <- plot_grid( table_tally ,  plot_stratify_abx_class , 
+                nrow  = 2,
+                 rel_heights = c(1.6,2),
+                labels = 'auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R46_abx_three_levels_class_stratification.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)        
+```
