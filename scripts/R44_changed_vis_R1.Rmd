@@ -29,11 +29,9 @@ intensity_break <- meta %>%
   # Add a count for each group for plotting
   add_count(intensity, name = "n_samples") %>% 
   ggplot(aes(x = intensity, y = log(simpson_reciprocal))) +
-  # A narrow boxplot is overlaid to show key summary statistics (median, quartiles).
-  # The outline is now red and thicker to make it more prominent.
-  geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1.7, outlier.shape = NA, alpha = 0.7) +
-  # geom_jitter adds the raw points. geom_quasirandom is often tidier.
   geom_quasirandom(alpha = points_alpha, width = 0.2) +
+  geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1, outlier.shape = NA, alpha = 0.7) +
+  
   geom_text(
     aes(label = paste("n =", n_samples), y = -0.5), # Adjust y-position as needed
     stat = "unique", size = 3.5
@@ -50,51 +48,68 @@ intensity_break <- meta %>%
 intensity_break
 ```
 
-# "Abx, No Sweets", "No Abx, Sweets",  "Abx, No Sweets", "Abx, Sweets"
+# break down by abx and sweets 
+
+## break by median sweets   
 
 ```{r}
-# First, create the four categories and get sample sizes
+library(viridis)
+# First, calculate the median sweets intake ONLY for samples where sweets were consumed.
+# This avoids the median being skewed by all the zeros.
+median_sweets_intake <- meta %>%
+  filter(fg_sweets > 0) %>%
+  summarize(median_val = median(fg_sweets, na.rm = TRUE)) %>%
+  pull(median_val)
+
+# Now, create the six distinct exposure groups.
 plot_data <- meta %>%
   mutate(
-    # Create a simple binary for sweets consumption
-    sweets_exposure = fg_sweets > 0,
-    # Create the four-level group factor using case_when
+    # The case_when statement defines the logic for each of the six groups.
     exposure_group = case_when(
-      !empirical & !sweets_exposure ~ "No Abx, No Sweets",
-      !empirical &  sweets_exposure ~ "No Abx, Sweets",
-       empirical & !sweets_exposure ~ "Abx, No Sweets",
-       empirical &  sweets_exposure ~ "Abx, Sweets"
+      !empirical & fg_sweets == 0 ~ "No Abx, No Sweets",
+      empirical & fg_sweets == 0 ~ "Abx, No Sweets",
+      !empirical & fg_sweets > 0 & fg_sweets <= median_sweets_intake ~ "No Abx, Low Sweets",
+      !empirical & fg_sweets > median_sweets_intake ~ "No Abx, High Sweets",
+      empirical & fg_sweets > 0 & fg_sweets <= median_sweets_intake ~ "Abx, Low Sweets",
+      empirical & fg_sweets > median_sweets_intake ~ "Abx, High Sweets"
     )
   ) %>%
-  # Reorder factors for the plot
-  mutate(exposure_group = factor(exposure_group, levels = c(
-    "No Abx, No Sweets", "No Abx, Sweets",
-    "Abx, No Sweets", "Abx, Sweets"
-  ))) %>%
-  # Add a count for each group for plotting
-  add_count(exposure_group, name = "n_samples")
+  # Filter out any potential NA groups if they exist
+  filter(!is.na(exposure_group)) %>%
+  # Add sample sizes to the labels for clarity on the plot.
+  add_count(exposure_group, name = "n_samples") %>%
+  # Convert to a factor to control the plotting order.
+  mutate(exposure_group = factor(exposure_group, levels = rev(c(
+    "No Abx, No Sweets", "No Abx, Low Sweets", "No Abx, High Sweets",
+    "Abx, No Sweets", "Abx, Low Sweets", "Abx, High Sweets"
+  ))))
 
-# Now, create the plot
+# --- Plot Generation ---
 g4_break_abx <- ggplot(plot_data, aes(x = exposure_group, y = log(simpson_reciprocal))) +
-  geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1.7, outlier.shape = NA, alpha = 0.7) +
   geom_quasirandom(alpha = points_alpha, width = 0.25) +
-  # Add the sample size labels
+  geom_boxplot(width = 0.1, fill = "white", color = "red", linewidth = 1, outlier.shape = NA, alpha = 0.7) +
+ 
+  coord_flip() +
+
+  # Use a color palette suitable for categorical data and remove the legend.
+   # Add the sample size labels
   geom_text(
     aes(label = paste("n =", n_samples), y = -0.5), # Adjust y-position as needed
     stat = "unique", size = 3.5
   ) +
-  coord_flip() +
-  labs(
-    title = bquote("Unadjusted "~alpha*"-Diversity by Broad-Spectrum Antibiotic and Sweets Exposure"),
-    x = "Exposure Group\n(in 2 days prior to sample)",
-    y = "log(Inverse Simpson Diversity)"
-  ) +
-  theme_minimal() +
-  theme(axis.text.x = element_text( hjust = 1)) # Angle labels if they overlap
 
-g4_break_abx
+  # Update the labels and title to reflect the new breakdown.
+  labs(
+    title = bquote("Unadjusted "~alpha*"-Diversity by Antibiotics and Sweets Intake"),
+    subtitle = "Sweets consumption is stratified by the median intake of consumers",
+    x = "Exposure Group\n(in 2 days prior to sample)",
+    y = "Log(Inverse Simpson Diversity)"
+  ) +
+  theme_minimal()
 
 ```
+
+
 # break down TPN and sweets, need to exclude the EN exposed samples since that is considered to be sweets 
 
 ```{r}
@@ -125,8 +140,9 @@ plot_tpn <- meta %>%
 
 # --- Plot Generation ---
 tpn_break <- ggplot(plot_tpn, aes(x = exposure_group, y = log(simpson_reciprocal))) +
-  geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1.7, outlier.shape = NA, alpha = 0.7) +
   geom_quasirandom(alpha = points_alpha, width = 0.25) +
+  geom_boxplot(width = 0.15, fill = "white", color = "red", linewidth = 1, outlier.shape = NA, alpha = 0.7) +
+  
   # Add the sample size labels
   geom_text(
     aes(label = paste("n =", n_samples), y = -0.5), # Adjust y-position as needed
@@ -151,7 +167,7 @@ tpn_break
 ```{r}
 final_plot <- plot_grid(intensity_break, g4_break_abx , tpn_break,
                 ncol  = 1,
-                #rel_heights = c(.6,1),
+                rel_heights = c(1,1.7, 1),
                 labels ='auto',
                 align = 'vh', axis = 'lrtb')
 

@@ -182,7 +182,7 @@ key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
 replacement_dictionary <- setNames(key$shortname, key$fg1_name)
 
 level_order <- rev(c(
-    "abx", "EN", "TPN", "ci cleaned numeric",
+    "abx", "EN", "TPN", "Comorbidity index",
     "abx * Sweets", "Sweets",
     "abx * Grains", "Grains",
     "abx * Milk", "Milk",
@@ -206,7 +206,8 @@ cleaned_effects <- results_df %>%
       str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
       str_replace_all( replacement_dictionary) %>%
       str_replace("empiricalTRUE:", "abx * ") %>%
-      str_replace_all("_", " ")
+      str_replace_all("_", " ") %>% 
+      str_replace("ci cleaned numeric", "Comorbidity index")
   ) %>%
   filter(!str_detect(clean_term, 'intensity')) %>%
   # Create a new column to identify significant results
@@ -520,7 +521,7 @@ plot_disease <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
   labs(
     x = "ln(diversity) change",
     title = "Predictor effects on diversity",
-    subtitle = "Sensitivity Analysis:\nControl for disease lineage\n- Myeloid or Lymphoid\n",
+    subtitle = "Sensitivity Analysis:\nControl for disease lineage\n- Myeloid or Lymphoid",
     y = ''
   ) +
   theme_classic(base_size = 11) +
