@@ -410,13 +410,15 @@ patient_summary <- daily_intake %>%
   # Group by patient to create a single summary row for each one
   group_by(pid) %>%
   summarise(
+    # also summarize the absolute gram weight intake
+    avg_sugar_daily_intake_gram = mean(sugar_intake_grams, na.rm = TRUE),
     # This is your diet COMPOSITION variable
     avg_sugar_density_per_1000kcal = mean(daily_sugar_density, na.rm = TRUE),
     # This is your diet QUANTITY variable
     avg_total_caloric_intake = mean(total_caloric_intake, na.rm = TRUE)
   ) %>%
   ungroup() %>% 
-  inner_join(df_main %>% select(pid, OStime_30, OSevent, intensity, source_and_gvhdppx, day_exposed)) %>%
+  inner_join(df_main %>% select(pid, OStime_30, OSevent, intensity, source_and_gvhdppx, day_exposed, source, gvhd_ppx)) %>%
   mutate(
     # Create a factor "High" or "Low" based on the median of the cohort
     SugarCal_cat_high = if_else(avg_sugar_density_per_1000kcal > median(avg_sugar_density_per_1000kcal, na.rm = TRUE),
@@ -425,12 +427,51 @@ patient_summary <- daily_intake %>%
   )
 ```
 
+## two scatter correlation
+
 ```{r}
-# The '*' operator automatically includes the main effects and the interaction
-coxph(Surv(OStime_30, OSevent) ~ SugarCal_cat_high + day_exposed + avg_total_caloric_intake +
-                                 source_and_gvhdppx + intensity ,
-      data = patient_summary |> filter(OStime_30 > 0))
+# --- Plot 1: Raw Sugar Intake vs. Total Calories ---
+# This plot shows the relationship between the total amount of food eaten
+# and the absolute amount of sugar consumed. We expect a strong positive correlation,
+# as people who eat more food in general will also eat more sugar.
+plot_raw_sugar <- ggplot(patient_summary, aes(x = avg_total_caloric_intake / 1000, y = avg_sugar_daily_intake_gram)) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred") +
+  # This function from ggpubr calculates and adds the Pearson correlation coefficient
+  stat_cor(method = "spearman", label.x = 1, label.y = 170, p.accuracy = 0.001) +
+  labs(
+    title = "Raw Sugar Intake vs. Total Calories",
+    x = "Average Daily Caloric Intake (in 1000s kcal)",
+    y = "Average Daily Raw Sugar Intake (grams)"
+  ) +
+  theme_minimal()
+
+# --- Plot 2: Calorie-Adjusted Sugar vs. Total Calories ---
+# This plot checks if our calorie-adjustment worked. After normalizing sugar
+# intake to a standard energy unit (grams per 1000 kcal), there should be
+# little to no correlation with total calories. This confirms we have
+# successfully removed total intake as a confounder.
+plot_adjusted_sugar <- ggplot(patient_summary, aes(x = avg_total_caloric_intake / 1000, y = avg_sugar_density_per_1000kcal)) +
+  geom_point(alpha = 0.6, color = "green4") +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred") +
+  # Calculate and add the Pearson correlation for this plot
+  stat_cor(method = "spearman", label.x = 1, label.y = 170, p.accuracy = 0.001) +
+  labs(
+    title = "Calorie-Adjusted Sugar vs. Total Calories",
+    x = "Average Daily Caloric Intake (in 1000s kcal)",
+    y = "Average Sugar Density (grams per 1000 kcal)"
+  ) +
+  theme_minimal()
+
+
+# --- Arrange and display both plots side-by-side ---
+# This makes it easy to compare the two relationships directly.
+ggarrange(plot_raw_sugar, plot_adjusted_sugar, ncol = 2)
+
 ```
+
+## multivariate model 
+
 Model 2: With Interaction (the non-significant one)
 Surv ~ SugarCal_cat_high * day_exposed + ...
 
@@ -450,3 +491,165 @@ In the second model, the coefficient for SugarCal_cat_highHigh (p=0.64) is no lo
 Likewise, the effect of day_exposed (p=0.28) is now the effect only for the low-sugar group.
 
 The crucial term, SugarCal_cat_highHigh:day_exposed, is asking if the two "slopes" (the risk from antibiotics) are different between the sugar groups. With a p-value of 0.33, the model is telling you that it cannot confidently say the effect of antibiotics is statistically different between the two groups.
+
+
+```{r}
+fit <- coxph(Surv(OStime_30,OSevent)~ SugarCal_cat_high * day_exposed + source_and_gvhdppx + intensity ,
+             data=patient_summary |> filter(OStime_30 > 0))
+
+diff <- sum(coef(fit)[c(2,8)])  ### This is the hazard ratio
+
+p <- aod::wald.test(Sigma=vcov(fit)[c(2,8),c(2,8)],
+                    b=coef(fit)[c(2,8)],
+                    L=t(c(1,1)))
+
+se <- sqrt((vcov(fit)[2,2] + vcov(fit)[8,8] + 2*vcov(fit)[2,8]))
+
+```
+
+## model table output
+
+```{r}
+publication_table <- tbl_regression(
+  fit,
+  exponentiate = FALSE, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
+  # The 'label' argument maps variable names to publication-ready labels.
+  # The formula structure is list(variable_name ~ "Desired Label")
+  label = list(
+    SugarCal_cat_high ~ "Calorie-Adjusted Sugar Intake",
+    day_exposed ~ "Abx exposure(days)",
+    source_and_gvhdppx ~ "Graft source and GvHD prophylaxis",
+    intensity ~ "Conditioning intensity"
+    # Note: The interaction term label is automatically created from the main variable labels.
+  )
+  ) %>%
+  # Improve the table's appearance and clarity
+  bold_p(t = 0.05) %>% # Make p-values < 0.05 bold
+  bold_labels() %>%
+  # Add a clear title and a source note for context
+  as_gt() %>% # Convert to a gt object for better customization
+  gt::tab_header(
+    title = "Multivariable Cox Model for Overall Survival"
+  ) 
+# --- Step 3: Display the Table ---
+# In RStudio or a Quarto/RMarkdown document, this will render a beautiful HTML table.
+publication_table %>% 
+  gt::gtsave(filename = "../data/R09_sugar_density_model_multivariate_output.png") 
+```
+
+```{r}
+res <- data.frame(Variable=c("Days of abx exposure | low sugar grams/1000Kcal",
+                             "Days of abx exposure | high sugar grams/1000Kcal"),
+                  log.estimate = c(coef(fit)[2],diff),
+                  log.conf.low = c(coef(fit)[2] - 1.96*sqrt(vcov(fit)[2,2]),
+                                   diff - 1.96*se),
+                  log.conf.high = c(coef(fit)[2] + 1.96*sqrt(vcov(fit)[2,2]),
+                                    diff + 1.96*se),
+                  estimate = exp(c(coef(fit)[2],diff)),
+                  conf.low = exp(c(coef(fit)[2] - 1.96*sqrt(vcov(fit)[2,2]),
+                                   diff - 1.96*se)),
+                  conf.high = exp(c(coef(fit)[2] + 1.96*sqrt(vcov(fit)[2,2]),
+                                    diff + 1.96*se)),
+                  p.value = c(0.3,
+                              p$result$chi2[3]))
+
+# wrangle results into pre-plotting table form
+res_plot <- res |>
+  # round estimates and 95% CIs to 2 decimal places for journal specifications
+  mutate(across(
+    c(estimate, conf.low, conf.high),
+    ~ str_pad(
+      round(.x, 2),
+      width = 4,
+      pad = "0",
+      side = "right"
+    )
+  ),
+  # add an "-" between HR estimate confidence intervals
+  estimate_lab = paste0(estimate, " (", conf.low, "-", conf.high, ")")) |>
+  # round p-values to two decimal places, except in cases where p < .001
+  mutate(p.value = case_when(
+    p.value < .001 ~ "<0.001",
+    round(p.value, 2) == .05 ~ as.character(round(p.value,3)),
+    p.value < .01 ~ str_pad( # if less than .01, go one more decimal place
+      as.character(round(p.value, 3)),
+      width = 4,
+      pad = "0",
+      side = "right"
+    ),
+    TRUE ~ str_pad( # otherwise just round to 2 decimal places and pad string so that .2 reads as 0.20
+      as.character(round(p.value, 2)),
+      width = 4,
+      pad = "0",
+      side = "right"
+    )
+  )) |>
+  # add a row of data that are actually column names which will be shown on the plot in the next step
+  bind_rows(
+    data.frame(
+      Variable = "Variable",
+      estimate_lab = "Hazard Ratio (95% CI)",
+      conf.low = "",
+      conf.high = "",
+      p.value = "p-value"
+    )
+  ) |>
+  mutate(Variable = fct_rev(fct_relevel(Variable, "Variable")))
+
+glimpse(res_plot)
+
+p_mid <- 
+  res |>
+  ggplot(aes(y = fct_rev(Variable))) + 
+  theme_classic()+
+  geom_point(aes(x=log.estimate), shape=15, size=3) +
+  geom_linerange(aes(xmin=log.conf.low, xmax=log.conf.high)) +
+  geom_vline(xintercept = 0, linetype="dashed") +
+  labs(x="Log Hazard Ratio", y="") +
+  coord_cartesian(ylim=c(1,3), xlim=c(-.1, .2)) +
+  annotate("text", x = -.1, y = 3, label = "Lower risk",hjust=0) +
+  annotate("text", x = .1, y = 3, label = "Higher risk") + 
+  theme(axis.line.y = element_blank(),
+        axis.ticks.y= element_blank(),
+        axis.text.y= element_blank(),
+        axis.title.y= element_blank())
+p_mid
+
+
+p_left <-
+  res_plot  |>
+  ggplot(aes(y = Variable)) +
+  geom_text(aes(x = 0, label = Variable), hjust = 0, fontface = "bold") +
+  geom_text(
+    aes(x = 2, label = estimate_lab),
+    hjust = 0,
+    fontface = ifelse(res_plot$estimate_lab == "Hazard Ratio (95% CI)", "bold", "plain")
+  )+
+  theme_void() +
+  coord_cartesian(xlim = c(0, 4))
+
+p_left
+
+# right side of plot - pvalues
+p_right <-
+  res_plot  |>
+  ggplot() +
+  geom_text(
+    aes(x = 0, y = Variable, label = p.value),
+    hjust = 0,
+    fontface = ifelse(res_plot$p.value == "p-value", "bold", "plain")
+  ) +
+  theme_void() 
+
+p_right
+
+library(patchwork)
+layout <- c(
+  area(t = 0, l = 0, b = 30, r = 9), # left plot, starts at the top of the page (0) and goes 30 units down and 3 units to the right
+  area(t = 1, l = 8, b = 30, r = 11), # middle plot starts a little lower (t=1) because there's no title. starts 1 unit right of the left plot (l=4, whereas left plot is r=3), goes to the bottom of the page (30 units), and 6 units further over from the left plot (r=9 whereas left plot is r=3)
+  area(t = 0, l = 11, b = 30, r = 15) # right most plot starts at top of page, begins where middle plot ends (l=9, and middle plot is r=9), goes to bottom of page (b=30), and extends two units wide (r=11)
+)
+# final plot arrangement
+p_left + p_mid + p_right + plot_layout(design = layout)
+```
+
