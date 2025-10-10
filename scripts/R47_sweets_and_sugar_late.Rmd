@@ -1,0 +1,143 @@
+---
+title: "Sweets and sugar late days"
+output: html_document
+date: "2025-10-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+```
+
+```{r}
+dtb <- read_csv('../data/152_combined_DTB.csv') %>% select(pid, fdrt, Meal, Food_code, Sugars_g, dehydrated_weight) %>%
+  mutate(Food_code = as.character(Food_code))
+```
+
+```{r}
+# Create a comprehensive list of all days where any food was consumed by a patient.
+# This is crucial for correctly plotting 'zero intake' on days without sweets.
+all_patient_days_with_intake <- dtb %>%
+  filter(dehydrated_weight > 0) %>%
+  distinct(pid, fdrt)
+
+# Filter for the "Sugars, Sweets, and Beverages" food group.
+# Based on FNDDS classification, this group corresponds to food codes starting with '9'.
+sweets_df <- dtb %>%
+  filter(str_starts(Food_code, "9")) %>%
+  # Identify meals that are part of enteral nutrition.
+  mutate(is_enteral = str_detect(Meal, regex("Enteral nutrition", ignore_case = TRUE)))
+
+# Aggregate the sweets data by patient and day to get daily totals.
+daily_sweets_intake <- sweets_df %>%
+  group_by(pid, fdrt) %>%
+  summarise(
+    total_sweets_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+    total_sugars_g = sum(Sugars_g, na.rm = TRUE),
+    had_enteral = any(is_enteral),
+    .groups = 'drop'
+  )
+
+# Join the aggregated sweets data back to the full list of patient-days.
+# This step ensures that days where a patient ate food but had no items from
+# the "Sweets" group are included with an intake of 0.
+daily_intake_final <- all_patient_days_with_intake %>%
+  left_join(daily_sweets_intake, by = c("pid", "fdrt")) %>%
+  # Replace NA values with 0 for weight and FALSE for the enteral flag.
+  mutate(
+    total_sweets_dehydrated_weight = replace_na(total_sweets_dehydrated_weight, 0),
+    total_sugars_g = replace_na(total_sugars_g, 0),
+    had_enteral = replace_na(had_enteral, FALSE),
+    had_enteral = factor(had_enteral,
+                           levels = c(FALSE, TRUE),
+                           labels = c("Oral Intake", "Enteral Nutrition"))
+  )
+```
+
+
+```{r}
+# --- Plot Generation ---
+# Manually find the maximum value across both metrics to set a shared y-axis limit.
+max_y_value <- max(
+  daily_intake_final$total_sweets_dehydrated_weight,
+  daily_intake_final$total_sugars_g,
+  na.rm = TRUE
+)
+
+# Create the scatter plot using ggplot2.
+sweets_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sweets_dehydrated_weight, color = had_enteral)) +
+  geom_point(alpha = 0.4, size = 2.5) +
+  # Add a LOESS smoothing line to visualize the overall trend, similar to the manuscript.
+  #geom_smooth(method = "loess", se = FALSE, aes(group = 1), color = "black", linetype = "dashed") +
+  # Use a colorblind-friendly palette for clarity.
+  # Set the y-axis limit to the same maximum value.
+  coord_cartesian(ylim = c(0, max_y_value)) +
+  scale_color_manual(
+    name = "Source of 'Sweets'",
+    values = c("Oral Intake" = "#0072B2", "Enteral Nutrition" = "#D55E00")
+  ) +
+  labs(
+    title = "Daily 'Sweets' Group Intake",
+    subtitle = "Dehydrated weight of items in the 'Sugars, Sweets, and Beverages' food group",
+    x = "Day Relative to Transplant",
+    y = "Total Dehydrated Weight (grams)"
+  ) +
+  theme_bw(base_size = 12) +
+  facet_wrap(~ had_enteral) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+# Create the scatter plot for sugar content (grams).
+sugars_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sugars_g, color = had_enteral)) +
+  geom_point(alpha = 0.4, size = 2.5) +
+  #geom_smooth(method = "loess", se = FALSE, aes(group = 1), color = "black", linetype = "dashed") +
+  # Set the y-axis limit to the same maximum value.
+  coord_cartesian(ylim = c(0, max_y_value)) +
+  scale_color_manual(
+    name = "",
+    values = c("Oral Intake" = "#0072B2", "Enteral Nutrition" = "#D55E00")
+  ) +
+  labs(
+    title = "Daily Sugar Intake from 'Sweets' Group",
+    subtitle = "Sugar (grams) from items in the 'Sugars, Sweets, and Beverages' food group",
+    x = "Day Relative to Transplant",
+    y = "Total Sugars (grams)"
+  ) +
+  theme_bw(base_size = 12) +
+  facet_wrap(~ had_enteral) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  ) 
+
+# assemble 
+final_plot <- plot_grid( sweets_plot ,  sugars_plot ,
+                nrow  = 2,
+                labels = 'auto',
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,2,4,1), "cm"))
+
+ggsave('../data/R47_sugars_and_sweets_discrepancy.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)        
+```
