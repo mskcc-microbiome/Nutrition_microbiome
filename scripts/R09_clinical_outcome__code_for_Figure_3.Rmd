@@ -382,8 +382,7 @@ ggsave('../data/09_clinical_outcome.pdf',
 
 ```{r}
 dtb <- read_csv('../data/152_combined_DTB.csv')
-```
-```{r}
+
 daily_intake <- dtb %>%
   # Group by patient ID (pid) and day relative to transplant (fdrt)
   group_by(pid, fdrt) %>%
@@ -411,9 +410,10 @@ patient_summary <- daily_intake %>%
   # Group by patient to create a single summary row for each one
   group_by(pid) %>%
   summarise(
-    # Calculate the average of the daily sugar densities over the period
-    avg_sugar_density_per_1000kcal = mean(daily_sugar_density, na.rm = TRUE)
-    # NOTE: You will need to join this back with your antibiotic exposure data
+    # This is your diet COMPOSITION variable
+    avg_sugar_density_per_1000kcal = mean(daily_sugar_density, na.rm = TRUE),
+    # This is your diet QUANTITY variable
+    avg_total_caloric_intake = mean(total_caloric_intake, na.rm = TRUE)
   ) %>%
   ungroup() %>% 
   inner_join(df_main %>% select(pid, OStime_30, OSevent, intensity, source_and_gvhdppx, day_exposed)) %>%
@@ -427,7 +427,7 @@ patient_summary <- daily_intake %>%
 
 ```{r}
 # The '*' operator automatically includes the main effects and the interaction
-coxph(Surv(OStime_30, OSevent) ~ SugarCal_cat_high + day_exposed + 
+coxph(Surv(OStime_30, OSevent) ~ SugarCal_cat_high + day_exposed + avg_total_caloric_intake +
                                  source_and_gvhdppx + intensity ,
       data = patient_summary |> filter(OStime_30 > 0))
 ```
