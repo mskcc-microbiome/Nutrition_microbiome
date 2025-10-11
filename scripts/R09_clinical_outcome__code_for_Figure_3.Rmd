@@ -418,7 +418,7 @@ patient_summary <- daily_intake %>%
     avg_total_caloric_intake = mean(total_caloric_intake, na.rm = TRUE)
   ) %>%
   ungroup() %>% 
-  inner_join(df_main %>% select(pid, OStime_30, OSevent, intensity, source_and_gvhdppx, day_exposed, source, gvhd_ppx)) %>%
+  inner_join(df_main %>% select(pid, OStime_30, OSevent, intensity, source_and_gvhdppx, day_exposed, source, gvhd_ppx, age, sex, Disease = disease.simple)) %>%
   mutate(
     # Create a factor "High" or "Low" based on the median of the cohort
     SugarCal_cat_high = if_else(avg_sugar_density_per_1000kcal > median(avg_sugar_density_per_1000kcal, na.rm = TRUE),
@@ -650,6 +650,127 @@ layout <- c(
   area(t = 0, l = 11, b = 30, r = 15) # right most plot starts at top of page, begins where middle plot ends (l=9, and middle plot is r=9), goes to bottom of page (b=30), and extends two units wide (r=11)
 )
 # final plot arrangement
-p_left + p_mid + p_right + plot_layout(design = layout)
+coeff_plot <- p_left + p_mid + p_right + plot_layout(design = layout)
+```
+## patient characteristics
+
+```{r}
+final <- patient_summary %>% 
+  select(age, sex, Disease , source,  intensity, gvhd_ppx, SugarCal_cat_high , day_exposed) %>% 
+  mutate(Disease = case_when(
+    Disease == 'NHL' ~ "Non-Hodgkin's lymphoma",
+    # Myelodysplastic/myeloproliferative neoplasms
+    Disease == 'MDS/MPN' ~ 'MDS/MPN',
+    Disease == 'AML' ~ 'Acute myeloid leukemia',
+    Disease == 'ALL' ~ 'Acute lymphoid leukemia',
+    Disease == 'CLL' ~ 'Chronic lymphocytic leukemia',
+    Disease == 'CML' ~ 'Other',
+    Disease == 'Hodgkins' ~ "Other",
+    Disease == 'Myeloma' ~ 'Myeloma', 
+    Disease == 'AA' ~ 'Other',
+    Disease == 'other' ~ 'Other'
+  )) %>% 
+  mutate(source = case_when(
+    source == 'Unmodified' ~ "Unmodified bone marrow or PBSC",
+    source == 'Cord' ~ "Cord blood",
+    source == 'TCD' ~ "T-cell depleted PBSC"
+  )) %>% 
+  mutate(sex = case_when(
+    sex == 'F' ~ "Female",
+    sex == 'M' ~ "Male"
+  )) %>% 
+  mutate(intensity = case_when(
+    intensity == 'nonablative' ~ "Nonmyeloablative",
+    intensity == 'ablative' ~ "Ablative",
+    intensity == 'reduced' ~ "Reduced intensity"
+  )) %>% 
+  mutate(gvhd_ppx = case_when(
+    gvhd_ppx == 'CNI-based' ~ "CNI-based",
+    gvhd_ppx == 'PTCy-based' ~ "PTCy-based",
+    gvhd_ppx == 'TCD' ~ "T-cell depleted PBSC"
+  ))  %>% 
+  mutate(intensity = fct_reorder(intensity, intensity, .fun=length, .desc = T),
+         source = fct_reorder(source, source, .fun=length, .desc = T),
+         Disease = fct_reorder(Disease, Disease, .fun=length, .desc = T),
+         sex = fct_reorder(sex, sex, .fun=length, .desc = T)) %>% 
+  rename(`Graft type` = source, 
+         #`HCT-CI` = ci,
+         `Intensity of conditioning regimen` = intensity ) %>% 
+  rename(Sex = sex, Age = age, `GvHD prophylaxis` = gvhd_ppx,
+         `Days exposed to broad-spectrum antibiotics` = day_exposed)
+
+```
+
+```{r}
+final %>% 
+  tbl_summary(
+    statistic = list(all_continuous() ~ "{median} ({IQR})", all_categorical() ~ "{n} ({p}%)"),
+    by=SugarCal_cat_high
+  ) %>%
+ # Improve the table's appearance and clarity
+  add_p() %>%
+  bold_labels() %>%
+   # Use the `all_stat_cols()` selector to target the columns for the "by" variable
+  # modify_header(
+  #   all_stat_cols() ~ "**Calorie-Adjusted Sugar Intake, {level}**"
+  # ) %>%
+  # 1. Now, convert the gtsummary object to a gt object
+  as_gt() %>%
+  # 2. Now you can use any functions from the 'gt' package
+  tab_header(
+    title = "Patient Characteristics by Calorie-Adjusted Sugar Intake"
+  ) %>% 
+  gt::gtsave(filename = "../data/R09_patient_summary_binarized.png")
+```
+
+## assemble 
+
+```{r}
+patient_char <- ggdraw() + draw_image("../data/R09_patient_summary_binarized.png", scale = 1)
+
+model_output <- ggdraw() + draw_image("../data/R09_sugar_density_model_multivariate_output.png", scale = 1)
+
+two <- plot_grid( plot_raw_sugar ,  plot_adjusted_sugar ,
+                ncol  = 2,
+                labels = 'auto',
+                #rel_heights = c(1,2,1),
+                align = 'vh', axis = 'lrtb')
+
+top_left <- plot_grid(two ,
+                        model_output, 
+                ncol  = 1,
+                labels = c(NA, "c"),
+                rel_heights = c(1,2),
+                align = 'vh', axis = 'lrtb')
+
+
+top_ <- plot_grid(top_left ,
+                        patient_char, 
+                ncol  = 2,
+                labels = c(NA, "d"),
+                rel_widths =   c(1,1),
+                align = 'vh', axis = 'lrtb')
+
+final_plot <- plot_grid(top_ ,
+                        coeff_plot, 
+                ncol  = 1,
+                labels = c(NA, "e"),
+                rel_heights  =   c(3,1),
+                align = 'vh', axis = 'lrtb')
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.05, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R09_sugar_density_OS.pdf',
+      width = 17, height = 19, units = "in", device = 'pdf', 
+      dpi = 300)       
 ```
 
