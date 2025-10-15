@@ -1,0 +1,109 @@
+---
+title: "All two batches of the RNA-seq of the GF mouse experiments"
+output: html_document
+date: "2025-10-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggpubr)
+library(edgeR)
+library(DESeq2)
+library(ggrepel)
+library(cowplot)
+library(patchwork)
+library(ashr)
+library(fgsea)       # For GSEA
+library(msigdbr)     # To get MSigDB gene sets
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(ggupset)
+library(pheatmap)      # For creating the heatmap
+library(viridis)  
+library(RColorBrewer) 
+library(gridExtra)
+library(tidyverse)
+```
+
+```{r}
+# --- 1. Load Raw Count Data ---
+# Read the two raw count matrices from the uploaded TSV files.
+# The `read_tsv` function from the readr package (part of tidyverse) is used.
+counts_b1 <- read_tsv("../data/raw_counts_matrix.tsv")
+counts_b2 <- read_tsv("../data/raw_counts_matrix_batch2.tsv")
+
+# --- 2. Merge Count Matrices ---
+# The goal is to combine the two matrices into one, aligning genes by their ID.
+# A full_join ensures that all genes from both batches are kept.
+merged_counts_df <- full_join(counts_b1, counts_b2, by = "Geneid") %>%
+  # After joining, genes present in only one batch will have NAs in the columns
+  # from the other batch. Replace these NAs with 0.
+  mutate(across(where(is.numeric), ~replace_na(., 0))) %>%
+  # It's good practice to make the gene IDs the row names for analysis matrices.
+  column_to_rownames("Geneid")
+
+# --- 3. Create the Combined Metadata Table ---
+# This step involves parsing the complex sample names to extract experimental variables.
+
+# Get all the sample names (column names) from the merged matrix
+all_sample_ids <- colnames(merged_counts_df)
+# Get the sample names from each batch to assign a 'batch' variable
+b1_sample_ids <- colnames(counts_b1)[-1]
+b2_sample_ids <- colnames(counts_b2)[-1]
+
+# Create the metadata table
+meta_table <- tibble(sample_id = all_sample_ids) %>%
+  mutate(
+    # Assign a batch label to each sample
+    batch = case_when(
+      sample_id %in% b1_sample_ids ~ "batch1",
+      sample_id %in% b2_sample_ids ~ "batch2"
+    ),
+    
+    # Extract the tissue type (LI or SI) from the sample name
+    tissue = case_when(
+      str_detect(sample_id, "_LI_") ~ "large_intestine",
+      str_detect(sample_id, "_SI_") ~ "small_intestine"
+    ),
+    
+    # Extract the mouse group identifier (e.g., "1_10", "4_3")
+    mouse_group = str_extract(sample_id, "\\d+_\\d+"),
+    
+    # Assign treatment and water based on the first digit of the mouse group
+    treatment = case_when(
+      str_starts(mouse_group, "1_") ~ "E. faecalis",
+      str_starts(mouse_group, "2_") ~ "E. faecalis",
+      str_starts(mouse_group, "3_") ~ "PBS",
+      str_starts(mouse_group, "4_") ~ "PBS"
+    ),
+    
+    water = case_when(
+      str_starts(mouse_group, "1_") ~ "sucrose_water",
+      str_starts(mouse_group, "2_") ~ "regular_water",
+      str_starts(mouse_group, "3_") ~ "sucrose_water",
+      str_starts(mouse_group, "4_") ~ "regular_water"
+    )
+  )
+
+# --- 4. Save the New Files ---
+# The merged data is now ready to be used in downstream analyses like DESeq2.
+
+# Save the merged raw counts matrix to a new TSV file
+# We convert the rownames back to a column for saving.
+as.data.frame(merged_counts_df) %>%
+  rownames_to_column("Geneid") %>%
+  write_tsv("../data/R49_merged_raw_counts.tsv")
+
+# Save the new metadata table to a CSV file
+write_csv(meta_table, "../data/R49_combined_meta_table.csv")
+
+# --- 5. Display Summary ---
+# Print the dimensions and first few rows to verify the results.
+print("Dimensions of merged count matrix:")
+print(dim(merged_counts_df))
+print("Head of new metadata table:")
+print(head(meta_table))
+```
