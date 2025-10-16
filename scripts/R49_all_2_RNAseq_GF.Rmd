@@ -303,6 +303,8 @@ save_plot("../data/R49_pca_summary_large_intestine.jpg", li_pca_grid, base_heigh
 print("Large Intestine PCA Grid:")
 print(li_pca_grid)
 
+
+# The PCA results show that the treatment effects are more subtle than the overall inter-mouse variability. This is precisely the scenario where DESeq2 excels at finding the real, statistically significant signals.
 ```
 
 # DE analysis and shrinking 
@@ -404,4 +406,242 @@ print("DESeq2 analyses complete. Annotated shrunken results have been saved to C
 
 
 ```
+
+# volcano plots 
+
+```{r}
+# --- 1. Load the Annotated DESeq2 Results ---
+# These are the CSV files you created in the previous step.
+# Make sure the file paths are correct.
+results_si_col <- read_csv("../data/R49_shrunken_results_si_colonization.csv")
+results_li_col <- read_csv("../data/R49_shrunken_results_li_colonization.csv")
+results_si_suc <- read_csv("../data/R49_shrunken_results_si_sucrose.csv")
+results_li_suc <- read_csv("../data/R49_shrunken_results_li_sucrose.csv")
+
+
+# --- 2. Create a Reusable Volcano Plot Function ---
+# This function takes a results dataframe and a title, and returns a ggplot object.
+
+create_volcano_plot <- function(results_df, plot_title) {
+  
+  # Add a column to categorize genes as 'Upregulated', 'Downregulated', or 'Not significant'
+  # based on the specified thresholds.
+  results_df <- results_df %>%
+    mutate(
+      significance = case_when(
+        padj < 0.05 & log2FoldChange > 1  ~ "Upregulated",
+        padj < 0.05 & log2FoldChange < -1 ~ "Downregulated",
+        TRUE                             ~ "Not significant"
+      ),
+      # Create a label column that only contains the symbol for significant genes
+      label = if_else(significance != "Not significant", symbol, NA_character_)
+    )
+
+  # Generate the plot
+  ggplot(results_df, aes(x = log2FoldChange, y = -log10(padj))) +
+    # Add points for all genes, colored by their significance status
+    geom_point(aes(color = significance), alpha = 0.6, size = 1.5) +
+    
+    # Use ggrepel to add non-overlapping labels for the significant genes
+    geom_text_repel(aes(label = label),
+                    size = 3.5,
+                    box.padding = 0.5,
+                    max.overlaps = Inf, # Allow all labels to be plotted
+                    na.rm = TRUE) + # Ignore genes without a label
+    
+    # Define custom colors for the points
+    scale_color_manual(values = c("Upregulated" = "red", "Downregulated" = "blue", "Not significant" = "grey")) +
+    
+    # Add dashed lines for the significance cutoffs
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+    geom_vline(xintercept = 1, linetype = "dashed") +
+    geom_vline(xintercept = -1, linetype = "dashed") +
+    
+    # Set plot titles and axis labels
+    labs(
+      title = plot_title,
+      x = "Log2 Fold Change",
+      y = "-log10(Adjusted P-value)"
+    ) +
+    
+    # Apply a clean theme and adjust the legend
+    theme_minimal(base_size = 14) +
+    theme(legend.position = "none") # Hide the legend for a cleaner grid
+}
+
+
+# --- 3. Generate Each of the Four Volcano Plots ---
+
+# Create each plot by calling the function with the corresponding dataframe and title
+p_si_col <- create_volcano_plot(results_si_col, "SI: Colonization Effect")
+p_li_col <- create_volcano_plot(results_li_col, "LI: Colonization Effect")
+p_si_suc <- create_volcano_plot(results_si_suc, "SI: Sucrose Effect")
+p_li_suc <- create_volcano_plot(results_li_suc, "LI: Sucrose Effect")
+
+
+# --- 4. Arrange the Plots into a 2x2 Grid ---
+# Use cowplot's plot_grid to combine the four plots into a single figure.
+
+final_volcano_grid <- plot_grid(
+  p_si_col, p_si_suc,
+  p_li_col, p_li_suc,
+  ncol = 2,
+  labels = "AUTO"
+)
+
+# Save the combined figure as a JPG file
+save_plot("../data/R49_volcano_plots_summary.jpg", final_volcano_grid, base_height = 10, base_width = 14)
+
+# Display the final plot
+print(final_volcano_grid)
+
+# Colonizing germ-free mice with E. faecalis will "wake up" the naive gut. The small intestine will focus on immediate defense by beefing up the mucus layer and producing bacteria-coating IgA antibodies. The large intestine, where the bacteria will primarily reside, will undergo a much more profound transformation, building out its immune infrastructure and physically remodeling its lining to learn how to permanently host a bacterial resident.
+```
+
+# GSEA
+
+```{r}
+# --- Gene Rank Preparation Function ---
+# This function is updated to work with data that already contains a 'symbol' column.
+prepare_ranked_list <- function(deseq_results) {
+  
+  # The input `deseq_results` is a dataframe/tibble from read_csv.
+  # We assume it contains 'symbol', 'log2FoldChange', and 'pvalue' columns.
+  results_df <- deseq_results %>%
+    # Ensure symbol, pvalue and log2FoldChange are not NA
+    filter(!is.na(symbol) & !is.na(pvalue) & !is.na(log2FoldChange)) %>%
+    
+    # *** Create a custom ranking metric ***
+    # This metric combines the direction (sign of LFC) and significance (-log10 of p-value)
+    mutate(rank_metric = sign(log2FoldChange) * -log10(pvalue))
+
+  # Handle cases where one gene symbol maps to multiple entries.
+  # We'll keep the one with the largest absolute rank_metric value.
+  results_df <- results_df %>%
+    group_by(symbol) %>%
+    slice_max(order_by = abs(rank_metric), n = 1, with_ties = FALSE) %>%
+    ungroup()
+
+  # Create the final ranked list: a named vector
+  ranked_list <- results_df$rank_metric
+  names(ranked_list) <- results_df$symbol
+  
+  # Sort the list in descending order
+  ranked_list <- sort(ranked_list, decreasing = TRUE)
+  
+  # Remove any NA values from the ranking metric
+  ranked_list <- ranked_list[!is.na(ranked_list)]
+  
+  return(ranked_list)
+}
+```
+
+```{r}
+# --- Prepare Gene Sets ---
+# Fetch the Hallmark (H) gene sets for mouse from the msigdbr database.
+hallmark_pathways <- msigdbr(species = "Mus musculus", category = "H") %>%
+  split(x = .$gene_symbol, f = .$gs_name)
+
+# --- Prepare Gene Ranks for all four conditions ---
+ranks_si_col <- prepare_ranked_list(results_si_col)
+ranks_li_col <- prepare_ranked_list(results_li_col)
+ranks_si_suc <- prepare_ranked_list(results_si_suc)
+ranks_li_suc <- prepare_ranked_list(results_li_suc)
+
+
+# --- Run GSEA for all four conditions ---
+set.seed(42) # for reproducibility
+fgsea_res_si_col <- fgsea(pathways = hallmark_pathways, stats = ranks_si_col, minSize=15, maxSize=500, nPermSimple = 10000)
+fgsea_res_li_col <- fgsea(pathways = hallmark_pathways, stats = ranks_li_col, minSize=15, maxSize=500, nPermSimple = 10000)
+fgsea_res_si_suc <- fgsea(pathways = hallmark_pathways, stats = ranks_si_suc, minSize=15, maxSize=500, nPermSimple = 10000)
+fgsea_res_li_suc <- fgsea(pathways = hallmark_pathways, stats = ranks_li_suc, minSize=15, maxSize=500, nPermSimple = 10000)
+
+# --- Process and Visualize Results ---
+# Combine all results into one dataframe with identifying columns
+all_fgsea_res <- bind_rows(
+  fgsea_res_si_col %>% as_tibble() %>% mutate(condition = "SI - Colonization"),
+  fgsea_res_li_col %>% as_tibble() %>% mutate(condition = "LI - Colonization"),
+  fgsea_res_si_suc %>% as_tibble() %>% mutate(condition = "SI - Sucrose"),
+  fgsea_res_li_suc %>% as_tibble() %>% mutate(condition = "LI - Sucrose")
+)
+
+# Filter for significant pathways and select top N up/down for each condition
+top_pathways <- all_fgsea_res %>%
+  filter(padj < 0.05) %>%
+  mutate(direction = ifelse(NES > 0, "Upregulated", "Downregulated")) %>%
+  group_by(condition, direction) %>%
+  slice_max(order_by = abs(NES), n = 10) %>% # Get top 10 in each direction
+  ungroup()
+
+# --- Plotting Function ---
+# This function creates a diverging bar plot for a single condition
+create_diverging_plot <- function(data, plot_condition) {
+  
+  plot_data <- data %>%
+    filter(condition == plot_condition)
+  
+  if (nrow(plot_data) == 0) {
+    return(ggplot() + theme_void() + labs(title = plot_condition, subtitle = "No significant pathways"))
+  }
+  
+  plot_data <- plot_data %>%
+    mutate(
+      pathway_clean = pathway %>%
+        str_replace("HALLMARK_", "") %>%    # Remove the prefix.
+        str_to_title() %>%                  # Convert to Title Case.
+        str_replace_all("_", " ") %>%     # Replace underscores with spaces.
+        str_wrap(width = 48)                # Wrap long names for readability.
+    ) %>%
+    mutate(pathway_clean = reorder(pathway_clean, NES))
+
+  ggplot(plot_data, aes(x = NES, y = pathway_clean, fill = direction)) +
+    geom_col(color = "black") +
+    scale_fill_manual(values = c("Upregulated" = "#E64B35", "Downregulated" = "#4DBBD5"), name = "Direction") +
+    labs(
+      title = plot_condition,
+      x = "Normalized Enrichment Score (NES)",
+      y = ""
+    ) +
+    geom_vline(xintercept = 0, linetype = "dashed") +
+    theme_bw(base_size = 12) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      axis.text.y = element_text(size = 9)
+    )
+}
+
+# --- Generate the Four Plots ---
+plot_si_col <- create_diverging_plot(top_pathways, "SI - Colonization")
+plot_li_col <- create_diverging_plot(top_pathways, "LI - Colonization")
+plot_si_suc <- create_diverging_plot(top_pathways, "SI - Sucrose")
+plot_li_suc <- create_diverging_plot(top_pathways, "LI - Sucrose")
+
+# --- Combine Plots into a 2x2 Grid ---
+final_plot <- (plot_si_col | plot_li_col) / (plot_si_suc | plot_li_suc) +
+  plot_annotation(
+    title = 'Hallmark Gene Set Enrichment Analysis',
+    subtitle = 'Top 10 Enriched Pathways by Condition',
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"))
+  )
+
+# --- Save and Display the Final Plot ---
+ggsave("../data/R49_gsea_hallmark_grid.jpg", final_plot, width = 18, height = 14, dpi = 300)
+print(final_plot)
+
+
+```
+
+Metabolism: The small intestine is boosting its energy production to fuel an active defense, while the large intestine is shutting down its normal metabolism, indicating a more severe level of stress.
+
+Cell Growth: Both parts of the gut are halting cell division to focus on the immediate threat.
+
+Tissue Response: The large intestine is mounting a more aggressive and complex response, leading to significant remodeling of the gut wall itself.
+
+The GSEA data provides the molecular "receipts" for our hypothesis:
+
+The Small Intestine is paying for its "meet-and-greet" defense with a massive surge in energy production.
+
+The Large Intestine is undertaking a deep, stressful, and inflammatory "reconstruction" to prepare for its long-term role as a host.
 
