@@ -28,6 +28,8 @@ library(gridExtra)
 library(tidyverse)
 ```
 
+# merge counts and meta data 
+
 ```{r}
 # --- 1. Load Raw Count Data ---
 # Read the two raw count matrices from the uploaded TSV files.
@@ -63,10 +65,11 @@ meta_table <- tibble(sample_id = all_sample_ids) %>%
       sample_id %in% b2_sample_ids ~ "batch2"
     ),
     
-    # Extract the tissue type (LI or SI) from the sample name
+    # Extract the tissue type (LI or SI) from the sample name,
+    # accounting for different naming conventions in batch 1 and batch 2.
     tissue = case_when(
-      str_detect(sample_id, "_LI_") ~ "large_intestine",
-      str_detect(sample_id, "_SI_") ~ "small_intestine"
+      str_detect(sample_id, "_LI_") | str_starts(sample_id, "LI_") ~ "large_intestine",
+      str_detect(sample_id, "_SI_") | str_starts(sample_id, "SI_") ~ "small_intestine"
     ),
     
     # Extract the mouse group identifier (e.g., "1_10", "4_3")
@@ -106,4 +109,299 @@ print("Dimensions of merged count matrix:")
 print(dim(merged_counts_df))
 print("Head of new metadata table:")
 print(head(meta_table))
+
+# how many mice in each treatment group two batches combined
+meta_table %>% count(treatment, water, tissue)
 ```
+# data-driven filtering 
+
+```{r}
+raw_counts_matrix <- merged_counts_df %>% as.matrix()
+cpm_matrix <- cpm(raw_counts_matrix)
+
+# ---  Calculate Genes Kept at Different Thresholds ---
+# Define the range of CPM thresholds to test.
+cpm_thresholds <- seq(0.5, 10, by = 0.5)
+
+# This function will count how many genes pass the filter for a given threshold.
+# The rule is: at least 3 samples must be >= the threshold.
+count_genes_kept <- function(threshold, cpm_data) {
+  # 'apply' goes through each row (gene) of the matrix.
+  # For each row, it checks how many sample values are >= the threshold.
+  # The result is a vector of TRUE/FALSE for each gene.
+  genes_to_keep <- apply(cpm_data, 1, function(gene_row) {
+    sum(gene_row >= threshold) >= 4
+  })
+  # Finally, sum up the TRUE values to get the total number of genes kept.
+  return(sum(genes_to_keep))
+}
+
+# Apply the function to every threshold in our sequence.
+genes_left <- map_int(cpm_thresholds, ~count_genes_kept(., cpm_matrix))
+
+# Combine the thresholds and the gene counts into a results table.
+results_df <- tibble(
+  cpm_threshold = cpm_thresholds,
+  genes_remaining = genes_left
+)
+
+# Create the plot.
+ggplot(results_df, aes(x = cpm_threshold, y = genes_remaining)) +
+  geom_line(color = "dodgerblue", size = 1) +
+  geom_point(color = "dodgerblue", size = 2) +
+  labs(
+    title = "Effect of CPM Threshold on Gene Filtering",
+    x = "CPM Threshold (gene kept if expressed in at least 4 samples)",
+    y = "Number of Genes Remaining"
+  ) +
+  theme_minimal() +
+  # Add grid lines for easier reading of values.
+  theme(panel.grid.major = element_line(color = "grey85"),
+        panel.grid.minor = element_line(color = "grey90"))
+# 3 is a good elbow point
+```
+
+# filter on the CPM
+
+```{r}
+# --- Filter Lowly Expressed Genes based on CPM ---
+# Remove genes with very low counts across all samples before analysis to improve statistical power.
+
+# Calculate library sizes (total reads per sample)
+library_sizes <- colSums(merged_counts_df)
+
+# Calculate CPM (Counts Per Million)
+cpm_matrix <- t(t(merged_counts_df) / library_sizes * 1e6)
+
+# Define the filtering threshold based on the elbow plot
+cpm_threshold <- 3
+# A common rule is to keep genes that are expressed above the threshold in at least
+# the number of samples in the smallest experimental group. We'll use 4. 
+min_samples <- 4
+
+# Identify genes that meet the criteria
+genes_to_keep <- rowSums(cpm_matrix >= cpm_threshold) >= min_samples
+
+# Filter the original raw counts matrix to keep only these genes
+filtered_raw_counts_matrix <- merged_counts_df[genes_to_keep, ]
+```
+
+# batch effects?
+
+The goal of checking for a batch effect is to see if the technical variation between sequencing runs is driving the differences in your data, rather than the biological variation you're interested in.
+
+If you were to include the PBS samples (which are only in batch 1), you would be looking at a confounded experiment. Any separation you see in a PCA plot wouldn't be clear. Is the separation because of the biological difference between PBS and E. faecalis, or is it because of the technical difference between batch 1 and batch 2? You can't tell them apart.
+
+By creating a dataset that only contains the E. faecalis-treated samples from both batches, you hold the biology constant and can cleanly visualize the technical variable you care about: the batch.
+
+```{r}
+# --- Visualize Batch Effects using PCA ---
+# To check for batch effects, it's best to use samples with the same biological condition
+# that are present in both batches. In this case, it's the 'E. faecalis' treated samples.
+
+# Filter the metadata to get only the E. faecalis samples
+meta_faecalis <- meta_table %>%
+  filter(treatment == "E. faecalis")
+
+# Filter the raw counts matrix to match these samples
+counts_faecalis <- filtered_raw_counts_matrix[, meta_faecalis$sample_id]
+
+# Now, split by tissue and generate a PCA for each
+# Small Intestine
+meta_si_faecalis <- meta_faecalis %>% filter(tissue == "small_intestine")
+counts_si_faecalis <- counts_faecalis[, meta_si_faecalis$sample_id]
+
+dds_si_batch <- DESeqDataSetFromMatrix(
+  countData = counts_si_faecalis,
+  colData = meta_si_faecalis,
+  design = ~ batch
+)
+vst_si_batch <- vst(dds_si_batch, blind = TRUE)
+pca_si_batch <- plotPCA(vst_si_batch, intgroup = "batch") +
+  ggtitle("SI: E. faecalis Samples - Batch Effect") +
+  theme_minimal() + coord_fixed()
+
+# Large Intestine
+meta_li_faecalis <- meta_faecalis %>% filter(tissue == "large_intestine")
+counts_li_faecalis <- counts_faecalis[, meta_li_faecalis$sample_id]
+
+dds_li_batch <- DESeqDataSetFromMatrix(
+  countData = counts_li_faecalis,
+  colData = meta_li_faecalis,
+  design = ~ batch
+)
+vst_li_batch <- vst(dds_li_batch, blind = TRUE)
+pca_li_batch <- plotPCA(vst_li_batch, intgroup = "batch") +
+  ggtitle("LI: E. faecalis Samples - Batch Effect") +
+  theme_minimal() + coord_fixed()
+
+# Arrange the two PCA plots side-by-side and save
+batch_effect_plot <- plot_grid(pca_si_batch, pca_li_batch, ncol = 2, labels = c("A", "B"))
+save_plot("../data/R49_pca_batch_effect_visualization.jpg", batch_effect_plot, base_height = 6, base_width = 12)
+
+# Display the final plot
+print(batch_effect_plot)
+```
+
+# PCA Visualization with Batch Correction    
+ 
+```{r}
+#  ---  PCA Visualization of Treatment Effects within each Tissue (Batch Corrected) ---
+
+# Create a full DESeqDataSet object for the entire filtered dataset
+dds_full <- DESeqDataSetFromMatrix(
+  countData = filtered_raw_counts_matrix,
+  colData = meta_table,
+  design = ~ batch + tissue + treatment + water 
+)
+
+# Apply variance stabilizing transformation
+vst_full <- vst(dds_full, blind = TRUE)
+
+# Create a design matrix that includes the biological variables of interest.
+design_matrix <- model.matrix(~ tissue + treatment + water, data = colData(vst_full))
+
+# Remove the batch effect from the VST data
+batch_corrected_assay <- removeBatchEffect(assay(vst_full), batch = vst_full$batch, design = design_matrix)
+
+# Create a new DESeqTransform object with the batch-corrected data
+vst_corrected <- vst_full
+assay(vst_corrected) <- batch_corrected_assay
+
+# A function to generate a 2x2 PCA grid for a given tissue
+plot_tissue_pca <- function(vst_data, target_tissue) {
+  
+  # Subset the batch-corrected data for the target tissue
+  vst_tissue <- vst_data[, vst_data$tissue == target_tissue]
+  
+  # Generate PCA plots colored by different factors
+  pca_by_treatment <- plotPCA(vst_tissue, intgroup = "treatment") + ggtitle(paste("PCA by Treatment -", target_tissue)) + theme_minimal() + coord_fixed()
+  pca_by_water <- plotPCA(vst_tissue, intgroup = "water") + ggtitle(paste("PCA by Water -", target_tissue)) + theme_minimal() + coord_fixed()
+  pca_by_batch <- plotPCA(vst_tissue, intgroup = "batch") + ggtitle(paste("PCA by Batch -", target_tissue)) + theme_minimal() + coord_fixed()
+  
+  # Create a combined group for a full overview within the tissue
+  vst_tissue$group <- factor(paste(vst_tissue$treatment, vst_tissue$water, sep = "_"))
+  pca_by_group <- plotPCA(vst_tissue, intgroup = "group") + ggtitle(paste("PCA by All Groups -", target_tissue)) + theme_minimal() + coord_fixed()
+  
+  # Arrange the four plots into a 2x2 grid
+  plot_grid(
+    pca_by_treatment, pca_by_water,
+    pca_by_batch, pca_by_group,
+    ncol = 2, labels = "AUTO"
+  )
+}
+
+# Generate and save the PCA grid for the Small Intestine
+si_pca_grid <- plot_tissue_pca(vst_corrected, "small_intestine")
+save_plot("../data/R49_pca_summary_small_intestine.jpg", si_pca_grid, base_height = 10, base_width = 14)
+print("Small Intestine PCA Grid:")
+print(si_pca_grid)
+
+# Generate and save the PCA grid for the Large Intestine
+li_pca_grid <- plot_tissue_pca(vst_corrected, "large_intestine")
+save_plot("../data/R49_pca_summary_large_intestine.jpg", li_pca_grid, base_height = 10, base_width = 14)
+print("Large Intestine PCA Grid:")
+print(li_pca_grid)
+
+```
+
+# DE analysis and shrinking 
+
+```{r}
+# ---  Differential Expression Analysis with Batch Correction ---
+# This function automates the process of running DESeq2 for a specific contrast
+# while accounting for the batch effect.
+
+run_deseq_with_batch_correction <- function(full_counts, full_meta, target_tissue, analysis_type) {
+  
+  # Determine which samples and which variable to use for the contrast
+  if (analysis_type == "Colonization") {
+    # Compare PBS vs E. faecalis within regular water samples
+    meta_subset <- full_meta %>% filter(tissue == target_tissue, water == "regular_water")
+    design_formula <- ~ batch + treatment
+    contrast_info <- c("treatment", "E. faecalis", "PBS")
+  } else if (analysis_type == "Sucrose") {
+    # Compare sucrose vs regular water within E. faecalis samples
+    meta_subset <- full_meta %>% filter(tissue == target_tissue, treatment == "E. faecalis")
+    design_formula <- ~ batch + water
+    contrast_info <- c("water", "sucrose_water", "regular_water")
+  } else {
+    stop("Invalid analysis_type. Choose 'Colonization' or 'Sucrose'.")
+  }
+  
+  # Subset the counts matrix to match the selected metadata
+  counts_subset <- full_counts[, meta_subset$sample_id]
+  
+  # Create the DESeqDataSet object with batch in the design
+  dds <- DESeqDataSetFromMatrix(
+    countData = counts_subset,
+    colData = meta_subset,
+    design = design_formula
+  )
+  
+  # Run the DESeq2 analysis
+  dds <- DESeq(dds)
+  
+  # Get the results for the specific contrast
+  results <- results(dds, contrast = contrast_info)
+  
+  # Apply LFC shrinkage for more accurate fold changes
+  shrunken_results <- lfcShrink(dds, contrast = contrast_info, type = "ashr")
+  
+  return(shrunken_results)
+}
+```
+
+# add gene symbols  
+
+```{r}
+# ---  Annotate and Save DESeq2 Results ---
+
+# A helper function to convert a DESeqResults object to an annotated dataframe
+annotate_results <- function(deseq_results) {
+  as.data.frame(deseq_results) %>%
+    rownames_to_column("ensembl_version") %>%
+    mutate(
+      # Clean the Ensembl ID by removing the version number for mapping
+      ensembl_id = str_remove(ensembl_version, "\\..*"),
+      # Map the clean Ensembl IDs to gene symbols
+      symbol = mapIds(
+        org.Mm.eg.db,
+        keys = ensembl_id,
+        column = "SYMBOL",
+        keytype = "ENSEMBL",
+        multiVals = "first"
+      )
+    ) %>%
+    # Reorder columns for better readability
+    select(ensembl_id, symbol, everything())
+}
+
+
+# Run all four analyses
+# Colonization Effect
+shrunken_si_col <- run_deseq_with_batch_correction(filtered_raw_counts_matrix, meta_table, "small_intestine", "Colonization")
+shrunken_li_col <- run_deseq_with_batch_correction(filtered_raw_counts_matrix, meta_table, "large_intestine", "Colonization")
+
+# Sucrose Effect
+shrunken_si_suc <- run_deseq_with_batch_correction(filtered_raw_counts_matrix, meta_table, "small_intestine", "Sucrose")
+shrunken_li_suc <- run_deseq_with_batch_correction(filtered_raw_counts_matrix, meta_table, "large_intestine", "Sucrose")
+
+# Annotate each of the results dataframes
+annotated_si_col <- annotate_results(shrunken_si_col)
+annotated_li_col <- annotate_results(shrunken_li_col)
+annotated_si_suc <- annotate_results(shrunken_si_suc)
+annotated_li_suc <- annotate_results(shrunken_li_suc)
+
+# Save the ANNOTATED shrunken results to CSV files
+write_csv(annotated_si_col, "../data/R49_shrunken_results_si_colonization.csv")
+write_csv(annotated_li_col, "../data/R49_shrunken_results_li_colonization.csv")
+write_csv(annotated_si_suc, "../data/R49_shrunken_results_si_sucrose.csv")
+write_csv(annotated_li_suc, "../data/R49_shrunken_results_li_sucrose.csv")
+
+# Print a message to confirm completion
+print("DESeq2 analyses complete. Annotated shrunken results have been saved to CSV files.")
+
+
+```
+
