@@ -119,7 +119,7 @@ composition_plot <- ggplot(plot_data, aes(x = sample_id, y = relative_abundance,
 
 # Print the plot to the R viewer.
 print(composition_plot)
-ggsave('../data/R48_composition_plot.pdf', width = 13, plot = composition_plot)
+ggsave('../data/R48_composition_plot.pdf', width = 13, plot = composition_plot, height = 10)
 
 # You can now work with the 'final_data' data frame for your analysis.
 # For example, to save it to a new CSV file:
@@ -137,56 +137,54 @@ write_csv(final_data, "../data/R48_final_combined_output.csv")
 de_data <- final_data |>
   filter(
     # The name may need to be adjusted to exactly match your data.
-    str_detect(g_s, "Enterococcus"),
+    str_detect(g_s, "s__Enterococcus_faecalis"),
     treatment %in% c("Biapenem, Sucrose", "PBS, Sucrose"),
     # We are comparing both groups at the same timepoint.
     timepoint_day == 1
-  )
+  ) 
 ```
 
 
 ```{r}
-#  Pre-filtering step.
-# Before running tests, it's good practice to remove genes that have very low
-# expression, as they have little statistical power and can add noise.
-# Here, we identify genes that have a TPM > 1 in at least 3 samples.
+# Pre-filtering step based on RNA_TPM.
+# It's good practice to remove genes with very low expression.
+# A common threshold is to keep genes with RNA_TPM > 10 in at least as many
+# samples as the smallest group size (which is 4 in this case).
 genes_to_keep <- de_data |>
   group_by(gene_fam) |>
-  filter(normalized_TPM > 1) |>
+  filter(RNA_TPM > 10) |>
   summarise(n_samples_expr = n(), .groups = 'drop') |>
-  filter(n_samples_expr >= 3) |>
+  filter(n_samples_expr >= 4) |>
   pull(gene_fam)
 
 # Apply the filter to our data.
 de_data_filtered <- de_data |>
   filter(gene_fam %in% genes_to_keep)
 
-# Now, calculate the average expression and run a Wilcoxon test for each gene.
-# A small pseudocount (1) is added to avoid issues with taking the log of zero.
+# Now, calculate the average expression and run a Wilcoxon test for each gene, using RNA_TPM.
 de_results <- de_data_filtered |>
   group_by(gene_fam) |>
   # Ensure there are still observations in both groups after filtering.
   filter(n_distinct(treatment) > 1) |>
   summarise(
-    # Calculate the average expression for each group.
-    mean_expr_treated = mean(normalized_TPM[treatment == "Biapenem, Sucrose"], na.rm = TRUE),
-    mean_expr_control = mean(normalized_TPM[treatment == "PBS, Sucrose"], na.rm = TRUE),
-    # **CHANGE**: Handle the "present vs. absent" case explicitly.
-    # If a gene is completely absent in the control group (mean is 0),
-    # we consider this a highly significant result and assign a p-value of 0.
-    # Otherwise, we perform the Wilcoxon test.
+    # Calculate the average expression for each group using RNA_TPM.
+    mean_expr_treated = mean(RNA_TPM[treatment == "Biapenem, Sucrose"], na.rm = TRUE),
+    mean_expr_control = mean(RNA_TPM[treatment == "PBS, Sucrose"], na.rm = TRUE),
+    # Handle the "present vs. absent" case explicitly. If a gene is completely
+    # absent in the control group, we consider this highly significant.
     p_value = {
       if (mean_expr_control == 0) {
         0
       } else {
-        test_res <- try(wilcox.test(normalized_TPM ~ treatment), silent = TRUE)
+        # Perform the Wilcoxon test on the RNA_TPM values.
+        test_res <- try(wilcox.test(RNA_TPM ~ treatment), silent = TRUE)
         if (inherits(test_res, "try-error")) NA_real_ else test_res$p.value
       }
     }
   ) |>
   # Ungroup to ensure subsequent operations apply to the whole data frame.
   ungroup() |>
-  # Calculate the log2 fold change. This is a standard way to measure the magnitude of change.
+  # Calculate the log2 fold change. A pseudocount of 1 is added to avoid log(0).
   mutate(
     log2_fold_change = log2((mean_expr_treated + 1) / (mean_expr_control + 1))
   ) |>
@@ -202,8 +200,7 @@ print(head(de_results))
 
 # For example, to find genes that are significantly upregulated in the treated group:
 upregulated_genes <- de_results |>
-  filter(p_value < 0.05, log2_fold_change > 3)
-
+  filter( log2_fold_change > median(de_results$log2_fold_change))
 
 ```
 
@@ -213,7 +210,7 @@ upregulated_genes <- de_results |>
 # --- Annotate Upregulated Genes with Functions ---
 
 # Take the list of upregulated genes.
-ko_ids <- upregulated_genes$gene_fam
+ko_ids <- de_results$gene_fam
 
 
 # **FIX**: Replace batch queries with a more robust single-query loop.
@@ -270,11 +267,11 @@ if (length(kegg_results) > 0) {
   gene_annotations <- map_dfr(kegg_results, extract_kegg_info)
 
   # Join these rich annotations back to our original results table.
-  annotated_upregulated_genes <- left_join(upregulated_genes, gene_annotations, by = "gene_fam")
+  annotated_de_results <- left_join(de_results, gene_annotations, by = "gene_fam")
 
 } else {
   # If no definitions were found at all, just add empty annotation columns.
-  annotated_upregulated_genes <- upregulated_genes |>
+  annotated_de_results <- de_results |>
     mutate(
       name = NA_character_,
       symbol = NA_character_,
@@ -285,10 +282,102 @@ if (length(kegg_results) > 0) {
 }
 
 
-# Print the final, annotated table with gene functions.
-print("Annotated Upregulated Genes:")
-print(annotated_upregulated_genes)
+print(annotated_de_results)
 
-annotated_upregulated_genes |> write_tsv('../data/R48_annotated_upregulated_genes.tsv')
+annotated_de_results |> write_tsv('../data/R48_annotated_de_results.tsv')
+```
+
+# heatmap : Enterococcus is doing ..
+
+```{r}
+annotated_de_results <- read_tsv('../data/R48_annotated_de_results.tsv')
+
+# --- Heatmap Visualization ---
+
+# Manually define which genes belong to which category for the heatmap.
+
+# 1. Define categories for specific metabolic pathways manually.
+pts_genes <- tibble(
+  gene_fam = c("K08483", "K02795"),
+  category = "Phosphotransferase System"   #'PTS' is the keyword
+)
+
+# "Galactose metabolism" in the pathway, and "Glycolysis / Gluconeogenesis;" in the pathway
+# Find genes related to Central Metabolism by searching for specific pathways.
+central_metab_genes <- annotated_de_results |>
+  filter(str_detect(pathway, "Galactose metabolism|Glycolysis / Gluconeogenesis")) |>
+  select(gene_fam) |>
+  mutate(category = "Central Metabolism")
+
+# 2. Find genes for "Building Essential Components" based on keywords.
+# Find all genes with "ribosomal" in their name from the annotated results.
+ribosomal_genes <- annotated_de_results |>
+  filter(str_detect(name, "ribosomal")) |>
+  select(gene_fam) |>
+  mutate(category = "Building Essential Components")
+
+# Find all genes with "Arginine" in their pathway description.
+arginine_genes <- annotated_de_results |>
+  filter(str_detect(pathway, "Arginine")) |>
+  select(gene_fam) |>
+  mutate(category = "Building Essential Components")
+
+
+# 3. Combine all categories into a single data frame.
+# We bind the rows and then use `distinct` to avoid any duplicates if a gene fits multiple criteria.
+gene_categories <- bind_rows(
+  pts_genes,
+  central_metab_genes,
+  ribosomal_genes,
+  arginine_genes
+) |>
+  distinct()
+
+
+# Prepare the data for the heatmap.
+heatmap_data <- de_data |>
+  # Keep only the genes we have categorized.
+  inner_join(gene_categories, by = "gene_fam") |>
+  # Add the gene names from our annotation table for better labels.
+  left_join(select(annotated_de_results, gene_fam, name), by = "gene_fam") |>
+  # Create a more descriptive label for the heatmap rows.
+  mutate(
+    gene_label = paste0(gene_fam, " | ", name),
+    # Log-transform RNA_TPM for better color scaling in the heatmap. Adding 1 avoids log(0).
+    log2_tpm = log2(RNA_TPM + 1)
+  )
+
+# Create the heatmap using ggplot2.
+heatmap_plot <- ggplot(heatmap_data, aes(x = sample_id, y = gene_label, fill = log2_tpm)) +
+  # geom_tile creates the colored squares of the heatmap.
+  geom_tile(color = "white", linewidth = 0.5) +
+  # Use facet_grid to group the samples by treatment and the genes by category.
+  # `scales = "free"` and `space = "free"` make the panels adjust to their contents.
+  facet_grid(category ~ treatment, scales = "free", space = "free") +
+  # Use the Viridis color scale, which is good for colorblind viewers and prints well in grayscale.
+  scale_fill_viridis_c(option = "plasma") +
+  # Add labels and a title.
+  labs(
+    title = "Heatmap of Upregulated Enterococcus Genes",
+    subtitle = "Day 1: Biapenem + Sucrose vs. PBS + Sucrose",
+    x = "Sample",
+    y = "Gene",
+    fill = "Log2(RNA TPM + 1)"
+  ) +
+  # Use a minimal theme.
+  theme_minimal() +
+  # Customize theme elements for readability.
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    strip.text.y = element_text(angle = 0, face = "bold"),
+    strip.text.x = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+# Print the heatmap.
+print(heatmap_plot)
+
+ggsave('../data/R48_heatmap_plot_TPM_Day 1 Biapenem + Sucrose vs. PBS + Sucrose.pdf', width = 10, height = 8, plot = heatmap_plot)
 ```
 
