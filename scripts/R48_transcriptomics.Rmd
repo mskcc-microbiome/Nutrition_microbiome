@@ -1,0 +1,104 @@
+---
+title: "Transcriptomics"
+output: html_document
+date: "2025-10-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+some mice are sacrificed at day 1 and some at day 3. normalized TPM is what needs to be used. 
+
+```{r}
+library(tidyverse)
+# The fs package is great for working with the file system in a way that works
+# across different operating systems (Windows, macOS, Linux).
+library(fs)
+library(janitor)
+```
+
+
+```{r}
+data_folder <- "../data/taxo_normalized_rna_kos/"
+metadata_file <- "../data/sample_metadata.csv"
+
+# --- Script Logic ---
+# Get a list of all files in the specified folder that end with ".tsv".
+# dir_ls() from the fs package finds the files, and the glob argument acts as a filter.
+file_paths <- dir_ls(data_folder, glob = "*.tsv")
+
+combined_data <- map_dfr(file_paths, read_tsv, .id = "source_file") |>
+  # This next step just cleans up the source_file column to only show the filename
+  # itself, rather than the full path (e.g., "MR1.tsv" instead of "path/to/your/data_folder/MR1.tsv").
+  mutate(source_file = path_file(source_file))|>
+  mutate(sample_id = str_remove(source_file, ".tsv"))
+
+
+# --- Metadata Integration ---
+# Read the metadata. Based on your screenshot, it looks like a CSV.
+# We'll also select only the first four columns as you requested.
+metadata <- read_csv(metadata_file) |>
+  clean_names() |>
+  select(1:4)
+
+final_data <- left_join(combined_data, metadata, by = "sample_id") |> select(-source_file, -...1) |> rename(relative_abundance = relvative_abundance)
+```
+
+# composition from the shallow shotgun
+
+```{r}
+# --- Visualization of Microbial Composition ---
+
+# To make the plot readable, it's often best to visualize only the most abundant taxa.
+# Here, we find the top 10 most abundant taxa across the entire dataset.
+top_taxa <- final_data |>
+  group_by(g_s) |>
+  summarise(total_abundance = sum(relative_abundance, na.rm = TRUE)) |>
+  slice_max(order_by = total_abundance, n = 10) |>
+  pull(g_s)
+
+# Prepare the data for plotting. This involves a few steps:
+# 1. Lump less abundant taxa into an "Other" category.
+# 2. Convert the 'treatment' column to a factor with a specific order for the plot facets.
+# 3. Group by the key variables and sum the abundances, which aggregates the new "Other" category.
+plot_data <- final_data |>
+  mutate(
+    g_s_display = ifelse(g_s %in% top_taxa, as.character(g_s), "Other"),
+    treatment = factor(treatment, levels = c("Not Treated", "PBS, Sucrose", "Biapenem, Plain Hydrogel", "Biapenem, Sucrose"))
+  ) |>
+  group_by(sample_id, timepoint_day, treatment, g_s_display) |>
+  summarise(relative_abundance = sum(relative_abundance, na.rm = TRUE), .groups = 'drop')
+
+# Create the faceted bar plot.
+composition_plot <- ggplot(plot_data, aes(x = sample_id, y = relative_abundance, fill = g_s_display)) +
+  # geom_col creates the bars; position="fill" makes each bar a stacked percentage plot (100% height).
+  geom_col(position = "fill") +
+  # facet_grid creates the panel of plots. Rows are timepoints, columns are treatments.
+  # `scales = "free_x"` and `space = "free_x"` ensure that each panel only shows the relevant samples.
+  facet_grid(timepoint_day ~ treatment, scales = "free_x", space = "free_x") +
+  # Add labels and a title.
+  labs(
+    title = "Microbial Composition Across Treatments and Timepoints",
+    x = "Sample",
+    y = "Relative Abundance",
+    fill = "Taxa (Top 10 + Other)"
+  ) +
+  # Use a clean black and white theme.
+  theme_bw() +
+  # Customize the theme for better readability.
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+# Print the plot to the R viewer.
+print(composition_plot)
+
+
+# You can now work with the 'final_data' data frame for your analysis.
+# For example, to save it to a new CSV file:
+write_csv(final_data, "../data/R48_final_combined_output.csv")
+```
+
