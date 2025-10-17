@@ -16,6 +16,7 @@ library(tidyverse)
 # across different operating systems (Windows, macOS, Linux).
 library(fs)
 library(janitor)
+library(KEGGREST)
 ```
 
 
@@ -43,6 +44,11 @@ metadata <- read_csv(metadata_file) |>
   select(1:4)
 
 final_data <- left_join(combined_data, metadata, by = "sample_id") |> select(-source_file, -...1) |> rename(relative_abundance = relvative_abundance)
+# final_data table doesn't just list which bacteria are present. The columns like RNA_TPM and normalized_TPM measure the expression level of specific genes (gene_fam).
+
+# A high TPM value for a gene involved in metabolizing sucrose in a sample from the "PBS, Sucrose" group means the bacteria are actively eating the sucrose you provided.
+# 
+# A high TPM value for an antibiotic resistance gene in the "Biapenem" group means the bacteria are actively fighting off the antibiotic to survive.
 ```
 
 # composition from the shallow shotgun
@@ -70,10 +76,28 @@ plot_data <- final_data |>
   group_by(sample_id, timepoint_day, treatment, g_s_display) |>
   summarise(relative_abundance = sum(relative_abundance, na.rm = TRUE), .groups = 'drop')
 
+# --- Custom Color Palette ---
+# Define a set of contrasting colors. You can adjust these hex codes.
+# This palette excludes "gray" for the main taxa.
+contrasting_colors <- c(
+  "#E41A1C", "#377EB8", "#FFFF33", "#984EA3", "#FF7F00",
+  "#4DAF4A", "#A65628", "#F781BF", "#999999", "blue" # Example, you might need more if > 9 taxa
+)
+
+# Determine the number of unique top taxa to assign colors.
+num_top_taxa <- length(setdiff(unique(plot_data$g_s_display), "Other"))
+
+# Create the full color mapping, ensuring "Other" is specifically gray.
+# We'll use the first `num_top_taxa` colors for the main taxa.
+color_map <- c(setNames(contrasting_colors[1:num_top_taxa], sort(setdiff(unique(plot_data$g_s_display), "Other"))),
+               "Other" = "gray70") # A light gray for 'Other'
+
 # Create the faceted bar plot.
 composition_plot <- ggplot(plot_data, aes(x = sample_id, y = relative_abundance, fill = g_s_display)) +
   # geom_col creates the bars; position="fill" makes each bar a stacked percentage plot (100% height).
   geom_col(position = "fill") +
+  # Apply the custom color palette.
+  scale_fill_manual(values = color_map) +
   # facet_grid creates the panel of plots. Rows are timepoints, columns are treatments.
   # `scales = "free_x"` and `space = "free_x"` ensure that each panel only shows the relevant samples.
   facet_grid(timepoint_day ~ treatment, scales = "free_x", space = "free_x") +
@@ -95,10 +119,176 @@ composition_plot <- ggplot(plot_data, aes(x = sample_id, y = relative_abundance,
 
 # Print the plot to the R viewer.
 print(composition_plot)
-
+ggsave('../data/R48_composition_plot.pdf', width = 13, plot = composition_plot)
 
 # You can now work with the 'final_data' data frame for your analysis.
 # For example, to save it to a new CSV file:
 write_csv(final_data, "../data/R48_final_combined_output.csv")
+```
+
+# statistical test
+
+```{r}
+# --- Differential Expression Analysis  ---
+# Goal: Find genes in Enterococcus that are differentially expressed between
+# "Biapenem, Plain Hydrogel" at Day 3 and the "Not Treated" control group.
+
+# First, filter the data to only include the relevant bacterium and treatment groups.
+de_data <- final_data |>
+  filter(
+    # The name may need to be adjusted to exactly match your data.
+    str_detect(g_s, "Enterococcus"),
+    treatment %in% c("Biapenem, Sucrose", "PBS, Sucrose"),
+    # We are comparing both groups at the same timepoint.
+    timepoint_day == 1
+  )
+```
+
+
+```{r}
+#  Pre-filtering step.
+# Before running tests, it's good practice to remove genes that have very low
+# expression, as they have little statistical power and can add noise.
+# Here, we identify genes that have a TPM > 1 in at least 3 samples.
+genes_to_keep <- de_data |>
+  group_by(gene_fam) |>
+  filter(normalized_TPM > 1) |>
+  summarise(n_samples_expr = n(), .groups = 'drop') |>
+  filter(n_samples_expr >= 3) |>
+  pull(gene_fam)
+
+# Apply the filter to our data.
+de_data_filtered <- de_data |>
+  filter(gene_fam %in% genes_to_keep)
+
+# Now, calculate the average expression and run a Wilcoxon test for each gene.
+# A small pseudocount (1) is added to avoid issues with taking the log of zero.
+de_results <- de_data_filtered |>
+  group_by(gene_fam) |>
+  # Ensure there are still observations in both groups after filtering.
+  filter(n_distinct(treatment) > 1) |>
+  summarise(
+    # Calculate the average expression for each group.
+    mean_expr_treated = mean(normalized_TPM[treatment == "Biapenem, Sucrose"], na.rm = TRUE),
+    mean_expr_control = mean(normalized_TPM[treatment == "PBS, Sucrose"], na.rm = TRUE),
+    # **CHANGE**: Handle the "present vs. absent" case explicitly.
+    # If a gene is completely absent in the control group (mean is 0),
+    # we consider this a highly significant result and assign a p-value of 0.
+    # Otherwise, we perform the Wilcoxon test.
+    p_value = {
+      if (mean_expr_control == 0) {
+        0
+      } else {
+        test_res <- try(wilcox.test(normalized_TPM ~ treatment), silent = TRUE)
+        if (inherits(test_res, "try-error")) NA_real_ else test_res$p.value
+      }
+    }
+  ) |>
+  # Ungroup to ensure subsequent operations apply to the whole data frame.
+  ungroup() |>
+  # Calculate the log2 fold change. This is a standard way to measure the magnitude of change.
+  mutate(
+    log2_fold_change = log2((mean_expr_treated + 1) / (mean_expr_control + 1))
+  ) |>
+  # Arrange the results to see the most significant changes first.
+  arrange(p_value)
+
+# Print the top differentially expressed genes.
+print(head(de_results))
+
+# You can now explore the `de_results` table.
+# Genes with a high absolute log2_fold_change and a low p_value (e.g., < 0.05)
+# are the most interesting candidates for follow-up.
+
+# For example, to find genes that are significantly upregulated in the treated group:
+upregulated_genes <- de_results |>
+  filter(p_value < 0.05, log2_fold_change > 3)
+
+
+```
+
+# annotation
+
+```{r}
+# --- Annotate Upregulated Genes with Functions ---
+
+# Take the list of upregulated genes.
+ko_ids <- upregulated_genes$gene_fam
+
+
+# **FIX**: Replace batch queries with a more robust single-query loop.
+# This is slower but prevents one bad ID from crashing the whole process.
+kegg_results <- list() # Initialize an empty list to store successful results.
+
+# Loop over each ID.
+for (id in ko_ids) {
+  # Use tryCatch to handle any errors that might occur for a single ID.
+  result <- tryCatch({
+    keggGet(id)
+  }, error = function(e) {
+    # If an error occurs, print a message to the console and return NULL.
+    message(paste("Could not retrieve info for:", id, "\nError:", e$message))
+    return(NULL)
+  })
+
+  # If the query was successful (not NULL), add it to our results list.
+  if (!is.null(result)) {
+    kegg_results <- c(kegg_results, result)
+  }
+}
+
+
+# A function to parse the complex list structure from keggGet.
+# It will extract multiple fields and flatten them into a single-row tibble.
+extract_kegg_info <- function(kegg_entry) {
+  # A small helper function to safely extract and collapse a field into a single string.
+  # The `%||%` operator is a handy shortcut for `if (is.null(x)) y else x`.
+  flatten_field <- function(field_name) {
+    # Safely get the content of a field.
+    content <- kegg_entry[[field_name]] %||% NA_character_
+    # Paste all elements together, separated by a semicolon.
+    paste(content, collapse = "; ")
+  }
+
+  # Build a one-row data frame (tibble) with all the desired information.
+  tibble(
+    gene_fam = str_remove(kegg_entry$ENTRY %||% NA_character_, "ko:"),
+    name = kegg_entry$NAME %||% NA_character_,
+    symbol = flatten_field("SYMBOL"),
+    pathway = flatten_field("PATHWAY"),
+    module = flatten_field("MODULE"),
+    brite = flatten_field("BRITE")
+  )
+}
+
+
+# Process the results into a clean table.
+# We check if there are any results before trying to process them.
+if (length(kegg_results) > 0) {
+  # Apply the new parsing function to every entry in our results list.
+  # map_dfr row-binds all the resulting one-row tibbles into a single data frame.
+  gene_annotations <- map_dfr(kegg_results, extract_kegg_info)
+
+  # Join these rich annotations back to our original results table.
+  annotated_upregulated_genes <- left_join(upregulated_genes, gene_annotations, by = "gene_fam")
+
+} else {
+  # If no definitions were found at all, just add empty annotation columns.
+  annotated_upregulated_genes <- upregulated_genes |>
+    mutate(
+      name = NA_character_,
+      symbol = NA_character_,
+      pathway = NA_character_,
+      module = NA_character_,
+      brite = NA_character_
+    )
+}
+
+
+# Print the final, annotated table with gene functions.
+print("Annotated Upregulated Genes:")
+print(annotated_upregulated_genes)
+
+annotated_upregulated_genes |> write_tsv('../data/R48_annotated_upregulated_genes.tsv')
 ```
 
