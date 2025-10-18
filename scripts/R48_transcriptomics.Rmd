@@ -281,11 +281,63 @@ if (length(kegg_results) > 0) {
     )
 }
 
-
 print(annotated_de_results)
 
-annotated_de_results |> write_tsv('../data/R48_annotated_de_results.tsv')
+# annotated_de_results |> write_tsv('../data/R48_annotated_de_results.tsv')
 ```
+
+# Entercoccus abundance in the bars
+
+```{r}
+# --- Focused Composition Plot ---
+
+# Filter the data for Day 1 samples in the two sucrose groups.
+day1_comp_data <- final_data |>
+  filter(timepoint_day == 1, treatment %in% c("PBS, Sucrose", "Biapenem, Sucrose")) |> 
+  mutate(treatment = factor(treatment, levels = c("PBS, Sucrose", "Biapenem, Sucrose")))
+```
+
+
+```{r}
+# Prepare data for plotting, highlighting only Enterococcus.
+day1_plot_data <- day1_comp_data |>
+  mutate(
+    # Create a new column to highlight our species of interest.
+    g_s_highlight = ifelse(str_detect(g_s, "s__Enterococcus_faecalis"), "Enterococcus faecalis", "Other"),
+    # Define the order of samples to match the heatmap.
+    sample_id = factor(sample_id, levels = c("MR12", "MR14", "MR15", "MR13", "MR4", "MR5", "MR6", "MR7"))
+  ) |>
+  # Group by the new highlight column and sum abundances.
+  group_by(sample_id, treatment, g_s_highlight) |>
+  summarise(relative_abundance = sum(relative_abundance, na.rm = TRUE), .groups = 'drop') |>
+  # Ensure the sample order is maintained.
+  arrange(sample_id)
+
+
+# Create the focused composition plot.
+focused_composition_plot <- ggplot(day1_plot_data, aes(x = sample_id, y = relative_abundance, fill = g_s_highlight)) +
+  geom_col(position = "fill") +
+  # Use a manual color scale to set Enterococcus to red and everything else to gray.
+  scale_fill_manual(values = c("Enterococcus faecalis" = "#4DAF4A", "Other" = "#999999")) +
+  # Facet by treatment to separate the groups.
+  facet_grid(. ~ treatment, scales = "free_x", space = "free_x") +
+  labs(
+    title = "Composition of Day 1 Sucrose Groups",
+    x = "Sample",
+    y = "Relative Abundance",
+    fill = "Taxa"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+# Print the new plot.
+print(focused_composition_plot)
+```
+
 
 # heatmap : Enterococcus is doing ..
 
@@ -297,10 +349,10 @@ annotated_de_results <- read_tsv('../data/R48_annotated_de_results.tsv')
 # Manually define which genes belong to which category for the heatmap.
 
 # 1. Define categories for specific metabolic pathways manually.
-pts_genes <- tibble(
-  gene_fam = c("K08483", "K02795"),
-  category = "Phosphotransferase System"   #'PTS' is the keyword
-)
+pts_genes <- annotated_de_results |>
+  filter(str_detect(name, "PTS") |str_detect(pathway, "PTS") ) |>
+  select(gene_fam) |>
+  mutate(category = "Phosphotransferase System")
 
 # "Galactose metabolism" in the pathway, and "Glycolysis / Gluconeogenesis;" in the pathway
 # Find genes related to Central Metabolism by searching for specific pathways.
@@ -342,26 +394,32 @@ heatmap_data <- de_data |>
   left_join(select(annotated_de_results, gene_fam, name), by = "gene_fam") |>
   # Create a more descriptive label for the heatmap rows.
   mutate(
-    gene_label = paste0(gene_fam, " | ", name),
-    # Log-transform RNA_TPM for better color scaling in the heatmap. Adding 1 avoids log(0).
-    log2_tpm = log2(RNA_TPM + 1)
+    # Clean the gene name by removing the EC number for cleaner labels.
+    name_clean = str_remove(name, "\\s\\[EC:.*\\]$"),
+    gene_label = paste0(gene_fam, " | ", name_clean),
+    # Log-transform RNA_TPM for better color scaling in the heatmap.
+    log2_tpm = log2(RNA_TPM + 1),
+    # Reverse the order of the treatment factor for the plot.
+    treatment = factor(treatment, levels = c("PBS, Sucrose", "Biapenem, Sucrose"))
   )
 
 # Create the heatmap using ggplot2.
 heatmap_plot <- ggplot(heatmap_data, aes(x = sample_id, y = gene_label, fill = log2_tpm)) +
   # geom_tile creates the colored squares of the heatmap.
   geom_tile(color = "white", linewidth = 0.5) +
+  # Move the gene labels to the right side of the plot.
+  scale_y_discrete(position = "right") +
   # Use facet_grid to group the samples by treatment and the genes by category.
-  # `scales = "free"` and `space = "free"` make the panels adjust to their contents.
-  facet_grid(category ~ treatment, scales = "free", space = "free") +
+  # The `switch = "y"` argument moves the category labels to the left.
+  facet_grid(category ~ treatment, scales = "free", space = "free", switch = "y") +
   # Use the Viridis color scale, which is good for colorblind viewers and prints well in grayscale.
   scale_fill_viridis_c(option = "plasma") +
   # Add labels and a title.
   labs(
     title = "Heatmap of Upregulated Enterococcus Genes",
-    subtitle = "Day 1: Biapenem + Sucrose vs. PBS + Sucrose",
+    subtitle = "Day 3: Biapenem + Sucrose vs. PBS + Sucrose",
     x = "Sample",
-    y = "Gene",
+    y = "",
     fill = "Log2(RNA TPM + 1)"
   ) +
   # Use a minimal theme.
@@ -370,7 +428,8 @@ heatmap_plot <- ggplot(heatmap_data, aes(x = sample_id, y = gene_label, fill = l
   theme(
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
     axis.text.y = element_text(size = 8),
-    strip.text.y = element_text(angle = 0, face = "bold"),
+    # Adjust the y-axis strip text now that it's on the left, and left-align it.
+    strip.text.y.left = element_text(angle = 0, face = "bold", hjust = 0),
     strip.text.x = element_text(face = "bold"),
     legend.position = "bottom"
   )
@@ -379,5 +438,11 @@ heatmap_plot <- ggplot(heatmap_data, aes(x = sample_id, y = gene_label, fill = l
 print(heatmap_plot)
 
 ggsave('../data/R48_heatmap_plot_TPM_Day 1 Biapenem + Sucrose vs. PBS + Sucrose.pdf', width = 10, height = 8, plot = heatmap_plot)
+```
+
+# Day 3 data 
+
+```{r}
+
 ```
 
