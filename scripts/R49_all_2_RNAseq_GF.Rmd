@@ -649,3 +649,263 @@ The Small Intestine is paying for its "meet-and-greet" defense with a massive su
 
 The Large Intestine is undertaking a deep, stressful, and inflammatory "reconstruction" to prepare for its long-term role as a host.
 
+## B cell related genesets
+
+```{r}
+# --- Prepare Gene Sets ---
+# Fetch the C8 cell type signature gene sets for mouse.
+C7_pathways_all <- msigdbr(species = "Mus musculus", category = "C7", subcollection = 'IMMUNESIGDB')
+
+# Filter this collection to get the B-cell specific response signatures.
+b_cell_C7_pathways_filtered <- C7_pathways_all %>%
+  filter(str_detect(gs_name, "B_CELL"))
+
+#Are your B-cells just activated, or are they differentiating into full-blown antibody factories?
+
+# What These C7 Gene Sets Represent
+# Think of a B-cell's life like a career path.
+# 
+# Spleen B-Cell: This is like an experienced professional. It's mature, circulates, and is ready for a job, but it isn't fully committed to a single, massive project yet.
+# 
+# Bone Marrow Plasma Cell: This is the specialist who has taken on that one massive project. It has stopped circulating, set up a factory (often in the bone marrow), and is now dedicated 100% to producing and secreting vast quantities of antibodies. This is the final, most potent stage of a B-cell's life.
+# 
+# The two gene sets you found define the genetic differences between these two states:
+# 
+# ..._UP set: Genes that are higher in the spleen B-cell. These are genes for patrolling, signaling, and being ready for activation.
+# 
+# ..._DN set: Genes that are lower in the spleen B-cell. This is the crucial part—this means these genes are higher in the plasma cell. This list includes the machinery for massive protein synthesis and secretion.
+
+# Convert the filtered dataframe into the list format required by fgsea.
+b_cell_c7_pathways <- b_cell_C7_pathways_filtered %>%
+  split(x = .$gene_symbol, f = .$gs_name)
+
+# --- Prepare Gene Ranks for the Small Intestine ---
+ranks_si_col <- prepare_ranked_list(results_si_col)
+```
+
+
+```{r}
+# --- Run GSEA with the B-Cell C7 Signature Pathways ---
+set.seed(42)
+fgsea_res_bcell_c7 <- fgsea(
+  pathways = b_cell_c7_pathways, 
+  stats = ranks_si_col, 
+  minSize=15, 
+  maxSize=500, 
+  nPermSimple = 10000
+)
+
+# --- Process and Visualize Results ---
+# Filter for the most significant pathways to plot.
+top_bcell_c7_pathways <- fgsea_res_bcell_c7 %>%
+  as_tibble() %>%
+  filter(padj < 0.05)
+```
+
+
+```{r}
+# --- Plotting Function ---
+# Cleans up the C7 pathway names for better readability.
+plot_data_c7 <- top_bcell_c7_pathways %>%
+  mutate(
+    pathway_clean = pathway %>%
+      str_remove("GSE\\d+_") %>%
+      str_replace("_VS_", " vs ") %>%
+      str_replace("_DN", ": Down") %>%
+      str_replace("_UP", ": Up") %>%
+      str_to_sentence() %>%
+      str_replace_all("_", " ") %>%
+      str_wrap(width = 60)
+  ) %>%
+  mutate(
+    direction = ifelse(NES > 0, "Upregulated", "Downregulated"),
+    pathway_clean = reorder(pathway_clean, NES)
+  )
+
+# Create the plot
+bcell_c7_plot <- ggplot(plot_data_c7, aes(x = NES, y = pathway_clean, fill = direction)) +
+  geom_col(color = "black") +
+  scale_fill_manual(values = c("Upregulated" = "#E64B35", "Downregulated" = "#4DBBD5"), name = "Direction") +
+  labs(
+    title = "Top B-Cell Immunologic Signatures in the Small Intestine",
+    subtitle = "Enrichment upon E. faecalis Colonization (C7 Gene Sets)",
+    x = "Normalized Enrichment Score (NES)",
+    y = ""
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size=16),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 10)
+  )
+
+# --- Save and Display the Final Plot ---
+ggsave("../data/R49_gsea_bcell_c7_signatures_plot.jpg", bcell_c7_plot, width = 10, height = 4, dpi = 300)
+print(bcell_c7_plot)
+
+# Breaking it Down:
+
+# This gene set contains genes that are normally UPregulated in circulating spleen B-cells compared to stationary plasma cells.
+# 
+# Your data shows that these "spleen B-cell" genes are being DOWNregulated in your colonized mice (a negative enrichment score).
+# 
+# The Conclusion: If the genes that define a spleen B-cell are going down, it means your cells are moving away from that state. They are becoming less like circulating B-cells and more like plasma cells.
+
+
+#This result provides strong evidence that the B-cells in the small intestine are not just activated—they are undergoing terminal differentiation into antibody-secreting plasma cells.
+
+# Think of it this way: to become a dedicated antibody factory (a plasma cell), a B-cell has to shut down the genetic programs for being a mobile scout (a spleen B-cell). It turns off genes for patrolling and responding to new signals and turns on the massive machinery needed for protein production. Your GSEA result has captured this "shutting down" process perfectly.
+# 
+# This aligns with everything else you've seen:
+# 
+# Volcano Plot: Shows a massive B-cell signature.
+# 
+# Hallmark GSEA: Shows high metabolic activity (Oxidative Phosphorylation) needed to fuel the energy-intensive process of antibody production.
+# 
+# This C7 GSEA: Provides the final piece of the puzzle, showing that these metabolically active B-cells are committing to becoming plasma cells.
+```
+### enrichment plot
+
+```{r}
+# Define the exact name of the pathway of interest.
+target_pathway_name <- "GSE39916_B_CELL_SPLEEN_VS_PLASMA_CELL_BONE_MARROW_UP"
+
+# --- Create and Save the Enrichment Plot ---
+# Generate the GSEA enrichment plot for the single target pathway.
+enrichment_plot <- plotEnrichment(
+  pathway = b_cell_c7_pathways[[target_pathway_name]],
+  stats = ranks_si_col
+) + 
+  labs(
+    title = "Enrichment Plot",
+    subtitle = "Genes downregulated in Spleen B-Cells vs. Plasma Cells",
+    x = "Rank in Gene List",
+    y = "Enrichment Score"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+# --- Save and Display the Final Plot ---
+ggsave("../data/R49_gsea_enrichment_plot_c7_signature.jpg", enrichment_plot, width = 8, height = 6, dpi = 300)
+print(enrichment_plot)
+```
+
+# download the M7 genesets
+
+```{r}
+# --- Iteratively Run GSEA on all GMT files in a Folder ---
+# This section programmatically finds all .gmt files in a directory,
+# runs GSEA for each, and combines the results.
+
+# Define the path to the folder containing your .gmt files.
+geneset_folder <- "../data/geneset/" 
+
+# Check if the directory exists
+if (!dir.exists(geneset_folder)) {
+  stop("The specified geneset folder does not exist: ", geneset_folder)
+}
+
+# Get a list of all files ending with .gmt in the specified folder.
+gmt_files <- list.files(geneset_folder, pattern = "\\.gmt$", full.names = TRUE)
+
+if (length(gmt_files) == 0) {
+    stop("No .gmt files found in the directory: ", geneset_folder)
+}
+
+# Use purrr::map_dfr to iterate over the files, run GSEA, and row-bind the results.
+all_fgsea_results <- map_dfr(gmt_files, ~{
+  # Load the pathways from the current .gmt file.
+  current_pathways <- gmtPathways(.x)
+  
+  # Run fgsea.
+  fgsea(
+    pathways = current_pathways,
+    stats = ranks_si_col,
+    minSize = 5,
+    maxSize = 500,
+    nPermSimple = 10000
+  )
+})
+```
+
+
+```{r}
+# --- Process and Visualize Combined Results ---
+# Filter the combined results for the most significant pathways to plot.
+top_combined_pathways <- all_fgsea_results %>%
+  as_tibble() %>%
+  filter(padj < 0.05) %>%
+  mutate(direction = ifelse(NES > 0, "Upregulated", "Downregulated")) %>%
+  group_by(direction) %>%
+  slice_max(order_by = abs(NES), n = 31) %>% # Show top 15 from each direction
+  ungroup()
+
+# --- Plotting Function ---
+# Cleans up the pathway names for better readability.
+plot_data_combined <- top_combined_pathways %>%
+  mutate(
+    pathway_clean = pathway %>%
+      str_remove("CUI_B_CELL_") %>%
+      str_to_sentence() %>%
+      str_replace_all("_", " ") %>%
+      str_wrap(width = 40)
+  ) %>%
+  mutate(pathway_clean = reorder(pathway_clean, NES))
+
+# Create the plot
+bcell_combined_plot <- ggplot(plot_data_combined, aes(x = NES, y = pathway_clean, color = direction)) +
+  # Add the horizontal line segment from 0 to the NES value
+  geom_segment(aes(x = 0, xend = NES, y = pathway_clean, yend = pathway_clean), linewidth = 0.5) +
+  # Add the point at the end of the line
+  geom_point(aes(size = -log10(padj))) + 
+  scale_color_manual(values = c("Upregulated" = "#E64B35", "Downregulated" = "#4DBBD5"), name = "Direction") +
+  scale_size_continuous(name = "-log10(Adjusted P-value)", range = c(2, 8)) + # Control the range of point sizes
+  labs(
+    title = "Top B-Cell Response Signatures in the Small Intestine",
+    subtitle = "Combined GSEA Results from Custom Gene Sets",
+    x = "Normalized Enrichment Score (NES)",
+    y = ""
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size=16),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 10)
+  )
+
+# --- Save and Display the Final Plot ---
+ggsave("../data/R49_gsea_bcell_combined_plot.jpg", bcell_combined_plot, width = 8, height = 8, dpi = 300)
+print(bcell_combined_plot)
+
+# 1. A Dominant Interferon "Alarm" is Sounding
+# This is the most powerful signal in your plot. You see strong enrichment for the response signatures of multiple interferons: Ifna1, Ifnb, Ifne, Ifnk, and Ifng.
+# 
+# Why it matters: This confirms your earlier Hallmark GSEA result with much greater precision. It tells you that both Type I (alpha, beta, etc.) and Type II (gamma) interferons are major players. This type of signal is critical for directing B-cells to class-switch their antibodies and mature into a more potent fighting force.
+# 
+# 2. The Environment is Primed for Antibody Production
+# You see strong enrichment for cytokines that are classic drivers of B-cell differentiation into antibody-secreting plasma cells.
+# 
+# Il10 response up and Il21 response up: These are two of the most important cytokines for the final stages of B-cell maturation. Seeing these signatures confirms that the local environment is providing the exact signals needed to push the activated B-cells to become antibody factories, which perfectly supports your findings from the C7 gene sets.
+# 
+# 3. You Are Seeing a Complex, "In-Vivo" Response
+# This addresses your excellent question about seeing both "UP" and "DN" signatures for the same cytokine. Look at Interferon Alpha (Ifna1):
+# 
+# Ifna1 response up: This gene set is significantly enriched.
+# 
+# Ifna1 response dn: This gene set is also significantly enriched.
+# 
+# This is not a contradiction. It's a window into complex, real-world biology.
+# 
+# What it means: The "UP" and "DN" gene sets were defined in a clean lab experiment with only B-cells and IFN-alpha. Your experiment is in a complex gut. Your result shows that the B-cells are definitely "hearing" the IFN-alpha signal (activating the "UP" genes). However, the mix of all the other cytokines (Il10, Il21, etc.) is overriding IFN-alpha's normal ability to turn off its "DN" genes, causing them to be expressed instead. This is a sign of complex signal integration.
+
+```
+
