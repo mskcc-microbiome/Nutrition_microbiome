@@ -127,12 +127,12 @@ ggsave('../data/R48_composition_plot.pdf', width = 13, plot = composition_plot, 
 write_csv(final_data, "../data/R48_final_combined_output.csv")
 ```
 
-# statistical test
+# statistical test between "Biapenem, Sucrose", "PBS, Sucrose"
 
 ```{r}
 # --- Differential Expression Analysis  ---
 # Goal: Find genes in Enterococcus that are differentially expressed between
-# "Biapenem, Plain Hydrogel" at Day 3 and the "Not Treated" control group.
+# "Biapenem, Plain Hydrogel" at Day 1 and the "Not Treated" control group.
 
 # First, filter the data to only include the relevant bacterium and treatment groups.
 de_data <- final_data |>
@@ -437,7 +437,7 @@ heatmap_plot_day1 <- ggplot(heatmap_data, aes(x = sample_id, y = gene_label, fil
 # Print the heatmap.
 print(heatmap_plot_day1)
 
-ggsave('../data/R48_heatmap_plot_TPM_Day 1 Biapenem + Sucrose vs. PBS + Sucrose.pdf', width = 10, height = 8, plot = heatmap_plot)
+ggsave('../data/R48_heatmap_plot_TPM_Day 1 Biapenem + Sucrose vs. PBS + Sucrose.pdf', width = 10, height = 8, plot = heatmap_plot_day1)
 ```
 ## stacking 
 
@@ -471,6 +471,255 @@ final_plot_with_title <- ggdraw() +
 print(final_plot_with_title)
 
 ggsave('../data/R48_combined_plot_Day 1 Biapenem + Sucrose vs. PBS + Sucrose.pdf', width = 10, height = 11, plot = final_plot_with_title)
+```
+
+# abx +/- sucrose on day 1
+
+```{r}
+# --- New Analysis: Day 1, Hydrogel vs Sucrose in abx treated samples ---
+
+# Goal: Find genes in Enterococcus that are differentially expressed between
+# "Biapenem, Plain Hydrogel" and "Biapenem, Sucrose" at Day 1.
+
+# 1. Filter data for the new comparison.
+de_data_hydrogel_vs_sucrose <- final_data |>
+  filter(
+    str_detect(g_s, "s__Enterococcus_faecalis"),
+    treatment %in% c("Biapenem, Plain Hydrogel", "Biapenem, Sucrose"),
+    timepoint_day == 1
+  )
+
+# 2. Filter for expressed genes.
+genes_to_keep_hydrogel_vs_sucrose <- de_data_hydrogel_vs_sucrose |>
+  group_by(gene_fam) |>
+  filter(RNA_TPM > 10) |>
+  summarise(n_samples_expr = n(), .groups = 'drop') |>
+  # Both groups have 4 samples.
+  filter(n_samples_expr >= 4) |>
+  pull(gene_fam)
+
+de_data_filtered_hydrogel_vs_sucrose <- de_data_hydrogel_vs_sucrose |>
+  filter(gene_fam %in% genes_to_keep_hydrogel_vs_sucrose)
+
+# 3. Perform Wilcoxon test.
+de_results_hydrogel_vs_sucrose <- de_data_filtered_hydrogel_vs_sucrose |>
+  group_by(gene_fam) |>
+  filter(n_distinct(treatment) > 1) |>
+  summarise(
+    mean_expr_hydrogel = mean(normalized_TPM[treatment == "Biapenem, Plain Hydrogel"], na.rm = TRUE),
+    mean_expr_sucrose = mean(normalized_TPM[treatment == "Biapenem, Sucrose"], na.rm = TRUE),
+    p_value = {
+      test_res <- try(wilcox.test(normalized_TPM ~ treatment), silent = TRUE)
+      if (inherits(test_res, "try-error")) NA_real_ else test_res$p.value
+    }
+  ) |>
+  ungroup() |>
+  # Add p-value adjustment for multiple comparisons (Benjamini-Hochberg method).
+  mutate(p_adj = p.adjust(p_value, method = "BH")) |>
+  mutate(log2_fold_change = log2((mean_expr_sucrose + 1) / ( mean_expr_hydrogel+ 1))) |>
+  # Arrange by the absolute fold change to see the largest effects first.
+  arrange(desc(abs(log2_fold_change)))
+
+# 4. Find top candidate genes using a log2 fold change cutoff.
+# This is a common strategy when no genes are significant after p-value adjustment.
+# It allows for exploratory analysis of the genes with the largest effect sizes.
+candidate_genes_hydrogel_vs_sucrose <- de_results_hydrogel_vs_sucrose |>
+  filter(abs(log2_fold_change) > 1)
+```
+
+
+```{r}
+# Take the list of upregulated genes.
+ko_ids <- candidate_genes_hydrogel_vs_sucrose$gene_fam
+
+# Replace batch queries with a more robust single-query loop.
+# This is slower but prevents one bad ID from crashing the whole process.
+kegg_results <- list() # Initialize an empty list to store successful results.
+
+# Loop over each ID.
+for (id in ko_ids) {
+  # Use tryCatch to handle any errors that might occur for a single ID.
+  result <- tryCatch({
+    keggGet(id)
+  }, error = function(e) {
+    # If an error occurs, print a message to the console and return NULL.
+    message(paste("Could not retrieve info for:", id, "\nError:", e$message))
+    return(NULL)
+  })
+
+  # If the query was successful (not NULL), add it to our results list.
+  if (!is.null(result)) {
+    kegg_results <- c(kegg_results, result)
+  }
+}
+
+# A function to parse the complex list structure from keggGet.
+# It will extract multiple fields and flatten them into a single-row tibble.
+extract_kegg_info <- function(kegg_entry) {
+  # A small helper function to safely extract and collapse a field into a single string.
+  # The `%||%` operator is a handy shortcut for `if (is.null(x)) y else x`.
+  flatten_field <- function(field_name) {
+    # Safely get the content of a field.
+    content <- kegg_entry[[field_name]] %||% NA_character_
+    # Paste all elements together, separated by a semicolon.
+    paste(content, collapse = "; ")
+  }
+
+  # Build a one-row data frame (tibble) with all the desired information.
+  tibble(
+    gene_fam = str_remove(kegg_entry$ENTRY %||% NA_character_, "ko:"),
+    name = kegg_entry$NAME %||% NA_character_,
+    symbol = flatten_field("SYMBOL"),
+    pathway = flatten_field("PATHWAY"),
+    module = flatten_field("MODULE"),
+    brite = flatten_field("BRITE")
+  )
+}
+
+# Process the results into a clean table.
+# We check if there are any results before trying to process them.
+if (length(kegg_results) > 0) {
+  # Apply the new parsing function to every entry in our results list.
+  # map_dfr row-binds all the resulting one-row tibbles into a single data frame.
+  gene_annotations <- map_dfr(kegg_results, extract_kegg_info)
+
+  # Join these rich annotations back to our original results table.
+  annotated_de_results_hydrogel_vs_sucrose <- left_join(candidate_genes_hydrogel_vs_sucrose, gene_annotations, by = "gene_fam")
+
+} else {
+  # If no definitions were found at all, just add empty annotation columns.
+  annotated_de_results_hydrogel_vs_sucrose <- candidate_genes_hydrogel_vs_sucrose |>
+    mutate(
+      name = NA_character_,
+      symbol = NA_character_,
+      pathway = NA_character_,
+      module = NA_character_,
+      brite = NA_character_
+    )
+}
+
+print(annotated_de_results_hydrogel_vs_sucrose)
+
+```
+
+## Combined Plot
+
+```{r}
+# --- Combined Plot: Day 1, Hydrogel vs Sucrose ---
+
+# 1. Define the specific sample order for this plot
+sample_order_hydrogel <- de_data_hydrogel_vs_sucrose |>
+  arrange(treatment) |>
+  pull(sample_id) |>
+  unique()
+
+# 2. Create the focused compositional bar plot
+bar_plot_hydrogel_vs_sucrose <- final_data |>
+  filter(sample_id %in% sample_order_hydrogel) |>
+  mutate(
+    g_s_highlight = ifelse(str_detect(g_s, "s__Enterococcus_faecalis"), "s__Enterococcus_faecalis", "Other"),
+    sample_id = factor(sample_id, levels = sample_order_hydrogel),
+    treatment = factor(treatment, levels = c( "Biapenem, Plain Hydrogel", "Biapenem, Sucrose"))
+  ) |>
+  group_by(sample_id, treatment, g_s_highlight) |>
+  summarise(relative_abundance = sum(relative_abundance, na.rm = TRUE), .groups = 'drop') |>
+  ggplot(aes(x = sample_id, y = relative_abundance, fill = g_s_highlight)) +
+  geom_col(position = "fill") +
+  scale_fill_manual(values = c("s__Enterococcus_faecalis" = "#4DAF4A", "Other" = "#999999")) +
+  facet_grid(. ~ treatment, scales = "free_x", space = "free_x") +
+  labs(y = "Relative Abundance", fill = "Taxa") +
+  theme_bw() +
+  theme(
+    axis.title.x = element_blank(),
+    #axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+# 3. Create the heatmap of candidate genes
+# First, prepare the data and define the gene order in a separate step for clarity.
+heatmap_prep_data <- de_data_hydrogel_vs_sucrose |>
+  filter(gene_fam %in% candidate_genes_hydrogel_vs_sucrose$gene_fam) |>
+  left_join(annotated_de_results_hydrogel_vs_sucrose, by = "gene_fam") |>
+  mutate(
+    name_clean = str_remove(name, "\\s\\[EC:.*\\]$"),
+    gene_label = paste0(gene_fam, " | ", name_clean)
+  ) |> 
+  filter(sample_id != 'MR4')
+
+# Define the order of genes for the heatmap's y-axis based on log2 fold change.
+gene_order <- heatmap_prep_data |>
+  # We only need one row per gene to determine the order.
+  distinct(gene_label, log2_fold_change) |>
+  # Arrange by ascending fold change.
+  arrange(log2_fold_change) |>
+  # Pull out the gene labels as a character vector. This vector is now correctly ordered.
+  pull(gene_label)
+
+# Now, create the final data for plotting.
+heatmap_data_hydrogel_vs_sucrose <- heatmap_prep_data |>
+  filter(gene_fam %in% candidate_genes_hydrogel_vs_sucrose$gene_fam) |>
+  left_join(select(annotated_de_results_hydrogel_vs_sucrose, gene_fam, name), by = "gene_fam") |>
+  # Group by gene to calculate z-score for each gene across all samples.
+  group_by(gene_fam) |>
+  mutate(
+    # Calculate the z-score of the normalized TPM.
+    z_score = as.numeric(scale(normalized_TPM))
+  ) |>
+  ungroup() |>
+  mutate(
+    # Apply the pre-defined order to the gene_label factor.
+    gene_label = factor(gene_label, levels = gene_order),
+    sample_id = factor(sample_id, levels = sample_order_hydrogel),
+    treatment = factor(treatment, levels = c( "Biapenem, Plain Hydrogel", "Biapenem, Sucrose"))
+  )
+
+heatmap_plot_hydrogel_vs_sucrose <- ggplot(heatmap_data_hydrogel_vs_sucrose, aes(x = sample_id, y = gene_label, fill = z_score)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  # Move the gene labels to the right side of the plot.
+  scale_y_discrete(position = "right") +
+  facet_grid(. ~ treatment, scales = "free_x", space = "free_x") +
+  labs(
+    x = "Sample",
+    y = "",
+    # Update the legend title
+    fill = "Z-score (Normalized TPM)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    # Ensure the y-axis text on the right is formatted.
+    axis.text.y.right = element_text(size = 8),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+# 4. Combine plots using cowplot
+combined_hydrogel_plot <- plot_grid(
+  bar_plot_hydrogel_vs_sucrose,
+  heatmap_plot_hydrogel_vs_sucrose,
+  ncol = 1,
+  align = 'v',
+  rel_heights = c(1, 1.5)
+)
+
+# 5. Add a title
+final_hydrogel_plot_with_title <- ggdraw() +
+  draw_plot(combined_hydrogel_plot, 0, 0, 1, 0.95) +
+  draw_label(
+    "Enterococcus Composition and Gene Expression on Day 1",
+    x = 0.5, y = 0.99, vjust = 1, fontface = 'bold'
+  ) +
+  draw_label(
+    "Comparison between Biapenem + Sucrose and Biapenem + Hydrogel",
+    x = 0.5, y = 0.97, vjust = 1, size = 10
+  )
+
+print(final_hydrogel_plot_with_title)
+
+ggsave('../data/R48_combined_plot_Day 1 Comparison between Biapenem + Sucrose and Biapenem + Hydrogel.pdf', width = 7, height = 8, plot = final_hydrogel_plot_with_title)
 ```
 
 # Day 3 data 
