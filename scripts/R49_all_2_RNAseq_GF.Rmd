@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(ggpubr)
+library(limma) # <-- Added for removeBatchEffect
 library(edgeR)
 library(DESeq2)
 library(ggrepel)
@@ -497,6 +498,93 @@ print(final_volcano_grid)
 
 # Colonizing germ-free mice with E. faecalis will "wake up" the naive gut. The small intestine will focus on immediate defense by beefing up the mucus layer and producing bacteria-coating IgA antibodies. The large intestine, where the bacteria will primarily reside, will undergo a much more profound transformation, building out its immune infrastructure and physically remodeling its lining to learn how to permanently host a bacterial resident.
 ```
+## plot b cell genes
+
+```{r}
+meta_subset <- meta_table %>% filter(tissue == "small_intestine", water == "regular_water")
+design_formula <- ~ batch + treatment
+
+
+# Subset the counts matrix to match the selected metadata
+counts_subset <- filtered_raw_counts_matrix[, meta_subset$sample_id]
+
+# Create the DESeqDataSet object with batch in the design
+dds <- DESeqDataSetFromMatrix(
+  countData = counts_subset,
+  colData = meta_subset,
+  design = design_formula
+)
+
+# Run the DESeq2 analysis
+dds <- DESeq(dds)
+vst_data <- vst(dds, blind = FALSE)
+```
+
+```{r}
+# 1. find the list of B-cell genes from your volcano plot
+b_cell_sig_genes <- annotated_si_col |> 
+  filter(padj < 0.05 , log2FoldChange > 1) 
+
+# 2. Correct for batch effect
+#    We use limma::removeBatchEffect on the variance-stabilized counts
+#    The 'batch' argument needs the batch vector from your coldata
+batch_corrected_counts <- removeBatchEffect(
+  assay(vst_data), 
+  batch = vst_data$batch # Use the 'batch' column from coldata
+)
+
+# 3. Wrangle data for plotting
+#    The batch_corrected_counts is a matrix. We need to:
+#    a. Filter for our genes of interest
+#    b. Convert to a long-format tibble
+#    c. Join with the sample metadata (coldata)
+plot_data <- batch_corrected_counts %>%
+  as.data.frame() %>%
+  rownames_to_column("ensembl_version") %>%
+  inner_join(b_cell_sig_genes) |> 
+  # Melt to long format
+  pivot_longer(
+    cols = contains("IGO_"),
+    names_to = "sample",
+    values_to = "batch_corrected_count"
+  ) %>%
+  # Join with sample metadata to get 'condition'
+  # We get the coldata straight from the dds object
+  left_join(as.data.frame(colData(dds)), by = c("sample" = "sample_id"))
+```
+
+
+```{r}
+# 4. Create the faceted boxplot using the batch-corrected counts
+ggplot(plot_data, aes(x = treatment, y = batch_corrected_count, color = treatment)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.2, height = 0, size = 2) +
+  # Use facet_wrap to create one small plot for each gene
+  # scales = "free_y" is important, as each gene will have a different count range
+  facet_wrap(~ symbol, scales = "free_y") +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Batch-Corrected Counts of B-Cell Signature Genes",
+    subtitle = "SI: Colonization Effect (VST + removeBatchEffect)",
+    x = "Experimental Condition",
+    y = "Batch-Corrected Normalized Counts (VST)"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "none", # The x-axis already shows the treatment
+    strip.background = element_rect(fill = "grey90"),
+    strip.text = element_text(face = "bold.italic")
+  )
+
+ggsave("../data/R49_bcell_gene_counts_boxplot_batch_corrected.jpg", width = 12, height = 9, dpi = 300)
+```
+```{r}
+# make a heatmap of the above data
+
+
+```
 
 # GSEA
 
@@ -541,7 +629,10 @@ prepare_ranked_list <- function(deseq_results) {
 # Fetch the Hallmark (H) gene sets for mouse from the msigdbr database.
 hallmark_pathways <- msigdbr(species = "Mus musculus", category = "H") %>%
   split(x = .$gene_symbol, f = .$gs_name)
+```
 
+
+```{r}
 # --- Prepare Gene Ranks for all four conditions ---
 ranks_si_col <- prepare_ranked_list(results_si_col)
 ranks_li_col <- prepare_ranked_list(results_li_col)
@@ -564,13 +655,16 @@ all_fgsea_res <- bind_rows(
   fgsea_res_si_suc %>% as_tibble() %>% mutate(condition = "SI - Sucrose"),
   fgsea_res_li_suc %>% as_tibble() %>% mutate(condition = "LI - Sucrose")
 )
+```
 
+
+```{r}
 # Filter for significant pathways and select top N up/down for each condition
 top_pathways <- all_fgsea_res %>%
   filter(padj < 0.05) %>%
   mutate(direction = ifelse(NES > 0, "Upregulated", "Downregulated")) %>%
   group_by(condition, direction) %>%
-  slice_max(order_by = abs(NES), n = 10) %>% # Get top 10 in each direction
+  #slice_max(order_by = abs(NES), n = 10) %>% # Get top 10 in each direction
   ungroup()
 
 # --- Plotting Function ---
@@ -592,11 +686,23 @@ create_diverging_plot <- function(data, plot_condition) {
         str_replace_all("_", " ") %>%     # Replace underscores with spaces.
         str_wrap(width = 48)                # Wrap long names for readability.
     ) %>%
+    # Calculate -log10(padj) for dot size
+    mutate(neg_log_padj = -log10(padj)) %>%
     mutate(pathway_clean = reorder(pathway_clean, NES))
 
-  ggplot(plot_data, aes(x = NES, y = pathway_clean, fill = direction)) +
-    geom_col(color = "black") +
-    scale_fill_manual(values = c("Upregulated" = "#E64B35", "Downregulated" = "#4DBBD5"), name = "Direction") +
+  ggplot(plot_data, aes(x = NES, y = pathway_clean, color = direction)) +
+    # Add the "lollipop stick" segment
+    geom_segment(aes(x = 0, xend = NES, y = pathway_clean, yend = pathway_clean), linewidth = 0.8) +
+    
+    # Add the "dot" at the end, with size mapped to significance
+    geom_point(aes(size = neg_log_padj), alpha = 0.8) +
+    
+    # Manually set colors
+    scale_color_manual(values = c("Upregulated" = "#E64B35", "Downregulated" = "royalblue"), name = "Direction") +
+    
+    # Add a legend for dot size
+    scale_size_continuous(name = "-log10(Adjusted p-value)") +
+    
     labs(
       title = plot_condition,
       x = "Normalized Enrichment Score (NES)",
@@ -622,7 +728,7 @@ plot_li_suc <- create_diverging_plot(top_pathways, "LI - Sucrose")
 final_plot <- (plot_si_col | plot_li_col) / (plot_si_suc | plot_li_suc) +
   plot_annotation(
     title = 'Hallmark Gene Set Enrichment Analysis',
-    subtitle = 'Top 10 Enriched Pathways by Condition',
+    subtitle = 'Significantly Enriched Pathways by Condition',
     theme = theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"))
   )
 
@@ -906,6 +1012,248 @@ print(bcell_combined_plot)
 # This is not a contradiction. It's a window into complex, real-world biology.
 # 
 # What it means: The "UP" and "DN" gene sets were defined in a clean lab experiment with only B-cells and IFN-alpha. Your experiment is in a complex gut. Your result shows that the B-cells are definitely "hearing" the IFN-alpha signal (activating the "UP" genes). However, the mix of all the other cytokines (Il10, Il21, etc.) is overriding IFN-alpha's normal ability to turn off its "DN" genes, causing them to be expressed instead. This is a sign of complex signal integration.
+
+```
+# LI structural remodeling
+
+```{r}
+meta_subset <- meta_table %>% filter(tissue == "large_intestine", water == "regular_water")
+design_formula <- ~ batch + treatment
+
+
+# Subset the counts matrix to match the selected metadata
+counts_subset <- filtered_raw_counts_matrix[, meta_subset$sample_id]
+
+# Create the DESeqDataSet object with batch in the design
+dds <- DESeqDataSetFromMatrix(
+  countData = counts_subset,
+  colData = meta_subset,
+  design = design_formula
+)
+
+# Run the DESeq2 analysis
+dds <- DESeq(dds)
+vst_data <- vst(dds, blind = FALSE)
+
+batch_corrected_counts_li_col <- removeBatchEffect(
+  assay(vst_data), 
+  batch = vst_data$batch # Use the 'batch' column from coldata
+)
+```
+
+
+```{r}
+# --- Extract and Print Leading Edge Genes for EMT ---
+
+# Define the pathway name we're looking for
+emt_pathway_name <- "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"
+
+# Filter the GSEA results to find the EMT pathway
+emt_results <- fgsea_res_li_col %>%
+  as_tibble() %>%
+  filter(pathway == emt_pathway_name)
+
+# Check if the pathway was found and significant
+if (nrow(emt_results) > 0) {
+  
+  # The 'leadingEdge' column is a list column. We need to extract the genes.
+  # unlist() converts the list of genes into a simple vector
+  leading_edge_genes_emt <- emt_results %>%
+    pull(leadingEdge) %>%
+    unlist()
+  
+  # Print the genes to the console
+  cat("--- Leading Edge Genes for EMT Pathway ---\n")
+  cat("Pathway:", emt_pathway_name, "\n")
+  cat("Number of genes:", length(leading_edge_genes_emt), "\n\n")
+  
+  # Print the list of genes
+  print(leading_edge_genes_emt)
+  
+} else {
+  cat("The EMT pathway was not found or was not significant in the GSEA results.\n")
+}
+
+plot_data_EMT <- batch_corrected_counts_li_col %>%
+  as.data.frame() %>%
+  rownames_to_column("ensembl_version") %>%
+  inner_join(annotated_li_col |> filter(symbol %in% leading_edge_genes_emt)) |> 
+  # Melt to long format
+  pivot_longer(
+    cols = contains("IGO_"),
+    names_to = "sample",
+    values_to = "batch_corrected_count"
+  ) %>%
+  # Join with sample metadata to get 'condition'
+  # We get the coldata straight from the dds object
+  left_join(as.data.frame(colData(dds)), by = c("sample" = "sample_id"))
+
+
+plot_EMT <- ggplot(plot_data_EMT, aes(x = treatment, y = batch_corrected_count, color = treatment)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.2, height = 0, size = 2) +
+  # Use facet_wrap to create one small plot for each gene
+  # scales = "free_y" is important, as each gene will have a different count range
+  facet_wrap(~ symbol, scales = "free_y") +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Batch-Corrected Counts of EMT leading edge Genes",
+    subtitle = "LI: Colonization Effect (VST + removeBatchEffect)",
+    x = "Experimental Condition",
+    y = "Batch-Corrected Normalized Counts (VST)"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "none", # The x-axis already shows the treatment
+    strip.background = element_rect(fill = "grey90"),
+    strip.text = element_text(face = "bold.italic")
+  )
+
+ggsave("../data/R49_EMT_gene_counts_boxplot_batch_corrected.jpg", width = 12, height = 9, dpi = 300, plot = plot_EMT)
+```
+```{r}
+# --- Extract Leading Edge Genes for INFLAMMATION ---
+
+# 1. Define your target inflammation pathways from the GSEA plot
+inflammation_pathway_names <- c(
+  "HALLMARK_INFLAMMATORY_RESPONSE",
+  "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+  "HALLMARK_IL6_JAK_STAT3_SIGNALING",
+  "HALLMARK_INTERFERON_ALPHA_RESPONSE",
+  "HALLMARK_INTERFERON_GAMMA_RESPONSE"
+)
+
+# 2. Extract, combine, and de-duplicate all leading edge genes from these pathways
+#    We use unnest() to expand the list of genes in the leadingEdge column
+inflammation_leading_edge <- fgsea_res_li_col %>%
+  as_tibble() %>%
+  filter(pathway %in% inflammation_pathway_names) %>%
+  unnest(leadingEdge) %>%
+  select(pathway, symbol = leadingEdge) %>%
+  # A gene might be in multiple pathways. For the heatmap, we'll
+  # just keep the first one it's associated with for grouping.
+  distinct(symbol, .keep_all = TRUE)
+
+# 3. Create the gene_groups annotation for the heatmap
+gene_groups <- inflammation_leading_edge %>%
+  # Clean up the pathway names for the heatmap annotation
+  mutate(Function = str_replace(pathway, "HALLMARK_", "") %>%
+                    str_to_title() %>%
+                    str_replace_all("_", " ") %>%
+                    str_wrap(40)) %>%
+  select(-pathway) %>% # Drop the original pathway name
+  arrange(Function) %>%  # Sort by the new functional group
+  column_to_rownames("symbol")
+
+# 4. Get the gene symbols in the new sorted order
+inflammation_genes_for_heatmap <- rownames(gene_groups)
+```
+
+
+```{r}
+# 5. Check if we have any genes before proceeding
+if (length(inflammation_genes_for_heatmap) > 0) {
+  
+  # --- Create Heatmap for INFLAMMATION Leading Edge Genes ---
+  # 7. Filter the count matrix for these genes
+  #    Use intersect() to ensure we only grab genes present in the counts
+  
+  genes_to_plot <- batch_corrected_counts_li_col |> 
+    as.data.frame() %>%
+    rownames_to_column('ensembl_version') |> 
+    inner_join(annotated_li_col |> select(ensembl_version, symbol)) |> 
+    filter(symbol %in% inflammation_genes_for_heatmap)
+  
+  # Re-filter gene_groups to match the genes we actually have, preserving the new order
+  # The 'drop = FALSE' ensures it remains a dataframe even if only one gene is found
+  gene_groups <- gene_groups[genes_to_plot$symbol, , drop = FALSE] |> 
+    arrange(Function)
+  
+  heatmap_data <- genes_to_plot |> 
+    select(-ensembl_version) |> 
+    column_to_rownames('symbol') |> 
+    as.matrix()
+  
+  heatmap_data_sorted <- heatmap_data[rownames(gene_groups),]
+  
+  # 8. Create annotation for the columns (Samples)
+  sample_annotation <- meta_table |> filter(tissue == 'large_intestine', water == 'regular_water') |> 
+    select(sample_id, treatment, batch) |> 
+    column_to_rownames('sample_id')
+  
+  # Get unique values from the annotations to build the color lists
+  function_levels <- unique(gene_groups$Function)
+  condition_levels <- unique(sample_annotation$treatment)
+  batch_levels <- unique(sample_annotation$batch)
+  
+  # Create named color vectors
+  # Using RColorBrewer's "Paired" palette for functions (good for contrast)
+  # Ensure we have enough colors, even if n < 3
+  n_func_colors <- max(3, length(function_levels))
+
+  func_colors <- RColorBrewer::brewer.pal(n_func_colors, "Paired")[1:length(function_levels)]
+  names(func_colors) <- function_levels
+  
+  # High-contrast colors for treatment/condition
+  # Manually assigning for clarity based on the plot
+  cond_colors <- c("#E41A1C", "#377EB8") # (Red, Blue)
+  names(cond_colors) <- condition_levels
+  # if (length(condition_levels) == 2) {
+  #   # Try to match common names, otherwise just assign
+  #   if (all(c("E. faecalis", "PBS") %in% condition_levels)) {
+  #     names(cond_colors) <- c("E. faecalis", "PBS")
+  #   } else {
+  #     names(cond_colors) <- condition_levels
+  #   }
+  # } else {
+  #    names(cond_colors) <- condition_levels
+  # }
+
+  # Contrasting colors for batch
+  batch_colors <- c("#FDBF6F", "#A6CEE3") # (Light Orange, Light Blue)
+  names(batch_colors) <- batch_levels[1:length(batch_colors)]
+  
+  # Combine into the final list for pheatmap
+  ann_colors <- list(
+    Function = func_colors,
+    treatment = cond_colors,
+    batch = batch_colors
+  )
+  
+  
+  # 9. Generate the heatmap
+  pheatmap(
+    heatmap_data_sorted,
+    # Annotation for columns (samples) and rows (genes)
+    annotation_col = sample_annotation,
+    annotation_row = gene_groups,
+    # Pass the custom colors
+    annotation_colors = ann_colors,
+    # Scale data by row (Z-score)
+    scale = "row",
+    
+    # Clustering settings
+    cluster_rows = FALSE, # We already sorted by function
+    cluster_cols = TRUE,
+    
+    # Aesthetics
+    show_rownames = TRUE,
+    show_colnames = T,
+    border_color = "grey60",
+    fontsize_row = 8,
+    main = "Heatmap of Inflammation Leading Edge Genes (LI Colonization)",
+    filename = "../data/R49_inflammation_leading_edge_heatmap.jpg", width = 8, height = 15
+  )
+  
+}
+```
+
+
+# assemble  
+
+```{r}
 
 ```
 
