@@ -580,9 +580,73 @@ ggplot(plot_data, aes(x = treatment, y = batch_corrected_count, color = treatmen
 
 ggsave("../data/R49_bcell_gene_counts_boxplot_batch_corrected.jpg", width = 12, height = 9, dpi = 300)
 ```
+
+## B cells heatmap   
+
 ```{r}
 # make a heatmap of the above data
+# Filter the count matrix for these genes
+batch_corrected_count_si_col <- batch_corrected_counts
 
+genes_to_plot <- batch_corrected_count_si_col |> 
+  as.data.frame() %>%
+  rownames_to_column('ensembl_version') |> 
+  inner_join(annotated_si_col |> select(ensembl_version, symbol)) |> 
+  filter(symbol %in% b_cell_sig_genes$symbol)
+
+
+heatmap_data <- genes_to_plot |> 
+  select(-ensembl_version) |> 
+  column_to_rownames('symbol') |> 
+  as.matrix()
+
+# 8. Create annotation for the columns (Samples)
+sample_annotation <- meta_table |> filter(tissue == 'small_intestine', water == 'regular_water') |> 
+  select(sample_id, treatment, batch) |> 
+  column_to_rownames('sample_id')
+
+# Get unique values from the annotations to build the color lists
+condition_levels <- unique(sample_annotation$treatment)
+batch_levels <- unique(sample_annotation$batch)
+
+
+# High-contrast colors for treatment/condition
+# Manually assigning for clarity based on the plot
+cond_colors <- c("#E41A1C", "#377EB8") # (Red, Blue)
+names(cond_colors) <- condition_levels
+
+# Contrasting colors for batch
+batch_colors <- c("#FDBF6F", "#A6CEE3") # (Light Orange, Light Blue)
+names(batch_colors) <- batch_levels[1:length(batch_colors)]
+
+# Combine into the final list for pheatmap
+ann_colors <- list(
+  treatment = cond_colors,
+  batch = batch_colors
+)
+
+# 9. Generate the heatmap
+Bcell_heatmap <- pheatmap(
+  heatmap_data,
+  # Annotation for columns (samples) and rows (genes)
+  annotation_col = sample_annotation,
+  # Pass the custom colors
+  annotation_colors = ann_colors,
+  # Scale data by row (Z-score)
+  scale = "row",
+  
+  # Clustering settings
+  cluster_rows = T, # We already sorted by function
+  cluster_cols = TRUE,
+  
+  # Aesthetics
+  show_rownames = TRUE,
+  show_colnames = T,
+  border_color = "grey60",
+  fontsize_row = 8,
+  main = "Heatmap of B cell signature genes (SI Colonization)",
+  filename = "../data/R49_Bcell_heatmap.jpg", width = 8, height = 8
+)
 
 ```
 
@@ -664,7 +728,7 @@ top_pathways <- all_fgsea_res %>%
   filter(padj < 0.05) %>%
   mutate(direction = ifelse(NES > 0, "Upregulated", "Downregulated")) %>%
   group_by(condition, direction) %>%
-  #slice_max(order_by = abs(NES), n = 10) %>% # Get top 10 in each direction
+  slice_max(order_by = abs(NES), n = 10) %>% # Get top 10 in each direction
   ungroup()
 
 # --- Plotting Function ---
@@ -1113,6 +1177,8 @@ plot_EMT <- ggplot(plot_data_EMT, aes(x = treatment, y = batch_corrected_count, 
 
 ggsave("../data/R49_EMT_gene_counts_boxplot_batch_corrected.jpg", width = 12, height = 9, dpi = 300, plot = plot_EMT)
 ```
+## LI inflammation
+
 ```{r}
 # --- Extract Leading Edge Genes for INFLAMMATION ---
 
@@ -1200,16 +1266,7 @@ if (length(inflammation_genes_for_heatmap) > 0) {
   # Manually assigning for clarity based on the plot
   cond_colors <- c("#E41A1C", "#377EB8") # (Red, Blue)
   names(cond_colors) <- condition_levels
-  # if (length(condition_levels) == 2) {
-  #   # Try to match common names, otherwise just assign
-  #   if (all(c("E. faecalis", "PBS") %in% condition_levels)) {
-  #     names(cond_colors) <- c("E. faecalis", "PBS")
-  #   } else {
-  #     names(cond_colors) <- condition_levels
-  #   }
-  # } else {
-  #    names(cond_colors) <- condition_levels
-  # }
+
 
   # Contrasting colors for batch
   batch_colors <- c("#FDBF6F", "#A6CEE3") # (Light Orange, Light Blue)
@@ -1224,7 +1281,7 @@ if (length(inflammation_genes_for_heatmap) > 0) {
   
   
   # 9. Generate the heatmap
-  pheatmap(
+  Li_Inflammation <- pheatmap(
     heatmap_data_sorted,
     # Annotation for columns (samples) and rows (genes)
     annotation_col = sample_annotation,
@@ -1250,10 +1307,31 @@ if (length(inflammation_genes_for_heatmap) > 0) {
 }
 ```
 
-
 # assemble  
 
 ```{r}
+final_plot <- plot_grid( p_si_col ,  p_li_col ,
+                      plot_si_col, plot_li_col,    
+                      Bcell_heatmap$gtable, Li_Inflammation$gtable,
+                nrow  = 3,
+                rel_heights = c(1,1,3),
+                labels = 'auto',
+                align = 'vh', axis = '')
 
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R49_GF_mouse_RNA_seq_all.pdf',
+      width = 15, height = 24, units = "in", device = 'pdf', 
+      dpi = 300)  
 ```
 
