@@ -328,9 +328,9 @@ ggplot(plot_data, aes(x = sdrt, y = Enterococcus_relab)) +
 # assemble 
 
 ```{r}
-final_plot <-  plot_grid( duration_days_estimate , combined_plot,
-                 label_size = 12, nrow  =2,
-                 rel_heights = c(1.2,2),labels = "auto", 
+final_plot <-  plot_grid( duration_days_estimate , 
+                 label_size = 12, nrow  =1,
+                 rel_heights = c(1.2,2),
                 align = 'vh', axis = 'lrtb')
 
 
@@ -343,7 +343,7 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+) +theme(plot.margin = unit(c(1,6,16,1), "cm"))
 
 ggsave('../data/R34_pt_enterococcus_bloom.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
