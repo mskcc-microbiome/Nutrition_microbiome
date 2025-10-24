@@ -12,6 +12,9 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(ggpubr)
 library(cowplot)
+dayzeroline_size <- 1
+scatter_transparency <- 0.4
+day0_line_color <- 'gray40'
 ```
 
 ```{r}
@@ -38,16 +41,35 @@ daily_sweets_intake <- sweets_df %>%
   group_by(pid, fdrt) %>%
   summarise(
     total_sweets_dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
-    total_sugars_g = sum(Sugars_g, na.rm = TRUE),
     had_enteral = any(is_enteral),
     .groups = 'drop'
   )
+
+#Calculate the total_sugars_g for all food items consumed on that day.
+daily_sugar_summary <- dtb %>%
+  group_by(pid, fdrt) %>%
+  summarise(
+    # Calculate the total Sugars_g for that day from all meals.
+    total_sugars_g = sum(Sugars_g, na.rm = TRUE),
+    
+    # Check if *any* meal on that day was 'Enteral'.
+    had_enteral_meal = any(str_detect(Meal, regex("Enteral nutrition", ignore_case = TRUE))),
+    
+    .groups = 'drop' # Ungroup for the next step.
+  ) %>%
+  # Create the new 'intake_source' column based on the enteral flag.
+  mutate(
+    intake_source = if_else(had_enteral_meal, "Had Enteral Nutrition", "Only Oral Intake")
+  ) %>%
+  # Select only the columns the user asked for.
+  select(pid, fdrt, intake_source, total_sugars_g)
 
 # Join the aggregated sweets data back to the full list of patient-days.
 # This step ensures that days where a patient ate food but had no items from
 # the "Sweets" group are included with an intake of 0.
 daily_intake_final <- all_patient_days_with_intake %>%
   left_join(daily_sweets_intake, by = c("pid", "fdrt")) %>%
+  left_join(daily_sugar_summary, by = c("pid", "fdrt")) %>%
   # Replace NA values with 0 for weight and FALSE for the enteral flag.
   mutate(
     total_sweets_dehydrated_weight = replace_na(total_sweets_dehydrated_weight, 0),
@@ -55,69 +77,72 @@ daily_intake_final <- all_patient_days_with_intake %>%
     had_enteral = replace_na(had_enteral, FALSE),
     had_enteral = factor(had_enteral,
                            levels = c(FALSE, TRUE),
-                           labels = c("Oral Intake", "Enteral Nutrition"))
-  )
+                           labels = c("Only Oral Intake", "Had Enteral Nutrition")),
+    intake_source = factor(intake_source, levels = c("Only Oral Intake", "Had Enteral Nutrition"))
+  ) 
+
+daily_intake_final |> count(had_enteral, intake_source)
 ```
 
 
 ```{r}
 # --- Plot Generation ---
-# Manually find the maximum value across both metrics to set a shared y-axis limit.
-max_y_value <- max(
-  daily_intake_final$total_sweets_dehydrated_weight,
-  daily_intake_final$total_sugars_g,
-  na.rm = TRUE
-)
+
 
 # Create the scatter plot using ggplot2.
 sweets_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sweets_dehydrated_weight, color = had_enteral)) +
-  geom_point(alpha = 0.4, size = 2.5) +
+  geom_point(alpha = scatter_transparency, size = 1.5) +
   # Add a LOESS smoothing line to visualize the overall trend, similar to the manuscript.
   #geom_smooth(method = "loess", se = FALSE, aes(group = 1), color = "black", linetype = "dashed") +
   # Use a colorblind-friendly palette for clarity.
-  # Set the y-axis limit to the same maximum value.
-  coord_cartesian(ylim = c(0, max_y_value)) +
   scale_color_manual(
     name = "Source of 'Sweets'",
-    values = c("Oral Intake" = "#0072B2", "Enteral Nutrition" = "#D55E00")
+    values = c("Only Oral Intake" = "gray", "Had Enteral Nutrition" = "#D55E00")
   ) +
+  geom_vline(xintercept = 0, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
   labs(
-    title = "Daily 'Sweets' Group Intake",
-    subtitle = "Dehydrated weight of items in the 'Sugars, Sweets, and Beverages' food group",
+    title = "Daily Sweets Group Intake",
+    #subtitle = "Dehydrated weight of items in the 'Sugars, Sweets, and Beverages' food group",
     x = "Day Relative to Transplant",
     y = "Total Dehydrated Weight (grams)"
   ) +
   theme_bw(base_size = 12) +
+  scale_y_sqrt() +
   facet_wrap(~ had_enteral) +
   theme(
     legend.position = "none",
     plot.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank()
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    aspect.ratio = 1
   )
+sweets_plot
 
 # Create the scatter plot for sugar content (grams).
-sugars_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sugars_g, color = had_enteral)) +
-  geom_point(alpha = 0.4, size = 2.5) +
+sugars_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sugars_g, color = intake_source)) +
+  geom_point(alpha = scatter_transparency, size = 1.5) +
   #geom_smooth(method = "loess", se = FALSE, aes(group = 1), color = "black", linetype = "dashed") +
-  # Set the y-axis limit to the same maximum value.
-  coord_cartesian(ylim = c(0, max_y_value)) +
   scale_color_manual(
     name = "",
-    values = c("Oral Intake" = "#0072B2", "Enteral Nutrition" = "#D55E00")
+    values = c("Only Oral Intake" = "gray", "Had Enteral Nutrition" = "#D55E00")
   ) +
+  geom_vline(xintercept = 0, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
   labs(
-    title = "Daily Sugar Intake from 'Sweets' Group",
-    subtitle = "Sugar (grams) from items in the 'Sugars, Sweets, and Beverages' food group",
+    title = "Daily Sugars Intake",
     x = "Day Relative to Transplant",
     y = "Total Sugars (grams)"
   ) +
   theme_bw(base_size = 12) +
-  facet_wrap(~ had_enteral) +
+  scale_y_sqrt() +
+  facet_wrap(~ intake_source) +
   theme(
     legend.position = "none",
     plot.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank()
-  ) 
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    aspect.ratio = 1
+  )
+sugars_plot
 
 # assemble 
 final_plot <- plot_grid( sweets_plot ,  sugars_plot ,
@@ -135,7 +160,7 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,2,4,1), "cm"))
+) +theme(plot.margin = unit(c(1,4,8,1), "cm"))
 
 ggsave('../data/R47_sugars_and_sweets_discrepancy.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
