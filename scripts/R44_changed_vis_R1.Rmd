@@ -108,6 +108,73 @@ g4_break_abx <- ggplot(plot_data, aes(x = exposure_group, y = log(simpson_recipr
   theme_minimal()
 
 ```
+```{r}
+whisker_data <- plot_data %>%
+  group_by(exposure_group) %>%
+  summarise(
+    q1 = quantile(log(simpson_reciprocal), 0.25, na.rm = TRUE),
+    q3 = quantile(log(simpson_reciprocal), 0.75, na.rm = TRUE),
+    iqr = q3 - q1,
+    lower_whisker_bound = q1 - 1.5 * iqr,
+    upper_whisker_bound = q3 + 1.5 * iqr,
+    min_data = min(log(simpson_reciprocal), na.rm = TRUE),
+    max_data = max(log(simpson_reciprocal), na.rm = TRUE),
+    
+    # The actual whisker end is the min/max data point within the 1.5*IQR range
+    whisker_lower_end = lower_whisker_bound,
+    whisker_upper_end = upper_whisker_bound,
+    .groups = 'drop'
+  )
+
+# --- Plot Generation ---
+ggplot(plot_data, aes(x = exposure_group, y = log(simpson_reciprocal), fill = exposure_group)) +
+
+  # Original Violin plot
+
+  # Original Boxplot with red, thick outlines
+  geom_boxplot(width = 0.1, fill = "white", color = "red", linewidth = 1, outlier.shape = NA, alpha = 0.7) +
+
+  # Jittered raw data points
+  geom_jitter(width = 0.1, alpha = 0.3, shape = 16, height = 0) +
+
+  # ADDING BLUE LINES FOR WHISKER ENDS
+  geom_segment(data = whisker_data, 
+               aes(x = exposure_group, xend = exposure_group, 
+                   y = whisker_lower_end, yend = whisker_lower_end),
+               color = "blue", linewidth = 1.5, linetype = "solid", 
+               inherit.aes = FALSE) +
+  # geom_segment(data = whisker_data, 
+  #              aes(x = exposure_group, xend = exposure_group, 
+  #                  y = whisker_upper_end, yend = whisker_upper_end),
+  #              color = "blue", linewidth = 1.5, linetype = "solid", 
+  #              inherit.aes = FALSE) +
+  # You might want to add a very small horizontal line at the end to make it a cap
+  geom_segment(data = whisker_data, 
+               aes(x = as.numeric(exposure_group) - 0.1, xend = as.numeric(exposure_group) + 0.1, 
+                   y = whisker_lower_end, yend = whisker_lower_end),
+               color = "blue", linewidth = 1.5, inherit.aes = FALSE) +
+  geom_segment(data = whisker_data, 
+               aes(x = as.numeric(exposure_group) - 0.1, xend = as.numeric(exposure_group) + 0.1, 
+                   y = whisker_upper_end, yend = whisker_upper_end),
+               color = "blue", linewidth = 1.5, inherit.aes = FALSE) +
+
+
+  coord_flip() +
+  scale_fill_viridis_d(guide = "none", option = "magma", begin=0.1, end=0.9) +
+  labs(
+    title = bquote("Unadjusted "~alpha*"-Diversity by Antibiotics and Sweets Intake"),
+    subtitle = paste0("Sweets consumption is stratified by the median intake of consumers (median=", 
+                      round(median_sweets_intake, 2), "g)"),
+    x = "",
+    y = "Log(Inverse Simpson Diversity)"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(color = "gray40"),
+    axis.title = element_text(size = 14)
+  )
+```
 
 
 # break down TPN and sweets, need to exclude the EN exposed samples since that is considered to be sweets 

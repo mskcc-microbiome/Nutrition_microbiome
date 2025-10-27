@@ -81,7 +81,7 @@ meta <- read_csv('../data/153_combined_META.csv')
 details <- get_counts_subset(meta$sampleid)
 
 detailsall <- details %>% 
-  inner_join(asv_annotation_blast_detailed_ag %>% select(asv_key : pident_97)) %>% 
+  left_join(asv_annotation_blast_detailed_ag %>% select(asv_key : pident_97)) %>% 
   distinct(asv_key, pident)
 
 detailsall %>% count(pident > 97) %>% 
@@ -95,6 +95,17 @@ asv_97 <- detailsall %>%
 asv_97 %>% write_csv('../data/171_asv_with_pident_gt_97.csv')
 
 
+asvdetails <- asv_annotation_blast_detailed_ag %>% select(asv_key : pident_97) |> 
+  filter(asv_key %in% details$asv_key)
+
+asv_anno <- asv_annotation_blast_ag |> 
+  filter(asv_key %in% details$asv_key)
+
+details |> write_csv('../data/171_asv_counts_data.csv')
+
+asv_anno |> write_csv('../data/171_asv_annotation_blast_data.csv')
+
+asvdetails |> write_csv('../data/171_asv_annotation_blast_detailed_data.csv')
 ```
 
 ```{r}
