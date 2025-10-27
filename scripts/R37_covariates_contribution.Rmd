@@ -20,12 +20,7 @@ source("../functions/identify_covariates.R")
 proj_home <- '..'
 # Load and Prep data:
 
-otu_table <- read.csv(paste0(proj_home, "/data/R25_asv_counts.csv")) %>%
-  select(-count_relative) %>%
-  pivot_wider(values_from = "count", names_from = "sampleid") %>%
-  column_to_rownames("asv_key") 
-otu_table[is.na(otu_table)] <- 0
-dist_mat <- as.matrix(vegdist(t(otu_table), method = "bray")) # this step will take quite some time
+
 
 clinical_cov <- readRDS(paste0(proj_home, "/data/R02_cleaned_clinical_outcome.rds")) %>%
   select(c(source,intensity, age, sex, disease.simple, pid))
@@ -34,9 +29,30 @@ metadata <- read.csv(paste0(proj_home, "/data/153_combined_META.csv")) %>%
   select(c(sampleid, empirical, timebin, fg_egg, fg_fruit, fg_grain, fg_legume, fg_meat, fg_milk, fg_oils, fg_sweets, fg_veggie, TPN, EN, pid)) %>%
   left_join(clinical_cov, by = "pid") %>%
   #select(-pid) %>%
-  mutate(disease.simple = if_else(disease.simple == "AML", "AML", "all others"))
-    
+  mutate(
+    disease_lineage = case_when(
+      disease.simple %in% c("AML", "MDS/MPN", "CML") ~ "Myeloid",
+      disease.simple %in% c("NHL", "ALL", "Myeloma", "CLL", "Hodgkins") ~ "Lymphoid",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # Remove the rows where 'disease_lineage' is NA.
+  filter(!is.na(disease_lineage)) |> 
+  select(-disease.simple)
+```
 
+```{r}
+otu_table <- read.csv(paste0(proj_home, "/data/R25_asv_counts.csv")) %>%
+  select(-count_relative) %>%
+  filter(sampleid %in% metadata$sampleid) |> 
+  pivot_wider(values_from = "count", names_from = "sampleid") %>%
+  column_to_rownames("asv_key") 
+otu_table[is.na(otu_table)] <- 0
+dist_mat <- as.matrix(vegdist(t(otu_table), method = "bray")) # this step will take quite some time
+```
+
+
+```{r}
 # make sure sample order is the same:
 reorder_indices <- match(rownames(dist_mat), metadata$sampleid)
 metadata <- metadata[reorder_indices,] %>%
@@ -59,14 +75,14 @@ metadata %>%
   theme(
     legend.position = "none"
   )
+```
 
-print(table(metadata$disease.simple))
+
+```{r}
 threshold = 0.05
 factor_fit <- vegan::envfit(as.data.frame(dist_mat), metadata, perms=1000)
 plotting_data_frame <- find_covariates_using_covariates_matrix_and_dist_mat(dist_mat, metadata, threshold = threshold, perms = 10000)
 ```
-
-
 
 
 ```{r}
@@ -74,7 +90,6 @@ covariate_data <- plotting_data_frame %>%
    filter(significant) %>% 
   mutate(variable_name = case_when(
     variable_name == "timebin" ~ "Week Relative to Transplant",
-    variable_name == "disease.simple" ~ "Disease (Broad Category)",
     variable_name == "empirical" ~ "ABX exposure (last 2 days)",
     variable_name == "modal diet" ~ "Dietary Pattern",
     variable_name == "source" ~ "Graft Source",
@@ -99,11 +114,20 @@ plot_data <- covariate_data |>
     category = case_when(
       variable_name == "pid" ~ "Inter-Patient Variability",
       str_starts(variable_name, "fg") ~ "Dietary Factors",
-      # TRUE ~ ... acts as a catch-all for anything not matched above.
-      TRUE ~ "Clinical Factors"
+      
+      # --- New Category: Patient Characteristics ---
+      # These are static characteristics of the patient, set at baseline.
+      variable_name %in% c("Graft Source", "Conditioning Intensity", "Sex",  "Age") ~ "Per-Patient Factors",
+      
+      # --- New Category: In-Hospital Events ---
+      # These are dynamic factors that change over time, sample-to-sample.
+      variable_name %in% c("ABX exposure (last 2 days)", "Week Relative to Transplant", "Enteral Nutrition") ~ "Per-Sample Events",
+      
+      # A fallback just in case, though all should be matched.
+      TRUE ~ "Other Clinical"
     ),
-    # Let's make the variable names more descriptive for the publication.
-    # `str_replace_all` helps clean up the labels.
+    
+    # Clean up the variable names for a publication-ready figure.
     variable_name = str_replace_all(variable_name,
       c(
         "pid" = "Patient ID (pid)",
@@ -128,7 +152,9 @@ plot_all_covariates <- plot_data |>
     fill = "Covariate Category"
   ) +
   theme_minimal(base_size = 14) + # A clean theme is good for publications.
-  theme(legend.position = "bottom") # Place legend at the bottom for a wider plot.
+  theme(legend.position = "bottom") +
+  # This line splits the legend into 2 rows.
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
 
 # --- Plot 2: "Zoomed-in" View ---
 # The second plot answers the reviewer's specific question about the relative
