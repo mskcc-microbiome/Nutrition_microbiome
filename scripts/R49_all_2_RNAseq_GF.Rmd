@@ -112,7 +112,10 @@ print("Head of new metadata table:")
 print(head(meta_table))
 
 # how many mice in each treatment group two batches combined
-meta_table %>% count(treatment, water, tissue)
+meta_table %>% 
+  filter(treatment == 'E. faecalis') |> 
+  count(treatment, water, tissue, batch) |> 
+  arrange(tissue,  water, treatment, batch)
 ```
 # data-driven filtering 
 
@@ -312,43 +315,74 @@ print(li_pca_grid)
 
 ```{r}
 # ---  Differential Expression Analysis with Batch Correction ---
-# This function automates the process of running DESeq2 for a specific contrast
-# while accounting for the batch effect.
-
 run_deseq_with_batch_correction <- function(full_counts, full_meta, target_tissue, analysis_type) {
   
   # Determine which samples and which variable to use for the contrast
   if (analysis_type == "Colonization") {
+    
+    # --- MODIFICATION ---
     # Compare PBS vs E. faecalis within regular water samples
-    meta_subset <- full_meta %>% filter(tissue == target_tissue, water == "regular_water")
-    design_formula <- ~ batch + treatment
+    # This design is confounded in batch2 (no PBS samples).
+    # Therefore, we ONLY use batch1 samples where the design is complete.
+    meta_subset <- full_meta %>% 
+      filter(tissue == target_tissue, 
+             water == "regular_water",
+             batch == "batch1") # <-- Added this filter
+    
+    # Since we are only using one batch, 'batch' is removed from the design formula.
+    design_formula <- ~ treatment
+    # ---------------------
+    
     contrast_info <- c("treatment", "E. faecalis", "PBS")
+    
   } else if (analysis_type == "Sucrose") {
+    
+    # --- NO CHANGE ---
     # Compare sucrose vs regular water within E. faecalis samples
-    meta_subset <- full_meta %>% filter(tissue == target_tissue, treatment == "E. faecalis")
+    # This design is valid across batches.
+    meta_subset <- full_meta %>% 
+      filter(tissue == target_tissue, 
+             treatment == "E. faecalis")
+    
+    # Include 'batch' in the design to correct for it.
     design_formula <- ~ batch + water
     contrast_info <- c("water", "sucrose_water", "regular_water")
+    
   } else {
     stop("Invalid analysis_type. Choose 'Colonization' or 'Sucrose'.")
   }
   
-  # Subset the counts matrix to match the selected metadata
-  counts_subset <- full_counts[, meta_subset$sample_id]
+  # Check if any samples are left after filtering
+  if (nrow(meta_subset) == 0) {
+    stop(paste("No samples found for tissue:", target_tissue, "and analysis:", analysis_type))
+  }
   
-  # Create the DESeqDataSet object with batch in the design
+  # Subset the counts matrix to match the selected metadata
+  # Ensure sample IDs are characters for matching
+  counts_subset <- full_counts[, as.character(meta_subset$sample_id)]
+  
+  # Ensure row and column names of colData and countData match
+  rownames(meta_subset) <- meta_subset$sample_id
+  counts_subset <- counts_subset[, rownames(meta_subset)]
+  
+  # Create the DESeqDataSet object with the appropriate design
   dds <- DESeqDataSetFromMatrix(
     countData = counts_subset,
     colData = meta_subset,
     design = design_formula
   )
   
+  
   # Run the DESeq2 analysis
   dds <- DESeq(dds)
   
   # Get the results for the specific contrast
+  # Using resultsNames(dds) to ensure contrast is valid
+  message("Running contrast: ", paste(contrast_info, collapse = " "))
   results <- results(dds, contrast = contrast_info)
   
   # Apply LFC shrinkage for more accurate fold changes
+  # 'contrast' is used for 'ashr' shrinkage
   shrunken_results <- lfcShrink(dds, contrast = contrast_info, type = "ashr")
   
   return(shrunken_results)
@@ -518,27 +552,20 @@ dds <- DESeqDataSetFromMatrix(
 # Run the DESeq2 analysis
 dds <- DESeq(dds)
 vst_data <- vst(dds, blind = FALSE)
-```
 
-```{r}
 # 1. find the list of B-cell genes from your volcano plot
 b_cell_sig_genes <- annotated_si_col |> 
   filter(padj < 0.05 , log2FoldChange > 1) 
 
-# 2. Correct for batch effect
-#    We use limma::removeBatchEffect on the variance-stabilized counts
-#    The 'batch' argument needs the batch vector from your coldata
-batch_corrected_counts <- removeBatchEffect(
-  assay(vst_data), 
-  batch = vst_data$batch # Use the 'batch' column from coldata
-)
+vst_counts <- assay(vst_data)
+
 
 # 3. Wrangle data for plotting
 #    The batch_corrected_counts is a matrix. We need to:
 #    a. Filter for our genes of interest
 #    b. Convert to a long-format tibble
 #    c. Join with the sample metadata (coldata)
-plot_data <- batch_corrected_counts %>%
+plot_data <- vst_counts %>%
   as.data.frame() %>%
   rownames_to_column("ensembl_version") %>%
   inner_join(b_cell_sig_genes) |> 
@@ -546,7 +573,7 @@ plot_data <- batch_corrected_counts %>%
   pivot_longer(
     cols = contains("IGO_"),
     names_to = "sample",
-    values_to = "batch_corrected_count"
+    values_to = "VST_normalized_count"
   ) %>%
   # Join with sample metadata to get 'condition'
   # We get the coldata straight from the dds object
@@ -555,30 +582,38 @@ plot_data <- batch_corrected_counts %>%
 
 
 ```{r}
-# 4. Create the faceted boxplot using the batch-corrected counts
-ggplot(plot_data, aes(x = treatment, y = batch_corrected_count, color = treatment)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
-  geom_jitter(width = 0.2, height = 0, size = 2) +
+# 4. Create the faceted boxplot, but show batch with color
+ggplot(plot_data, aes(x = treatment, y = VST_normalized_count, color = batch)) +
+  # Boxplot to summarize the groups
+  #geom_boxplot(outlier.shape = NA, alpha = 0.5, aes(fill = treatment)) +
+  
+  # Jitter plot to show *all* individual samples, colored by batch
+  # This is the most honest part of the visualization
+  geom_jitter(width = 0.1, height = 0, size = 3) +
+  
   # Use facet_wrap to create one small plot for each gene
-  # scales = "free_y" is important, as each gene will have a different count range
   facet_wrap(~ symbol, scales = "free_y") +
-  scale_color_brewer(palette = "Set1") +
+  
+  # Manually set high-contrast colors
+  scale_color_manual(values = c("batch1" = "black", "batch2" = "red")) +
+  scale_fill_manual(values = c("E. faecalis" = "#E41A1C", "PBS" = "#377EB8")) +
+  
   labs(
-    title = "Batch-Corrected Counts of B-Cell Signature Genes",
-    subtitle = "SI: Colonization Effect (VST + removeBatchEffect)",
-    x = "Experimental Condition",
-    y = "Batch-Corrected Normalized Counts (VST)"
+    title = "Normalized Counts of B-Cell Signature Genes",
+    subtitle = "Points colored by batch (VST data, no batch correction)",
+    x = "Experimental treatment",
+    y = "Normalized Counts (VST)"
   ) +
   theme_bw(base_size = 14) +
   theme(
     plot.title = element_text(hjust = 0.5, face = "bold"),
-    plot.subtitle = element_text(hjust = 0.5),
-    legend.position = "none", # The x-axis already shows the treatment
+    plot.subtitle = element_text(hjust = 0.5, size = 10),
+    legend.position = "bottom",
     strip.background = element_rect(fill = "grey90"),
     strip.text = element_text(face = "bold.italic")
   )
 
-ggsave("../data/R49_bcell_gene_counts_boxplot_batch_corrected.jpg", width = 12, height = 9, dpi = 300)
+ggsave("../data/R49_bcell_gene_counts_honest_plot.jpg", width = 12, height = 9, dpi = 300)
 ```
 
 ## B cells heatmap   
