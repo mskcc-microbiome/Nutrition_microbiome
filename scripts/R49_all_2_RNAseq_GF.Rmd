@@ -27,6 +27,7 @@ library(viridis)
 library(RColorBrewer) 
 library(gridExtra)
 library(tidyverse)
+library(gt)
 ```
 
 # merge counts and meta data 
@@ -117,6 +118,83 @@ meta_table %>%
   count(treatment, water, tissue, batch) |> 
   arrange(tissue,  water, treatment, batch)
 ```
+
+## the tally up of the samples count 
+
+```{r}
+summarize_sample_counts <- function(full_meta, target_tissue) {
+  
+  summary_table <- full_meta %>%
+    # Filter for the specific tissue
+    filter(tissue == target_tissue) %>%
+    
+    # Count samples for every combination of treatment, water, and batch
+    count(treatment, water, batch) %>%
+    
+    # Pivot so batch1 and batch2 are columns
+    # Fills with 0 if a combination doesn't exist (like PBS in batch2)
+    pivot_wider(names_from = batch, values_from = n, values_fill = 0) %>%
+    
+    # Create the "batch1 + batch2" string format
+    mutate(count_summary = paste0(batch1, " + ", batch2)) %>%
+    
+    # Keep only the columns we need for the final table
+    select(treatment, water, count_summary) %>%
+    
+    # Pivot so water types are columns
+    pivot_wider(names_from = water, values_from = count_summary) %>%
+    
+    # Order the rows as requested: E. faecalis first, then PBS
+    mutate(treatment = factor(treatment, levels = c("E. faecalis", "PBS"))) %>%
+    arrange(treatment) %>%
+    
+    # Order the columns as requested: regular_water first, then sucrose_water
+    # Using any_of() prevents an error if a column (e.g., sucrose_water) is missing
+    select(treatment, any_of(c("regular_water", "sucrose_water")))
+  
+  return(summary_table)
+}
+
+# ---  Usage ---
+
+# 1. Generate the table for the Large Intestine
+li_summary_data <- summarize_sample_counts(meta_table, "large_intestine")
+
+print("Large Intestine Summary:")
+li_summary_table <- li_summary_data %>%
+  gt() %>%
+  tab_header(
+    title = "Large Intestine Sample Summary",
+    subtitle = "Counts: batch1 + batch2"
+  ) %>%
+  cols_label(
+    treatment = "Treatment",
+    regular_water = "Regular Water",
+    sucrose_water = "Sucrose Water"
+  )
+
+print(li_summary_table)
+
+# 2. Generate the table for the Small Intestine
+si_summary_data <- summarize_sample_counts(meta_table, "small_intestine")
+
+print("Small Intestine Summary:")
+si_summary_table <- si_summary_data %>%
+  gt() %>%
+  tab_header(
+    title = "Small Intestine Sample Summary",
+    subtitle = "Counts: batch1 + batch2"
+  ) %>%
+  cols_label(
+    treatment = "Treatment",
+    regular_water = "Regular Water",
+    sucrose_water = "Sucrose Water"
+  )
+
+print(si_summary_table)
+```
+
+
 # data-driven filtering 
 
 ```{r}
@@ -314,105 +392,132 @@ print(li_pca_grid)
 # DE analysis and shrinking 
 
 ```{r}
-# ---  Differential Expression Analysis with Batch Correction ---
+#' Map Ensembl IDs to Gene Symbols and Aggregate Counts
+#'
+#' This helper function takes a raw counts matrix with Ensembl IDs,
+#' maps them to gene symbols, and sums up counts for any duplicate symbols.
+#'
+#' @param counts_matrix A raw counts matrix with Ensembl (versioned) rownames.
+#' @return A matrix with gene symbols as rownames and aggregated counts.
+map_and_aggregate_counts <- function(counts_matrix) {
+  
+  # 1. Create a mapping data frame
+  ensembl_versions <- rownames(counts_matrix)
+  ensembl_ids <- stringr::str_remove(ensembl_versions, "\\..*")
+  
+  mapping <- AnnotationDbi::select(
+    org.Mm.eg.db,
+    keys = ensembl_ids,
+    columns = "SYMBOL",
+    keytype = "ENSEMBL"
+  )
+  
+  # 2. Join mapping with the counts
+  counts_df <- as.data.frame(counts_matrix) %>%
+    rownames_to_column("ensembl_version") %>%
+    mutate(ensembl_id = stringr::str_remove(ensembl_version, "\\..*")) %>%
+    # Join by the clean Ensembl ID
+    left_join(mapping, by = c("ensembl_id" = "ENSEMBL")) %>%
+    # Remove genes that didn't map to a symbol
+    filter(!is.na(SYMBOL), SYMBOL != "") %>%
+    # Remove metadata columns, keep only symbol and counts
+    select(SYMBOL, all_of(colnames(counts_matrix))) 
+    # A safer way (if sample names are not predictable):
+    # select(SYMBOL, where(is.numeric)) 
+    
+  # 3. Aggregate counts for duplicate symbols (sum them up)
+  counts_aggregated_df <- counts_df %>%
+    group_by(SYMBOL) %>%
+    # Sum up all numeric columns (the samples)
+    summarise(across(where(is.numeric), sum)) %>%
+    # Convert back to a matrix with symbols as rownames
+    column_to_rownames("SYMBOL")
+    
+  return(as.matrix(counts_aggregated_df))
+}
+
+
+#' Run DESeq2 with batch correction and return results
+#'
+#' This function subsets data, handles the 'Colonization' contrast's
+#' confounding by filtering to batch1, and returns a list containing
+#' the dds object and an annotated results data frame.
+#'
+#' @param full_counts The full raw counts matrix (Ensembl IDs as rownames).
+#' @param full_meta The full metadata table.
+#' @param target_tissue The tissue to analyze (e.g., "large_intestine").
+#' @param analysis_type "Colonization" or "Sucrose".
+#'
+#' @return A list with 'dds' (the DESeqDataSet) and 'results' (an
+#'         annotated data frame of shrunken results).
 run_deseq_with_batch_correction <- function(full_counts, full_meta, target_tissue, analysis_type) {
   
   # Determine which samples and which variable to use for the contrast
   if (analysis_type == "Colonization") {
-    
-    # --- MODIFICATION ---
     # Compare PBS vs E. faecalis within regular water samples
-    # This design is confounded in batch2 (no PBS samples).
-    # Therefore, we ONLY use batch1 samples where the design is complete.
+    # This design is confounded in batch2, so we ONLY use batch1
     meta_subset <- full_meta %>% 
       filter(tissue == target_tissue, 
              water == "regular_water",
-             batch == "batch1") # <-- Added this filter
+             batch == "batch1") # Filter to batch1
     
-    # Since we are only using one batch, 'batch' is removed from the design formula.
-    design_formula <- ~ treatment
-    # ---------------------
-    
+    design_formula <- ~ treatment # Batch is no longer a variable
     contrast_info <- c("treatment", "E. faecalis", "PBS")
     
   } else if (analysis_type == "Sucrose") {
-    
-    # --- NO CHANGE ---
     # Compare sucrose vs regular water within E. faecalis samples
-    # This design is valid across batches.
+    # This design is NOT confounded and can use batch correction
     meta_subset <- full_meta %>% 
-      filter(tissue == target_tissue, 
-             treatment == "E. faecalis")
+      filter(tissue == target_tissue, treatment == "E. faecalis")
     
-    # Include 'batch' in the design to correct for it.
-    design_formula <- ~ batch + water
+    design_formula <- ~ batch + water # Correct for batch
     contrast_info <- c("water", "sucrose_water", "regular_water")
     
   } else {
     stop("Invalid analysis_type. Choose 'Colonization' or 'Sucrose'.")
   }
   
-  # Check if any samples are left after filtering
-  if (nrow(meta_subset) == 0) {
-    stop(paste("No samples found for tissue:", target_tissue, "and analysis:", analysis_type))
-  }
-  
   # Subset the counts matrix to match the selected metadata
-  # Ensure sample IDs are characters for matching
-  counts_subset <- full_counts[, as.character(meta_subset$sample_id)]
+  counts_subset <- full_counts[, meta_subset$sample_id]
   
-  # Ensure row and column names of colData and countData match
-  rownames(meta_subset) <- meta_subset$sample_id
-  counts_subset <- counts_subset[, rownames(meta_subset)]
+  # --- NEW STEP: Map IDs to Symbols and aggregate ---
+  # This converts the rownames from Ensembl IDs to Gene Symbols
+  counts_mapped <- map_and_aggregate_counts(counts_subset)
   
-  # Create the DESeqDataSet object with the appropriate design
+  # Create the DESeqDataSet object with batch in the design
+  # We use the NEW counts_mapped matrix
   dds <- DESeqDataSetFromMatrix(
-    countData = counts_subset,
+    countData = counts_mapped,
     colData = meta_subset,
     design = design_formula
   )
-  
   
   # Run the DESeq2 analysis
   dds <- DESeq(dds)
   
   # Get the results for the specific contrast
-  # Using resultsNames(dds) to ensure contrast is valid
-  message("Running contrast: ", paste(contrast_info, collapse = " "))
-  results <- results(dds, contrast = contrast_info)
+  results_raw <- results(dds, contrast = contrast_info)
   
   # Apply LFC shrinkage for more accurate fold changes
-  # 'contrast' is used for 'ashr' shrinkage
   shrunken_results <- lfcShrink(dds, contrast = contrast_info, type = "ashr")
   
-  return(shrunken_results)
+  # --- MODIFIED ANNOTATION ---
+  # Rownames are already gene symbols, so we just convert to a tibble
+  annotated_results <- as.data.frame(shrunken_results) %>%
+    rownames_to_column("symbol") %>%
+    select(symbol, everything()) # Reorder to put symbol first
+  
+  # Return both the dds (with symbols) and the annotated results
+  return(list(dds = dds, results = annotated_results))
 }
+
+
+
 ```
 
 # add gene symbols  
 
 ```{r}
-# ---  Annotate and Save DESeq2 Results ---
-
-# A helper function to convert a DESeqResults object to an annotated dataframe
-annotate_results <- function(deseq_results) {
-  as.data.frame(deseq_results) %>%
-    rownames_to_column("ensembl_version") %>%
-    mutate(
-      # Clean the Ensembl ID by removing the version number for mapping
-      ensembl_id = str_remove(ensembl_version, "\\..*"),
-      # Map the clean Ensembl IDs to gene symbols
-      symbol = mapIds(
-        org.Mm.eg.db,
-        keys = ensembl_id,
-        column = "SYMBOL",
-        keytype = "ENSEMBL",
-        multiVals = "first"
-      )
-    ) %>%
-    # Reorder columns for better readability
-    select(ensembl_id, symbol, everything())
-}
 
 
 # Run all four analyses
@@ -438,8 +543,6 @@ write_csv(annotated_li_suc, "../data/R49_shrunken_results_li_sucrose.csv")
 
 # Print a message to confirm completion
 print("DESeq2 analyses complete. Annotated shrunken results have been saved to CSV files.")
-
-
 ```
 
 # volcano plots 
@@ -532,11 +635,15 @@ print(final_volcano_grid)
 
 # Colonizing germ-free mice with E. faecalis will "wake up" the naive gut. The small intestine will focus on immediate defense by beefing up the mucus layer and producing bacteria-coating IgA antibodies. The large intestine, where the bacteria will primarily reside, will undergo a much more profound transformation, building out its immune infrastructure and physically remodeling its lining to learn how to permanently host a bacterial resident.
 ```
-## plot b cell genes
+## plot b cell genes in SI colonization contrast
+
+Use plotCounts (like in your script): To plot the expression of one gene at a time, comparing its value between groups.
+
+Use vst (like for the heatmap): To compare many different genes to each other, like in a heatmap or PCA plot.
 
 ```{r}
-meta_subset <- meta_table %>% filter(tissue == "small_intestine", water == "regular_water")
-design_formula <- ~ batch + treatment
+meta_subset <- meta_table %>% filter(tissue == "small_intestine", water == "regular_water", batch == "batch1")
+design_formula <- ~  treatment
 
 
 # Subset the counts matrix to match the selected metadata
@@ -1338,9 +1445,286 @@ if (length(inflammation_genes_for_heatmap) > 0) {
     main = "Heatmap of Inflammation Leading Edge Genes (LI Colonization)",
     filename = "../data/R49_inflammation_leading_edge_heatmap.jpg", width = 8, height = 15
   )
-  
 }
 ```
+
+
+# LI what is happening in LI
+
+E. faecalis alone causes inflammation and tells the gut cells to stop growing. Adding sucrose keeps the inflammation going but reverses the stop signal, telling the gut cells to grow rapidly, creating a high-risk, inflamed, and proliferative environment. The sucrose isn't directly affecting the host cells in the large intestine. Instead, a high-sucrose diet feeds the E. faecalis (which shouldn't have access to that sugar), causing it to produce byproducts like lactic acid and form biofilms. The host cells are reacting to this new, acidic, and bacteria-rich environment.
+
+```{r}
+# need to correct for batch effects in the sucrose contrast
+plot_pathway_heatmap <- function(dds, gene_list, annotation_vars, main_title, cluster_cols = FALSE) {
+  
+  # Run VST on the dds object
+  # blind = FALSE uses the model's dispersion estimates.
+  vst_data <- vst(dds, blind = FALSE)
+  vst_matrix <- assay(vst_data)
+  
+  # --- NEW: Check for and remove batch effect ---
+  # Check if 'batch' is part of the design formula
+  if ("batch" %in% all.vars(design(dds))) {
+    
+    message("Found 'batch' in the design. Removing batch effect for visualization.")
+    
+    # Load limma, which is needed for batch correction
+    if (!requireNamespace("limma", quietly = TRUE)) {
+      stop("Package 'limma' is needed for this function to remove batch effects.")
+    }
+    
+    # Identify the variable to *protect* (e.g., 'water' or 'treatment')
+    # This finds the variable in the design that is NOT 'batch'
+    design_vars <- all.vars(design(dds))
+    protected_var_name <- design_vars[design_vars != "batch"][1] # Get first non-batch var
+    
+    if (is.na(protected_var_name)) {
+      # This case should not happen with our 'Sucrose' design
+      warning("Could not automatically find variable to protect; only removing batch.")
+      
+      vst_matrix <- limma::removeBatchEffect(
+        vst_matrix, 
+        batch = colData(dds)$batch
+      )
+      
+    } else {
+      message(paste("Protecting variable:", protected_var_name))
+      
+      # Create a design matrix for the variable to protect
+      protected_design <- model.matrix(
+        as.formula(paste("~", protected_var_name)), 
+        data = colData(dds)
+      )
+      
+      # Remove batch effect, protecting the 'protected_design'
+      vst_matrix <- limma::removeBatchEffect(
+        vst_matrix, 
+        batch = colData(dds)$batch,
+        design = protected_design
+      )
+    }
+    message("Batch effect removed.")
+  }
+  # --- END NEW SECTION ---
+  
+  # Get all genes from the list
+  genes_to_plot <- unlist(gene_list)
+  
+  # Check which genes are actually in the matrix
+  genes_present <- genes_to_plot[genes_to_plot %in% rownames(vst_matrix)]
+  genes_missing <- genes_to_plot[!genes_to_plot %in% rownames(vst_matrix)]
+  
+  if (length(genes_missing) > 0) {
+    message("Warning: The following genes were not found and will be skipped: ", 
+            paste(genes_missing, collapse = ", "))
+  }
+  
+  if (length(genes_present) == 0) {
+    stop("Error: None of the specified genes were found in the dataset.")
+  }
+  
+  # Subset the matrix for the genes that are present
+  # This now uses the batch-corrected matrix (if batch was present)
+  plot_matrix <- vst_matrix[genes_present, , drop = FALSE]
+  
+  # Get metadata for annotation
+  annotation_col <- as.data.frame(colData(vst_data)[, annotation_vars, drop = FALSE])
+  
+  # --- NEW: Manually sort columns if cluster_cols is FALSE ---
+  ordering_indices <- 1:ncol(plot_matrix) # Default order (as is)
+  
+  if (cluster_cols == FALSE && length(annotation_vars) > 0) {
+    message(paste("Manual sorting of columns requested. Sorting by:", 
+                  paste(annotation_vars, collapse = ", ")))
+    
+    # Get the full colData to sort by
+    meta <- as.data.frame(colData(dds))
+    
+    # Create a list of columns to sort by (e.g., list(meta$water, meta$batch))
+    sort_list <- lapply(annotation_vars, function(var) meta[[var]])
+    
+    # Get the ordering indices
+    ordering_indices <- do.call(order, sort_list)
+  }
+  
+  # Apply the new order to the matrix and annotation
+  plot_matrix <- plot_matrix[, ordering_indices, drop = FALSE]
+  annotation_col <- annotation_col[ordering_indices, , drop = FALSE]
+  # --- END NEW SORTING LOGIC ---
+  
+  # Create row annotations and gaps
+  # Create a vector of pathway names, repeated for each gene
+  pathway_names <- rep(names(gene_list), lengths(gene_list))
+  # Filter this vector to only include genes that are present
+  pathway_names_present <- pathway_names[unlist(gene_list) %in% genes_present]
+  
+  annotation_row_df <- data.frame(
+    Pathway = pathway_names_present
+  )
+  rownames(annotation_row_df) <- genes_present
+  
+  # Calculate gaps based on the *present* genes
+  # Find the order of pathways based on the first gene appearance
+  unique_pathways_ordered <- unique(pathway_names_present)
+  # Table of counts, re-ordered
+  present_lengths <- table(pathway_names_present)[unique_pathways_ordered]
+  
+  gaps_row <- cumsum(present_lengths)
+  gaps_row <- gaps_row[-length(gaps_row)] # Remove last gap
+  
+  # Set colors
+  heatmap_colors <- colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100)
+  
+  # Plot the heatmap
+  pheatmap(
+    plot_matrix,
+    color = heatmap_colors,
+    annotation_col = annotation_col,
+    annotation_row = annotation_row_df,
+    cluster_rows = FALSE,  # Keep pathway groups together
+    cluster_cols = cluster_cols, # Allow clustering or keep sample groups
+    show_colnames = FALSE, # Tidy up the plot
+    show_rownames = TRUE,
+    gaps_row = gaps_row,
+    scale = "row",         # Scale by gene (Z-score), this is KEY
+    main = main_title
+  )
+} 
+```
+
+
+```{r}
+# ---  Usage ---
+
+# 1. Run your analyses 
+
+# Colonization (Batch 1 only)
+colonization_output <- run_deseq_with_batch_correction(
+  full_counts = filtered_raw_counts_matrix,
+  full_meta = meta_table,
+  target_tissue = "large_intestine",
+  analysis_type = "Colonization"
+)
+
+# Sucrose (Both batches, batch-corrected design)
+sucrose_output <- run_deseq_with_batch_correction(
+  full_counts = filtered_raw_counts_matrix,
+  full_meta = meta_table,
+  target_tissue = "large_intestine",
+  analysis_type = "Sucrose"
+)
+```
+
+
+
+
+```{r}
+#' Get a single vector of leading edge genes from an fgsea result
+#'
+#' @param fgsea_res The result object from running fgsea()
+#' @param pathway_name The exact name of the pathway (e.g., "HALLMARK_MYC_TARGETS_V1")
+#' @return A character vector of gene symbols in the leading edge.
+get_leading_edge <- function(fgsea_res, pathway_name) {
+  
+  # Find the pathway in the results
+  pathway_data <- fgsea_res %>% 
+    as_tibble() %>% 
+    filter(pathway == pathway_name)
+  
+  if (nrow(pathway_data) == 0) {
+    message("Warning: Pathway '", pathway_name, "' not found.")
+    return(character(0)) # Return empty vector
+  }
+  
+  # The leadingEdge column is a list, so unlist the first (and only) element
+  return(unlist(pathway_data$leadingEdge))
+}
+
+
+#' Create gene list of shared Alarm and Brakes/Gas genes from GSEA results
+#'
+#' @param fgsea_res_col The fgsea results for the Colonization contrast
+#' @param fgsea_res_suc The fgsea results for the Sucrose contrast
+#' @return A named list ("Interferon (Alarm)", "Cell Cycle (Brakes/Gas)")
+#'         containing the shared leading edge genes for those pathways.
+create_heatmap_genelist_from_gsea <- function(fgsea_res_col, fgsea_res_suc) {
+  
+  # --- 1. Define Pathway Names ---
+  alarm_pathways <- c("HALLMARK_ALLOGRAFT_REJECTION", 
+                      "HALLMARK_INTERFERON_GAMMA_RESPONSE")
+  
+  brakes_gas_pathways <- c("HALLMARK_MYC_TARGETS_V1", 
+                           "HALLMARK_E2F_TARGETS")
+  
+  # --- 2. Get ALARM (Interferon) Genes ---
+  # Get all leading edge genes from these pathways for both contrasts
+  alarm_col <- unlist(lapply(alarm_pathways, get_leading_edge, fgsea_res = fgsea_res_col))
+  alarm_suc <- unlist(lapply(alarm_pathways, get_leading_edge, fgsea_res = fgsea_res_suc))
+  
+  # Find the genes that are in the leading edge for *both* contrasts
+  shared_alarm_genes <- intersect(alarm_col, alarm_suc) %>% unique()
+  
+  if (length(shared_alarm_genes) == 0) {
+    message("Warning: No shared leading-edge 'Alarm' (Interferon) genes found.")
+  }
+  
+  # --- 3. Get BRAKES/GAS (Cell Cycle) Genes ---
+  # Get all leading edge genes from these pathways for both contrasts
+  brakes_gas_col <- unlist(lapply(brakes_gas_pathways, get_leading_edge, fgsea_res = fgsea_res_col))
+  brakes_gas_suc <- unlist(lapply(brakes_gas_pathways, get_leading_edge, fgsea_res = fgsea_res_suc))
+  
+  # Find the genes that are in the leading edge for *both* contrasts
+  shared_brakes_gas_genes <- intersect(brakes_gas_col, brakes_gas_suc) %>% unique()
+  
+  if (length(shared_brakes_gas_genes) == 0) {
+    message("Warning: No shared leading-edge 'Brakes/Gas' (Myc/E2F) genes found.")
+  }
+
+  # --- 4. Create the final list ---
+  final_gene_list <- list(
+    "Interferon" = shared_alarm_genes,
+    "Cell proliferation" = shared_brakes_gas_genes
+  )
+  
+  message("Gene list created.")
+  message(paste("  Found", length(shared_alarm_genes), "shared Alarm genes."))
+  message(paste("  Found", length(shared_brakes_gas_genes), "shared Brakes/Gas genes."))
+  
+  return(final_gene_list)
+}
+
+# --- Example Usage ---
+
+
+# Now, run this new function to get your *actual* gene list
+my_gene_list <- create_heatmap_genelist_from_gsea(
+  fgsea_res_col = fgsea_res_li_col,
+  fgsea_res_suc = fgsea_res_li_suc
+)
+```
+
+```{r}
+# 3. Plot Heatmap 1: Colonization
+plot_pathway_heatmap(
+  dds = colonization_output$dds,
+  gene_list = my_gene_list,
+  annotation_vars = c("treatment"),
+  main_title = "Colonization Effect (Batch 1 Only)"
+)
+
+# # --- Sucrose Heatmap (Both Batches, Corrected) ---
+
+# Plot heatmap
+# 'dds' object has ~ batch + water, so batch correction is APPLIED
+plot_pathway_heatmap(
+  dds = sucrose_output$dds,
+  gene_list = my_gene_list,
+  annotation_vars = c( "water", "batch"),
+  main_title = "LI Sucrose Effect (Batch Corrected)",
+  cluster_cols = F
+)
+```
+
 
 # assemble  
 
@@ -1369,4 +1753,3 @@ ggsave('../data/R49_GF_mouse_RNA_seq_all.pdf',
       width = 15, height = 24, units = "in", device = 'pdf', 
       dpi = 300)  
 ```
-
