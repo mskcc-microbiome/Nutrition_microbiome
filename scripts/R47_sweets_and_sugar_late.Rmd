@@ -108,7 +108,7 @@ sweets_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sweets_dehydra
   ) +
   theme_bw(base_size = 12) +
   scale_y_sqrt() +
-  facet_wrap(~ had_enteral) +
+  #facet_wrap(~ had_enteral) +
   theme(
     legend.position = "none",
     plot.title = element_text(face = "bold"),
@@ -134,7 +134,7 @@ sugars_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sugars_g, colo
   ) +
   theme_bw(base_size = 12) +
   scale_y_sqrt() +
-  facet_wrap(~ intake_source) +
+  #facet_wrap(~ intake_source) +
   theme(
     legend.position = "none",
     plot.title = element_text(face = "bold"),

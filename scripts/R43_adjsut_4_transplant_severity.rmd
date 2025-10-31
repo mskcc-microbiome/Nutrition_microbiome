@@ -115,6 +115,8 @@ cleaned_ci_data %>% write_csv('../data/R43_cleaned_ci_data_diet.csv')
 
 ```{r}
 # the meta table should remove the few patients that we don't have CI data 
+cleaned_ci_data <- read_csv('../data/R43_cleaned_ci_data_diet.csv')
+
 meta_CI <- meta %>%
   left_join(cleaned_ci_data %>% select(pid, ci_cleaned_numeric)) %>% 
   filter(!is.na(ci_cleaned_numeric))
@@ -124,6 +126,7 @@ rm_pt_num <- cleaned_ci_data %>% filter(is.na(ci_cleaned_numeric))
 rm_pt_num %>% nrow
 
 rm_samples_num <- meta %>% filter(pid %in% rm_pt_num$pid) 
+rm_samples_num |> nrow()
 ```
 
 ## running model 

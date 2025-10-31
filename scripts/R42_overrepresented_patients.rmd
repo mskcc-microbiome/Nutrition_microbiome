@@ -190,6 +190,7 @@ priors <-
 # 
 # We performed a sensitivity analysis by repeatedly subsampling the data to control for participant overrepresentation. The negative association between microbiome diversity and the co-exposure to antibiotics and sweets was a robust finding, remaining significant across all subsamples. In contrast, other potential associations (e.g., with meats and vegetables) were not stable and appeared only inconsistently, suggesting they are likely artifacts of sampling variability rather than robust biological signals.
 ```
+
 # Robustness Check via Iterative Subsampling
 
 ```{r}

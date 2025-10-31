@@ -20,6 +20,14 @@ experiment_data <- read_csv('../data/124_smoothie_mouse_experiment_data.csv') %>
   mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/(Stool_weight_g * 1000))+1) %>% 
   janitor::clean_names()
 ```
+```{r}
+# find out how many experiments and how many mice in each group
+experiment_data |> 
+  filter(day == 1) |> 
+  count(experiment, treatment) |> 
+  filter(experiment != 14) |> 
+  summary()
+```
 
 
 ```{r}
