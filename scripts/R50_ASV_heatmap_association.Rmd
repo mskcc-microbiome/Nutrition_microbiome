@@ -1,0 +1,434 @@
+---
+title: "ASV heatmap"
+output: html_document
+date: "2025-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(cowplot)
+library(broom.mixed)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(brmstools)
+library(bayesplot)
+library(gt)
+library(rcompanion)
+library(janitor)
+library(compositions)
+library(ggtext)
+library(furrr)
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+```
+```{r}
+asv_relab_97 <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv')
+
+clr_res <- read_csv('../data/R50_asv_all_clr_abundance.csv')
+
+meta <- read_csv('../data/153_combined_META.csv')
+```
+# filtering threshold
+
+```{r}
+# 1. Clean the data by removing ASVs with no genus annotation
+# This checks for both actual NA values and the text string "NA"
+clean_data <- asv_relab_97 %>%
+  filter(!is.na(genus), genus != "NA")
+
+# 2. Get the total number of unique samples in the dataset
+total_samples <- n_distinct(clean_data$sampleid)
+cat("Total unique samples:", total_samples, "\n\n")
+
+# 3. Pre-calculate prevalence for all ASVs to use as a lookup
+asv_prevalence_lookup <- clean_data %>%
+  group_by(asv_key) %>%
+  summarise(n_samples = n_distinct(sampleid), .groups = 'drop') %>%
+  mutate(prevalence = n_samples / total_samples) %>%
+  select(asv_key, prevalence)
+
+# 4. Define the series of abundance and prevalence thresholds to test
+abundance_thresholds <- seq(0.005, 0.0001, by = -0.0001)
+prevalence_thresholds <- seq(0.1, 0.5, by = 0.1) # 10%, 20%, 30%, 40%, 50%
+
+# 5. Create a grid (tibble) of all threshold combinations
+threshold_grid <- tidyr::expand_grid(
+  prev_thresh = prevalence_thresholds,
+  abund_thresh = abundance_thresholds
+)
+
+# 6. Loop through each combination, filter, and tally the results
+# We'll use purrr::pmap_dfr to iterate over the rows of the grid
+threshold_results <- purrr::pmap_dfr(threshold_grid, function(prev_thresh, abund_thresh) {
+  
+  # Find ASVs that meet the CURRENT prevalence threshold
+  prevalent_asvs <- asv_prevalence_lookup %>%
+    filter(prevalence >= prev_thresh) %>%
+    pull(asv_key)
+  
+  # Find ASVs that meet the CURRENT abundance threshold
+  # This finds ASVs that have at least one observation >= thresh
+  abundant_asvs <- clean_data %>%
+    filter(count_relative >= abund_thresh) %>%
+    distinct(asv_key) %>%
+    pull(asv_key)
+  
+  # Find the final list of ASVs that meet BOTH criteria
+  final_asvs_list <- intersect(prevalent_asvs, abundant_asvs)
+  
+  # Get the count
+  asv_count <- length(final_asvs_list)
+  
+  # Return a one-row tibble
+  tibble::tibble(
+    prevalence_threshold = prev_thresh,
+    abundance_threshold_min = abund_thresh,
+    retained_asv_count = asv_count,
+    retained_asvs = list(final_asvs_list) # Store the list of ASVs
+  )
+})
+
+# --- Results ---
+
+# 7. Report the tally of retained ASVs at each threshold combination
+cat("--- Analysis Results ---\n")
+cat("Tally of retained ASVs at each prevalence and abundance threshold combination:\n")
+# Print the results, but remove the list column for a cleaner look
+# Setting n = Inf to print all rows
+print(threshold_results %>% select(-retained_asvs), n = Inf)
+cat("\n")
+
+# 8. Plot the results as a heatmap
+cat("Generating heatmap of threshold results...\n")
+
+# Create a sequence for the y-axis breaks (showing every 5th label)
+y_axis_breaks <- abundance_thresholds[seq(1, length(abundance_thresholds), by = 5)]
+
+heatmap_plot <- threshold_results %>%
+  # Convert prevalence to a factor with percentage labels for a discrete x-axis
+  mutate(prevalence_threshold_label = factor(paste0(prevalence_threshold * 100, "%"))) %>%
+  ggplot(aes(x = prevalence_threshold_label, 
+             y = abundance_threshold_min, 
+             fill = retained_asv_count)) +
+  geom_tile(color = "white", size = 0.1) + # Add faint white lines between tiles
+  
+  # Add the text labels for the counts. You can comment this line out if it's too crowded.
+  geom_text(aes(label = retained_asv_count), color = "black", size = 2) +
+  
+  # Use the Viridis color scale
+  scale_fill_viridis_c(option = "C", direction = -1) +
+  
+  # Format the y-axis to be less crowded and reverse it
+  scale_y_continuous(
+    breaks = y_axis_breaks,
+    labels = scales::number_format(accuracy = 0.0001),
+    trans = "reverse" # Puts higher abundance thresholds (e.g., 0.005) at the top
+  ) +
+  labs(
+    title = "Retained ASV Count by Prevalence and Abundance Thresholds",
+    x = "Prevalence Threshold",
+    y = "Minimum Abundance Threshold",
+    fill = "Retained ASVs"
+  ) +
+  theme_minimal() +
+  theme(
+    # axis.text.x = element_text(angle = 45, hjust = 1), # Uncomment if x-axis labels overlap
+    panel.grid = element_blank() # Remove panel gridlines for a cleaner heatmap
+  )
+
+# Print the plot
+print(heatmap_plot)
+cat("\n")
+
+
+# 9. Get the final list of ASVs from the most inclusive threshold combination
+# This corresponds to the 10% prevalence and 0.0001 abundance
+final_asv_list_for_genera <- threshold_results %>%
+  filter(prevalence_threshold == min(prevalence_threshold),
+         abundance_threshold_min == min(abundance_threshold_min)) %>%
+  pull(retained_asvs) %>%
+  first() # Get the first element (which is the list of ASVs)
+
+cat("Total ASVs remaining at the 10% prevalence and 0.0001 abundance threshold:", length(final_asv_list_for_genera), "\n")
+if (length(final_asv_list_for_genera) > 0) {
+    cat("Remaining ASV keys:", paste(final_asv_list_for_genera, collapse = ", "), "\n\n")
+}
+
+# 10. Find the genera for these remaining ASVs and count them
+cat("Genera for ASVs meeting the 10% prevalence and 0.0001 abundance threshold, sorted by frequency:\n")
+if (length(final_asv_list_for_genera) > 0) {
+  genus_counts <- clean_data %>%
+    filter(asv_key %in% final_asv_list_for_genera) %>%
+    distinct(asv_key, genus) %>% # Get unique asv-genus pairs
+    count(genus, sort = TRUE, name = "number_of_asvs")
+  
+  print(genus_counts)
+} else {
+  cat("No ASVs remained at this threshold, so no genera to report.\n")
+}
+
+
+
+```
+```{r}
+# 11. Specific Genus Analysis (New section)
+cat("\n--- Specific Genus Analysis (0.0005 Abundance Threshold) ---\n\n")
+
+# Define the thresholds for this specific query
+specific_abund_thresh <- 0.002
+specific_prev_thresh_range <- seq(0.2, 0.5, by = 0.1)
+
+# Loop through the prevalence thresholds and report genera
+for (prev_thresh in specific_prev_thresh_range) {
+  
+  cat(paste0("--- Genera at ", prev_thresh * 100, "% Prevalence and ", specific_abund_thresh, " Abundance ---\n"))
+  
+  # Find the row in our results that matches these exact criteria
+  asv_list_for_condition <- threshold_results %>%
+    filter(prevalence_threshold == prev_thresh,
+           abundance_threshold_min == specific_abund_thresh) %>%
+    pull(retained_asvs) %>%
+    first()
+  
+  if (length(asv_list_for_condition) > 0) {
+    # If we have ASVs, find their genera and count them
+    genus_counts <- clean_data %>%
+      filter(asv_key %in% asv_list_for_condition) %>%
+      distinct(asv_key, genus) %>% # Get unique asv-genus pairs
+      count(genus, sort = TRUE, name = "number_of_asvs")
+    
+    print(genus_counts)
+  } else {
+    # If no ASVs met the criteria
+    cat("No ASVs remained at this threshold combination.\n")
+  }
+  cat("\n") # Add a blank line for readability
+}
+
+# decided to stick to Genera at 40% Prevalence and 0.002 Abundance 
+```
+
+
+```{r}
+# 12. Final ASV List and Subsetting clr_res (New section)
+cat("\n--- Final ASV Subsetting (40% Prevalence & 0.002 Abundance) ---\n\n")
+
+# Define the final chosen thresholds
+final_prev_thresh <- 0.4
+final_abund_thresh <- 0.002
+
+# Extract the list of ASVs from the pre-computed results
+final_asv_list <- threshold_results %>%
+  filter(prevalence_threshold == final_prev_thresh,
+         abs(abundance_threshold_min - final_abund_thresh) < 1e-9) %>%
+  pull(retained_asvs) %>%
+  first()
+
+if (length(final_asv_list) > 0) {
+  cat("Found", length(final_asv_list), "ASVs meeting the final criteria:\n")
+  cat(paste(final_asv_list, collapse = ", "), "\n\n")
+  
+  # --- UPDATED LOGIC FOR LONG FORMAT ---
+  # Filter the clr_res table by *rows* using the final ASV list
+  
+  cat("Subsetting clr_res table by filtering for rows with these ASVs:\n")
+  
+  clr_subset <- clr_res %>%
+    filter(asv_key %in% final_asv_list)
+  
+  cat("Resulting subsetted table (head):\n")
+  print(head(clr_subset))
+    
+
+} else {
+  cat("No ASVs were found that meet the final 40% prevalence and 0.002 abundance thresholds.\n")
+}
+```
+
+# CLR of the ASVs
+
+```{r}
+# library(vdbR)
+# connect_database()
+# 
+# details <- get_counts_subset(meta$sampleid)
+# 
+# # save a table that has the asv > 97 and also the samples and their relab
+# asv_relab_97 <- details %>% 
+#   select(asv_key, sampleid, count_relative, count) %>% 
+#   inner_join(clean_data %>% distinct(asv_key, genus)) 
+# 
+# asv_relab_97 |> write_csv('../data/R50_asv_cts_and_relab_all_trust_genus.csv')
+```
+
+
+```{r}
+# asv_relab_all <- read_csv('../data/R50_asv_cts_and_relab_all_trust_genus.csv')
+#   
+# cts_all <- asv_relab_all %>%
+#   select(asv_key, sampleid, cnt = count) |> 
+#   spread('sampleid', 'cnt', fill = 0) %>% 
+#   filter(!is.na(asv_key)) %>% 
+#   column_to_rownames('asv_key')
+# 
+# clr_res <- clr(cts_all + 0.5) %>% 
+#   as.data.frame()  %>% 
+#   rownames_to_column('asv_key') %>% 
+#   gather('sampleid','clr', names(.)[2]:names(.)[ncol(.)])
+# 
+# clr_res |> write_csv('../data/R50_asv_all_clr_abundance.csv')
+```
+
+# model 
+
+```{r}
+meta_ASVs <- meta %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100)) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  inner_join(clr_subset |> spread('asv_key','clr'))
+```
+
+```{r}
+all_food_vars <- meta_ASVs %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "asv_1 ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+  prior(normal(0, 1), class = 'b') + # General prior for all food effects
+  # Specific priors that override the general one for non-food covariates
+  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = meta_ASVs,
+  prior = priors,
+  warmup = 1000, iter = 3000,
+  chains = 2, cores = 4, 
+  seed = 123,
+  silent = 2
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
+```
+## loop
+
+```{r}
+# 12. Parallel brms Model Fitting (Replaces old Section 12)
+cat("\n--- Parallel brms Model Fitting ---\n\n")
+
+# --- Setup Model Parameters ---
+
+# Get all food variable column names
+all_food_vars <- meta_ASVs %>% 
+  select(starts_with('fg')) %>% 
+  colnames()
+
+# Create the interaction terms for all food variables
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Define the priors (these are constant for all models)
+priors <-
+  prior(normal(0, 1), class = 'b') + # General prior for all food effects
+  # Specific priors that override the general one for non-food covariates
+  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
+
+# Get the list of ASV outcome variables
+asv_vars <- meta_ASVs %>% 
+  select(starts_with('asv')) %>% 
+  colnames()
+
+cat("Found", length(asv_vars), "ASV columns to model:", paste(asv_vars, collapse = ", "), "\n")
+
+# --- Define the Model Fitting Function ---
+# This function takes one argument: the name of the ASV column to use as the outcome
+fit_brm_model <- function(asv_outcome_name) {
+  
+  # Build the full formula string dynamically
+  formula_string <- paste(
+    asv_outcome_name, # Use the dynamic ASV name here
+    "~ 0 + intensity + empirical + TPN + EN +",
+    paste(interaction_terms, collapse = " + "),
+    "+ (1 | pid) + (1 | timebin)"
+  )
+  
+  # Convert the string to a formula object
+  formula <- brms::bf(as.formula(formula_string))
+  
+  # Fit the model
+  # Using fewer iterations (warmup=500, iter=1000) for this example to run quickly
+  # Increase these for your real analysis
+  model_fit <- brm(
+    formula = formula,
+    data = meta_ASVs,
+    prior = priors,
+    warmup = 500, iter = 1000, # Reduced for example
+    chains = 2, cores = 1, # `cores = 1` is important for running in parallel
+    seed = 123,
+    silent = 2,
+    backend = "cmdstanr" # Recommended if you have cmdstanr installed
+  )
+  
+  # Tidy the results and return them
+  # Using broom.mixed::tidy
+  tidy(model_fit, conf.int = TRUE) %>%
+    mutate(conf.low = round(conf.low, 2),
+           conf.high = round(conf.high, 2))
+}
+
+# --- Run Models in Parallel using furrr ---
+
+cat("Setting up parallel plan (using multisession)...\n")
+# Set up a parallel plan with as many cores as possible, minus one
+# You can change `workers` to a specific number if you prefer
+plan(multisession, workers = max(1, parallel::detectCores() - 1))
+
+cat("Running models in parallel. This may take a while...\n")
+
+# Use future_map_dfr to run the function for each ASV and combine results
+# The `.id = "asv_key"` argument adds a column to the final dataframe
+# that identifies which ASV the results belong to.
+all_model_results <- future_map_dfr(
+  .x = asv_vars,
+  .f = fit_brm_model,
+  .options = furrr_options(seed = TRUE), # Ensures reproducibility
+  .id = "asv_key" # Adds a column with the name from `asv_vars`
+)
+
+# Shut down the parallel workers
+plan(sequential)
+
+cat("\n--- Parallel Modeling Complete ---\n")
+cat("Head of combined model results:\n")
+print(head(all_model_results))
+
+
+```
+
