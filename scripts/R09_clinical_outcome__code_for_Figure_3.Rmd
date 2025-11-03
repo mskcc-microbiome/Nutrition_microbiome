@@ -145,7 +145,8 @@ input_df <- df_main |>
    mutate(`Diet-pattern cluster` = case_when(
     `Diet-pattern cluster` == 'Lower-intake/sugar-enriched' ~ 'Cluster 1 (Lower-intake/sugar-enriched)',
     `Diet-pattern cluster` == 'Higher-intake' ~ 'Cluster 2 (Higher-intake)' 
-  )) 
+  )) |> 
+  mutate(exposure_in_week = `Abx exposure(days)`/7)
 
 
 
@@ -184,6 +185,19 @@ combined <- plot_grid(
 
 ggsave('../results//Table_S3_OS_multivariate_R09.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+```
+ 
+ 
+```{r}
+# what if I change the exposure to be in weeks
+fit_wk <- coxph(Surv(OStime_30,OSevent)~`Diet-pattern cluster`*exposure_in_week  + `Conditioning intensity` + `Graft source and GvHD prophylaxis`,
+             data= input_df)
+
+fit_wk |> 
+  tbl_regression(exponentiate = T) |> 
+  bold_p() |> 
+  as_gt() |> 
+  gtsave(filename="../data/09_OS_model_multi_wk.png")
 ```
  
 ## F3C  
@@ -423,7 +437,7 @@ patient_summary <- daily_intake %>%
     # Create a factor "High" or "Low" based on the median of the cohort
     SugarCal_cat_high = if_else(avg_sugar_density_per_1000kcal > median(avg_sugar_density_per_1000kcal, na.rm = TRUE),
                                           "High", "Low"),
-    SugarCal_cat_high = factor(SugarCal_cat_high, levels = c('Low','High'))
+    SugarCal_cat_high = factor(SugarCal_cat_high, levels = c('High', 'Low'))
   )
 ```
 
@@ -538,21 +552,118 @@ publication_table %>%
 ```
 
 ```{r}
-res <- data.frame(Variable=c("Days of abx exposure | low sugar grams/1000Kcal",
+fit_teng <- coxph(Surv(OStime_30,OSevent)~ SugarCal_cat_high * day_exposed + source_and_gvhdppx + intensity ,
+             data=patient_summary |> filter(OStime_30 > 0) )
+
+res_teng <- data.frame(Variable=c("Days of abx exposure | low sugar grams/1000Kcal",
                              "Days of abx exposure | high sugar grams/1000Kcal"),
-                  log.estimate = c(coef(fit)[2],diff),
-                  log.conf.low = c(coef(fit)[2] - 1.96*sqrt(vcov(fit)[2,2]),
+                  log.estimate = c(coef(fit_teng)[2],diff),
+                  log.conf.low = c(coef(fit_teng)[2] - 1.96*sqrt(vcov(fit_teng)[2,2]),
                                    diff - 1.96*se),
-                  log.conf.high = c(coef(fit)[2] + 1.96*sqrt(vcov(fit)[2,2]),
+                  log.conf.high = c(coef(fit_teng)[2] + 1.96*sqrt(vcov(fit_teng)[2,2]),
                                     diff + 1.96*se),
-                  estimate = exp(c(coef(fit)[2],diff)),
-                  conf.low = exp(c(coef(fit)[2] - 1.96*sqrt(vcov(fit)[2,2]),
+                  estimate = exp(c(coef(fit_teng)[2],diff)),
+                  conf.low = exp(c(coef(fit_teng)[2] - 1.96*sqrt(vcov(fit_teng)[2,2]),
                                    diff - 1.96*se)),
-                  conf.high = exp(c(coef(fit)[2] + 1.96*sqrt(vcov(fit)[2,2]),
+                  conf.high = exp(c(coef(fit_teng)[2] + 1.96*sqrt(vcov(fit_teng)[2,2]),
                                     diff + 1.96*se)),
                   p.value = c(0.3,
                               p$result$chi2[3]))
+```
+```{r}
+# --- 1. Define Log(Hazard Ratios) ---
+# Get the coefficients from the model
+# coef(fit)[2] is 'day_exposed'
+# coef(fit)[8] is 'SugarCal_cat_highLow:day_exposed'
 
+# The effect of 'day_exposed' for the High Sugar group (reference category)
+# is just the main effect of 'day_exposed'.
+log_hr_high_sugar <- coef(fit)[2]
+
+# The effect of 'day_exposed' for the Low Sugar group is the main effect
+# plus the interaction term's effect.
+log_hr_low_sugar <- coef(fit)[2] + coef(fit)[8]
+
+
+# --- 2. Define Standard Errors (SE) ---
+# Get the variance-covariance matrix
+v_cov <- vcov(fit)
+
+# SE for High Sugar group is just the sqrt of the variance for coef[2]
+se_high_sugar <- sqrt(v_cov[2, 2])
+
+# SE for Low Sugar group (for the sum of coef[2] + coef[8])
+# Uses the formula: SE(A+B) = sqrt(Var(A) + Var(B) + 2*Cov(A,B))
+se_low_sugar <- sqrt(v_cov[2, 2] + v_cov[8, 8] + 2 * v_cov[2, 8])
+
+
+# --- 3. Calculate Z-scores and P-values ---
+# For High Sugar group
+# We can pull this p-value directly from the summary
+p_high_sugar <- summary(fit)$coefficients[2, "Pr(>|z|)"]
+# Or calculate it:
+# z_high_sugar <- log_hr_high_sugar / se_high_sugar
+# p_high_sugar <- 2 * pnorm(-abs(z_high_sugar))
+
+# For Low Sugar group
+z_low_sugar <- log_hr_low_sugar / se_low_sugar
+p_low_sugar <- 2 * pnorm(-abs(z_low_sugar))
+
+
+# --- 4. Create the Final Results Data.frame ---
+# This builds the data.frame with the correct estimates in the correct rows.
+res <- data.frame(
+  Variable = c(
+    "Days of abx exposure | high sugar grams/1000Kcal",
+    "Days of abx exposure | low sugar grams/1000Kcal"
+  ),
+  
+  # Log-estimates
+  log.estimate = c(
+    log_hr_high_sugar,
+    log_hr_low_sugar
+  ),
+  
+  # Log-Confidence Intervals
+  log.conf.low = c(
+    log_hr_high_sugar - 1.96 * se_high_sugar,
+    log_hr_low_sugar - 1.96 * se_low_sugar
+  ),
+  log.conf.high = c(
+    log_hr_high_sugar + 1.96 * se_high_sugar,
+    log_hr_low_sugar + 1.96 * se_low_sugar
+  ),
+  
+  # Hazard Ratios (exponentiated estimates)
+  estimate = c(
+    exp(log_hr_high_sugar),
+    exp(log_hr_low_sugar)
+  ),
+  
+  # Hazard Ratio Confidence Intervals
+  conf.low = c(
+    exp(log_hr_high_sugar - 1.96 * se_high_sugar),
+    exp(log_hr_low_sugar - 1.96 * se_low_sugar)
+  ),
+  conf.high = c(
+    exp(log_hr_high_sugar + 1.96 * se_high_sugar),
+    exp(log_hr_low_sugar + 1.96 * se_low_sugar)
+  ),
+  
+  # P-values
+  p.value = c(
+    p_high_sugar,
+    p_low_sugar
+  )
+)
+
+# You can then print or view the final table
+print(res)
+
+```
+
+
+```{r}
 # wrangle results into pre-plotting table form
 res_plot <- res |>
   # round estimates and 95% CIs to 2 decimal places for journal specifications

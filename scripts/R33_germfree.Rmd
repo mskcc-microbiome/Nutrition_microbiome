@@ -515,13 +515,13 @@ p_label <- paste0("p = ", format(p_value, digits = 2, nsmall = 2), "*")
 # To visualize the result, a simple boxplot of the AUC values is helpful.
 auc_plot <- ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatment)) +
   geom_boxplot(alpha = 0.7,  outlier.shape = NA) +
-  geom_jitter(width = 0.35, size = 3) + 
+  geom_jitter(width = 0.35, size = 2) + 
   # Manually add the p-value annotation.
   annotate(
     "text",
     x = 1.5, y = max(auc_results$auc_value) + 50, # Position the text
     label = p_label,
-    size = 5,
+    size = 3,
     fontface = "bold"
   ) +
     # Add a bracket to show which groups are being compared.
@@ -542,9 +542,12 @@ auc_plot <- ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatme
   theme(legend.position = "bottom", plot.caption = element_text(hjust = 0, face = "italic"))+
   
   # This is the key part to remove the fill legend but keep the shape legend.
-  guides(fill = "none", shape = 'none')
+  guides(fill = "none", shape = 'none') + 
+  expand_limits(y = 0)
 
-auc_plot
+auc_plot 
+
+ggsave('../data/R33_GF_AUC_starts_at_0.pdf', width = 4, height = 4)
 ```
 
 

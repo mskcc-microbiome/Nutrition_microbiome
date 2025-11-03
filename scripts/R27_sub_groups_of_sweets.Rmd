@@ -1902,6 +1902,64 @@ print(annotated_tree_plot)
    
 ggsave('../data/R27_g9_tree.pdf', width = 8.5)
 ```
+```{r}
+# "can you please provide the median grams of exposure for each of these subgroups? I'm wondering if that might help explain why there is no significance in group 91 (candy)"
+boxplot_plot <- final_model_data %>%
+  # Reshape the data from a "wide" format to a "long" format.
+  # This is the standard tidyverse way to plot multiple columns.
+  pivot_longer(
+    # This selection logic is the core of the request:
+    # 1. Select columns that contain "avg_intake"
+    # 2. AND (&) exclude (!) columns that contain "fg"
+    cols = contains("avg_intake") & !contains("fg"),
+
+    # 'names_to' creates a new column to store the original column names
+    names_to = "intake_category",
+    # 'values_to' creates a new column to store the values from those columns
+    values_to = "value"
+  ) %>%
+  mutate(value = value * 100) |> 
+
+  # Now, create the plot using the new long-format data
+  # Map categories to x-axis and values to y-axis
+  ggplot(aes(x = intake_category, y = value, fill = intake_category)) +
+
+  # Add the boxplot layer.
+  geom_boxplot(alpha = 0.8) +
+  
+  # Add individual data points with some jitter for better visibility
+  geom_jitter(width = 0.1, alpha = 0.5) +
+
+  # No faceting is needed; this places all boxplots on the same row.
+
+  # Add informative labels and a clean theme
+  labs(
+    title = "Boxplot Distribution of Average Intakes",
+    x = "Intake Category",
+    y = "Average Intake Value"
+  ) +
+  theme_minimal() +
+  # Add theme adjustments
+  theme(
+    # Rotate x-axis labels for better readability
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    # Hide the legend since the x-axis is already labeled
+    legend.position = "none"
+  ) + scale_y_sqrt()
+
+# Print the plot to display it
+print(boxplot_plot)
+
+ggsave('../data/R27_box_4_subsweets.jpg', width = 6, height = 8)
+
+dtb_94 <- dtb %>% 
+  distinct(Food_NSC, Food_code, description) %>% 
+  mutate(Food_code = as.character(Food_code)) %>% 
+  filter(str_detect(Food_code, '^94'))
+```
+
+
+
 ## assemble
 
 ```{r}

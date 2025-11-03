@@ -2103,7 +2103,7 @@ timeline
 
 # 1. Prepare the data by calculating percent change from baseline
 plot_data_percent <- processed_weights %>%
-  filter(antibiotic_treatment == 'biapenem') %>% 
+  #filter(antibiotic_treatment == 'biapenem') %>% 
   mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}'), day = factor(day)) %>% 
   # Make sure data is ordered correctly to find the first day's weight
   arrange(experiment_no, mouse_identifier, day) %>%
@@ -2151,7 +2151,7 @@ timeline_percent <- ggplot(plot_data_percent, aes(x = day, y = percent_change)) 
   ) +
   scale_color_manual(values = color_palette) +
   # 4. Split the plot into two panels based on the diet treatment.
-  facet_wrap(~diet_treatment) +
+  facet_grid(antibiotic_treatment~diet_treatment) +
   # Add informative labels and a clean theme
   labs(
     #title = "Mouse Weight Percent Change from Baseline by Diet",
@@ -2161,6 +2161,10 @@ timeline_percent <- ggplot(plot_data_percent, aes(x = day, y = percent_change)) 
   theme_bw() + theme(legend.position = 'none')
 
 timeline_percent
+
+ggsave('../data/R31_mice_weight_timeline_percent_all_treatments.pdf',
+      width = 3.5, height = 6, units = "in", device = 'pdf', plot = timeline_percent, 
+      dpi = 300)  
 ```
 
 

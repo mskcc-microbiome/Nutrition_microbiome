@@ -170,6 +170,16 @@ plot_data <- covariate_data |>
     )
   )
 
+# --- Define a Manual, Consistent Color Palette ---
+# This named vector ensures that each category has the same color in both plots.
+# The colors are based on the default ggplot palette for 4 factors.
+color_palette <- c(
+  "Dietary Factors" = "#F8766D",         # Reddish
+  "Inter-Patient Variability" = "#7CAE00",  # Greenish
+  "Per-Patient Factors" = "#00BFC4",    # Teal
+  "Per-Sample Events" = "#C77CFF"         # Purple
+)
+
 # --- Plot 1: All Covariates ---
 # This first plot is designed to show the big picture: the massive influence of
 # individual patient differences compared to everything else.

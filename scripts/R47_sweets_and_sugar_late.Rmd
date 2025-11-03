@@ -15,6 +15,7 @@ library(cowplot)
 dayzeroline_size <- 1
 scatter_transparency <- 0.4
 day0_line_color <- 'gray40'
+diet_line_color <- '#E41A1C'
 ```
 
 ```{r}
@@ -92,8 +93,7 @@ daily_intake_final |> count(had_enteral, intake_source)
 # Create the scatter plot using ggplot2.
 sweets_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sweets_dehydrated_weight, color = had_enteral)) +
   geom_point(alpha = scatter_transparency, size = 1.5) +
-  # Add a LOESS smoothing line to visualize the overall trend, similar to the manuscript.
-  #geom_smooth(method = "loess", se = FALSE, aes(group = 1), color = "black", linetype = "dashed") +
+  geom_smooth(aes(x = fdrt, y = total_sweets_dehydrated_weight), method = "loess", formula = 'y ~ x', colour = diet_line_color ,  size = 1, fill = 'hotpink') +
   # Use a colorblind-friendly palette for clarity.
   scale_color_manual(
     name = "Source of 'Sweets'",
@@ -101,7 +101,7 @@ sweets_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sweets_dehydra
   ) +
   geom_vline(xintercept = 0, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
   labs(
-    title = "Daily Sweets Group Intake",
+    title = "FNDDS Sweets Food Group",
     #subtitle = "Dehydrated weight of items in the 'Sugars, Sweets, and Beverages' food group",
     x = "Day Relative to Transplant",
     y = "Total Dehydrated Weight (grams)"
@@ -121,6 +121,7 @@ sweets_plot
 # Create the scatter plot for sugar content (grams).
 sugars_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sugars_g, color = intake_source)) +
   geom_point(alpha = scatter_transparency, size = 1.5) +
+  geom_smooth(aes(x = fdrt, y = total_sugars_g), method = "loess", formula = 'y ~ x', colour = diet_line_color ,  size = 1, fill = 'hotpink') +
   #geom_smooth(method = "loess", se = FALSE, aes(group = 1), color = "black", linetype = "dashed") +
   scale_color_manual(
     name = "",
@@ -128,7 +129,7 @@ sugars_plot <- ggplot(daily_intake_final, aes(x = fdrt, y = total_sugars_g, colo
   ) +
   geom_vline(xintercept = 0, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
   labs(
-    title = "Daily Sugars Intake",
+    title = "Macronutrient Sugar",
     x = "Day Relative to Transplant",
     y = "Total Sugars (grams)"
   ) +
@@ -146,13 +147,12 @@ sugars_plot
 
 # assemble 
 final_plot <- plot_grid( sweets_plot ,  sugars_plot ,
-                nrow  = 2,
-                labels = 'auto',
+                nrow  = 1,
                 align = 'vh', axis = 'lrtb')
 
 
 title <- ggdraw() + 
-  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  draw_label("",fontface = 'bold', x = 0,hjust = 0) +
   theme(plot.margin = margin(0, 0, 0, 0))
 
 combined <- plot_grid(
@@ -163,6 +163,6 @@ combined <- plot_grid(
 ) +theme(plot.margin = unit(c(1,4,8,1), "cm"))
 
 ggsave('../data/R47_sugars_and_sweets_discrepancy.pdf',
-      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
       dpi = 300)        
 ```
