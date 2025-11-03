@@ -296,46 +296,7 @@ meta_ASVs <- meta %>%
   inner_join(clr_subset |> spread('asv_key','clr'))
 ```
 
-```{r}
-all_food_vars <- meta_ASVs %>% select(starts_with('fg')) %>% colnames()
 
-# Create the interaction terms for all food variables in this iteration
-interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
-
-# Build the full formula string dynamically
-formula_string <- paste(
-  "asv_1 ~ 0 + intensity + empirical + TPN + EN +",
-  paste(interaction_terms, collapse = " + "),
-  "+ (1 | pid) + (1 | timebin)"
-)
-
-# Convert the string to a formula object
-formula <- brms::bf(as.formula(formula_string))
-
-# Build the priors by adding them together.
-# This single prior() call applies to all coefficients listed in `all_food_coefs`.
-priors <-
-  prior(normal(0, 1), class = 'b') + # General prior for all food effects
-  # Specific priors that override the general one for non-food covariates
-  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
-  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
-  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
-
-# Fit the model (using fewer iterations for this example to run quickly)
-model_fit <- brm(
-  formula = formula,
-  data = meta_ASVs,
-  prior = priors,
-  warmup = 1000, iter = 3000,
-  chains = 2, cores = 4, 
-  seed = 123,
-  silent = 2
-)
-
-results_df <- tidy(model_fit, conf.int = TRUE) %>%
-  mutate(conf.low = round(conf.low, 2),
-         conf.high = round(conf.high, 2))
-```
 ## loop
 
 ```{r}
@@ -371,36 +332,58 @@ cat("Found", length(asv_vars), "ASV columns to model:", paste(asv_vars, collapse
 # This function takes one argument: the name of the ASV column to use as the outcome
 fit_brm_model <- function(asv_outcome_name) {
   
-  # Build the full formula string dynamically
-  formula_string <- paste(
-    asv_outcome_name, # Use the dynamic ASV name here
-    "~ 0 + intensity + empirical + TPN + EN +",
-    paste(interaction_terms, collapse = " + "),
-    "+ (1 | pid) + (1 | timebin)"
-  )
+ # --- ADDED tryCatch block for robustness ---
+  tryCatch({
+    # Build the full formula string dynamically
+    formula_string <- paste(
+      asv_outcome_name, # Use the dynamic ASV name here
+      "~ 0 + intensity + empirical + TPN + EN +",
+      paste(interaction_terms, collapse = " + "),
+      "+ (1 | pid) + (1 | timebin)"
+    )
+    
+    # Convert the string to a formula object
+    formula <- brms::bf(as.formula(formula_string))
+    
+    # Fit the model
+    # Using fewer iterations (warmup=500, iter=1000) for this example to run quickly
+    # Increase these for your real analysis
+    fit <- brm(
+      formula = formula,
+      data = meta_ASVs,
+      prior = priors,
+      iter = 2000, warmup = 1000, chains = 2,
+      # Adding control for adapt_delta can help with divergent transitions.
+      control = list(adapt_delta = 0.99),
+      # Each iteration runs on its own core, so we tell brm to only use 1.
+      cores = 1,
+      silent = 2, refresh = 0
+    )
+    
+    # 3. Extract results for ALL fixed effects, EXCLUDING intensity.
+    # **THE FIX**: Get parameter names directly from the model fit object.
+    # This is much more reliable than the previous methods.
+    all_pars <- variables(fit)
+    all_b_vars <- all_pars[startsWith(all_pars, "b_")]
+    fixed_effect_names <- all_b_vars[!startsWith(all_b_vars, "b_intensity")]
   
-  # Convert the string to a formula object
-  formula <- brms::bf(as.formula(formula_string))
   
-  # Fit the model
-  # Using fewer iterations (warmup=500, iter=1000) for this example to run quickly
-  # Increase these for your real analysis
-  model_fit <- brm(
-    formula = formula,
-    data = meta_ASVs,
-    prior = priors,
-    warmup = 500, iter = 1000, # Reduced for example
-    chains = 2, cores = 1, # `cores = 1` is important for running in parallel
-    seed = 123,
-    silent = 2,
-    backend = "cmdstanr" # Recommended if you have cmdstanr installed
-  )
-  
-  # Tidy the results and return them
-  # Using broom.mixed::tidy
-  tidy(model_fit, conf.int = TRUE) %>%
-    mutate(conf.low = round(conf.low, 2),
-           conf.high = round(conf.high, 2))
+    fit %>%
+      gather_draws(!!!syms(fixed_effect_names)) %>%
+      median_qi(.width = 0.95) %>%
+      mutate(
+        iteration = .x,
+        is_significant = !(.lower < 0 & .upper > 0)
+    )
+    
+  }, error = function(e) {
+    # This code runs if an error occurs in the tryCatch block
+    cat("--- ERROR fitting model for:", asv_outcome_name, "---\n")
+    cat("Error message:", e$message, "\n")
+    cat("---------------------------------------------------\n")
+    # Return NULL so that this ASV is just skipped
+    return(NULL)
+  })
 }
 
 # --- Run Models in Parallel using furrr ---
@@ -408,7 +391,7 @@ fit_brm_model <- function(asv_outcome_name) {
 cat("Setting up parallel plan (using multisession)...\n")
 # Set up a parallel plan with as many cores as possible, minus one
 # You can change `workers` to a specific number if you prefer
-plan(multisession, workers = max(1, parallel::detectCores() - 1))
+plan(multisession, workers = 8)
 
 cat("Running models in parallel. This may take a while...\n")
 
