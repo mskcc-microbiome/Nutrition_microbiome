@@ -189,6 +189,8 @@ plot_all_covariates <- plot_data |>
   # from smallest to largest effect size, making the plot intuitive.
   ggplot(aes(x = effect_size, y = fct_reorder(variable_name, effect_size), fill = category)) +
   geom_col() + # This creates the bar chart.
+  # Use the manual color palette
+  scale_fill_manual(values = color_palette) +
   labs(
     subtitle = "Patient Individuality is the Main Driver\nof Microbiome Variation",
     x = "Variance Explained",
@@ -209,6 +211,8 @@ plot_zoomed_in <- plot_data |>
   filter(variable_name != "Patient ID (pid)") |>
   ggplot(aes(x = effect_size, y = fct_reorder(variable_name, effect_size), fill = category)) +
   geom_col(show.legend = FALSE) + # Hide the legend; it's redundant with the first plot.
+  # Use the manual color palette
+  scale_fill_manual(values = color_palette) +
   # Adding text labels helps the reader see the precise R² value for each bar.
   #geom_text(aes(label = round(effect_size, 3)), hjust = -0.2, size = 3.5) +
   # Explicitly setting the x-axis limit ensures there's space for the text labels.

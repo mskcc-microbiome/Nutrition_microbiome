@@ -197,6 +197,7 @@ RB08_7_9_25 <- experiment_data %>%
   select(treatment:mouse_identifier, log10_cf_us_per_gram_stool = logCFU)
 
 ```
+
 ```{r}
 processed_data <- experiment_data %>%
   # The value '0' can't be plotted on a log scale. We'll replace it with a small number (e.g., 1)
@@ -1496,6 +1497,18 @@ ggsave('../data/R31_delayed_sugar.pdf',
 # weight data    
 
 ```{r}
+experiment_data <- read_csv('../data/7_9_25Biapenem Rebuttal Experiment_updated.csv') %>% 
+  filter(Group == 'RB08'| Group == 'sucrose' | Group == 'control') %>% 
+  mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1)  %>%
+  clean_names() %>%
+  mutate(logCFU = log10(cf_us_per_gram_stool)) 
+
+RB08_7_9_25 <- experiment_data %>% 
+  select(treatment:mouse_identifier, log10_cf_us_per_gram_stool = logCFU)
+```
+
+
+```{r}
 w1 <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xlsx') %>% 
   clean_names() %>% 
   mutate(group = if_else(str_detect(treatment, 'PBS'), 'RB08', group)) %>% 
@@ -2095,7 +2108,7 @@ timeline
 # scatter
 ```
 
-### timeline % change
+# timeline % change
 
 ```{r}
 # for the weights:
@@ -2103,18 +2116,17 @@ timeline
 
 # 1. Prepare the data by calculating percent change from baseline
 plot_data_percent <- processed_weights %>%
-  #filter(antibiotic_treatment == 'biapenem') %>% 
-  mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}'), day = factor(day)) %>% 
+  mutate(mouse_identifier = str_glue('{experiment_no}__{mouse_identifier}__{antibiotic_treatment}__{diet_treatment}'), day = factor(day)) %>% 
   # Make sure data is ordered correctly to find the first day's weight
-  arrange(experiment_no, mouse_identifier, day) %>%
+  arrange( mouse_identifier, day) %>%
   # Group by each unique mouse
-  group_by(experiment_no, mouse_identifier) %>%
+  group_by(experiment_no, mouse_identifier, antibiotic_treatment,diet_treatment ) %>%
   # Calculate percent change relative to the first measurement
   mutate(
     baseline_weight = first(mice_weights),
     percent_change = ((mice_weights - baseline_weight) / baseline_weight) * 100
   ) %>%
-  ungroup() 
+  ungroup()
 
 # 2. Create the plot
 timeline_percent <- ggplot(plot_data_percent, aes(x = day, y = percent_change)) +
@@ -2165,6 +2177,215 @@ timeline_percent
 ggsave('../data/R31_mice_weight_timeline_percent_all_treatments.pdf',
       width = 3.5, height = 6, units = "in", device = 'pdf', plot = timeline_percent, 
       dpi = 300)  
+```
+```{r}
+# Are there host health impacts (e.g. weight loss) associated with this bloom
+bloom_data_percent <- plot_data_percent |> 
+  filter(diet_treatment == 'regular_water', day != 6)
+
+bloom_percent <- ggplot(bloom_data_percent, aes(x = day, y = percent_change)) +
+  
+  # Add a horizontal dashed line at y=0 to represent the baseline
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  
+  # Plot individual mouse trajectories as thin, semi-transparent lines
+  geom_line(aes(group = mouse_identifier), color = "grey70", alpha = 0.6) +
+  
+ stat_summary(
+    aes(color = diet_treatment), 
+    fun.data = "median_hilow", 
+    fun.args = list(conf.int = 0.5), # This is a shortcut for 25th-75th percentile
+    geom = "errorbar",
+    width = 0.2,
+    linewidth = 1
+  ) +
+  
+ # Calculate and plot a line connecting the medians.
+  stat_summary(
+    aes(color = diet_treatment, group = diet_treatment),
+    fun = median,
+    geom = "line",
+    linewidth = 0.9
+  ) +
+  
+  # Calculate and plot the median as a point.
+  stat_summary(
+    aes(color = diet_treatment),
+    fun = median,
+    geom = "point",
+    size = 2
+  ) +
+  scale_color_manual(values = color_palette) +
+  # 4. Split the plot into two panels based on the diet treatment.
+  facet_grid(antibiotic_treatment~diet_treatment) +
+  # Add informative labels and a clean theme
+  labs(
+    #title = "Mouse Weight Percent Change from Baseline by Diet",
+    x = "Day",
+    y = "Weight Change from Baseline (%)"
+  ) +
+  theme_bw() + theme(legend.position = 'none')
+
+bloom_percent
+```
+```{r}
+# Generate the faceted scatter plot
+faceted_plot <- plot_data_percent %>%
+  # Filter to only include Day 3 data
+  filter(day == 3) %>%
+  # Initialize the ggplot object
+  ggplot(aes(
+    x = log10_cf_us_per_gram_stool,
+    y = percent_change,
+    color = antibiotic_treatment
+  )) +
+  # Add the raw data points
+  geom_point(alpha = 0.7, size = 2) +
+  # Add linear regression lines (method = "lm").
+  # By default, 'se = TRUE' which shows the 95% confidence interval ribbon.
+  # This is what you requested.
+  geom_smooth(method = "lm") +
+  # Add a dashed horizontal line at 0% weight change for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  # This is the key command: it splits the plot into separate panels
+  # for each level of 'diet_treatment'.
+  facet_wrap(~ diet_treatment) +
+  # Clean up the labels to be more readable
+  labs(
+    title = "Health Impact of Enterococcus Bloom by Diet",
+    subtitle = "Day 3 Measurements",
+    x = "Enterococcus Bloom (Log10 CFU/gram stool)",
+    y = "Weight Change from Baseline (%)",
+    color = "Antibiotic"
+  ) +
+  # Use a clean theme
+  theme_bw() +
+  # Improve the legend position
+  theme(legend.position = "bottom")
+
+# To display the plot, just run the variable name
+print(faceted_plot)
+
+ggsave('../data/R31_mice_weight_timeline_percent_faceted_plot.pdf',
+      width = 8.5, height = 5, units = "in", device = 'pdf', plot = faceted_plot, 
+      dpi = 300)  
+```
+
+## model to see the bloom on the host health impacts
+
+```{r}
+# the majority of the red dots (the main cluster between ~2.0 and ~3.0 logCFU) look like a random cloud, suggesting no real relationship between the bloom and weight change in the PBS group. The slightly negative slope you see is likely an artifact of that single point.
+# 
+# Why this is actually good for your hypothesis:
+# 
+# This makes your main finding stronger, not weaker. Your core question is about the health impact of the bloom.
+# 
+# PBS Group (Controls): No clear relationship. Bloom level doesn't seem to correlate with weight change (the line is probably flat, with a slope of 0).
+# 
+# Biapenem Group (Treated): A clear negative relationship. The higher the bloom, the lower the average weight.
+# 
+# Your story isn't "the slopes are -0.5 and -1.0". Your story is "the Enterococcus bloom had no discernible health impact in healthy control mice, but was strongly associated with weight loss in antibiotic-treated mice."
+# 
+# The statistical model we discussed (... logCFU * treatment) is designed to test exactly this. The interaction term will essentially check: "Is the slope of the teal line significantly different from the slope of the red line?"
+day3_data <- plot_data_percent %>%
+  # We only want to plot the measurements from Day 3 (the bloom day)
+  filter(day == 3) |> 
+  mutate(antibiotic_treatment = factor(antibiotic_treatment, levels = c('biapenem','PBS')))
+
+# --- 3. Fit the Linear Model with Interaction ---
+# This model tests if the relationship (the slope) between
+# CFU and weight change is DIFFERENT for each treatment group.
+#
+# The R formula `y ~ x * group` is shorthand for:
+# `y ~ x + group + x:group`
+#
+# The `x:group` term (the interaction) is the key. It directly
+# tests if the slopes are different.
+interaction_model <- lm(
+  percent_change ~ log10_cf_us_per_gram_stool * antibiotic_treatment * diet_treatment,
+  data = day3_data
+)
+
+# --- 4. View the Model Results ---
+# Using tidy() from the 'broom' package gives a clean table
+# instead of the standard R summary() output.
+model_summary <- tidy(interaction_model)
+
+print("Model Summary Table:")
+print(model_summary)
+
+# this above three way interaction tmodel is testing if the relationship (slope) between logCFU and percent_change is different for any of your 4 groups. The p-values show that no, none of the slopes are statistically different from each other or from zero.
+# 
+# The only "hint" of a relationship is the term log10...:diet_treatmentsucrose_water (p=0.0765), which suggests that adding sucrose might change the health impact in biapenem-treated mice, but the effect isn't strong enough to be statistically significant.
+# 
+# Devil's Advocate 😈
+# With 8 terms in your model and a limited number of mice, your model is "over-parameterized." You are asking a lot of questions of a (likely) small dataset. This splits your statistical power, making it very hard for any term to become significant. The model is "confused" by all the comparisons. Sometimes, a simpler model (like the one you ran first) is more powerful and easier to interpret.
+```
+
+## final version
+
+```{r}
+# only looking at the regular water group
+faceted_plot_regularwater <- bloom_data_percent %>%
+  # Filter to only include Day 3 data
+  filter(day == 3) %>%
+  # Initialize the ggplot object
+  ggplot(aes(
+    x = log10_cf_us_per_gram_stool,
+    y = percent_change,
+    color = antibiotic_treatment
+  )) +
+  # Add the raw data points
+  geom_point(alpha = 0.7, size = 2) +
+  # Add linear regression lines (method = "lm").
+  # By default, 'se = TRUE' which shows the 95% confidence interval ribbon.
+  # This is what you requested.
+  geom_smooth(method = "lm") +
+  # Add a dashed horizontal line at 0% weight change for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  # Clean up the labels to be more readable
+  labs(
+    subtitle = 'Mice on regular water diet ',
+    x = "Enterococcus Bloom (Log10 CFU/gram stool)",
+    y = "Weight Change on Day 3 from Baseline (%)",
+    color = "Antibiotic"
+  ) +
+  # Use a clean theme
+  theme_bw() +
+  # Improve the legend position
+  theme(legend.position = "bottom")
+
+# To display the plot, just run the variable name
+print(faceted_plot_regularwater)
+```
+```{r}
+day3_data_regularwater <- bloom_data_percent %>%
+  # We only want to plot the measurements from Day 3 (the bloom day)
+  filter(day == 3) |> 
+  mutate(antibiotic_treatment = factor(antibiotic_treatment, levels = c('biapenem','PBS')))
+
+interaction_model_regularwater <- lm(
+  percent_change ~ log10_cf_us_per_gram_stool * antibiotic_treatment ,
+  data = day3_data_regularwater
+)
+
+# --- 4. View the Model Results ---
+# Using tidy() from the 'broom' package gives a clean table
+# instead of the standard R summary() output.
+model_summary_regular <- tidy(interaction_model_regularwater)
+
+print(model_summary_regular)
+#This new output actually gives you a very important piece of information. Look at the log10_cf_us_per_gram_stool term (row 2).
+# 
+# Term: log10_cf_us_per_gram_stool
+# 
+# Estimate: -0.549
+# 
+# p.value: 0.0986
+# 
+# In this model, this term represents the slope for the biapenem group. That p-value of 0.0986 is greater than 0.05, which means that even the negative slope for the biapenem group by itself is not statistically significant.
+# 
+# Final Conclusion: You have now confirmed this from two different angles. The statistical conclusion is solid: this dataset does not provide evidence for a weight loss associated with the Enterococcus bloom, as neither group's slope is significantly different from zero, and the slopes are not significantly different from each other.
 ```
 
 
