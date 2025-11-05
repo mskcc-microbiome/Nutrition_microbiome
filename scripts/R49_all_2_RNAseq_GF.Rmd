@@ -28,6 +28,7 @@ library(RColorBrewer)
 library(gridExtra)
 library(tidyverse)
 library(gt)
+library(clinfun)
 ```
 
 # merge counts and meta data 
@@ -1751,11 +1752,14 @@ plot_pathway_heatmap(
 # load the weight loss plot from another script
 biapenem_plot <- readRDS("../data/R31_biapenem_plot_weight_perc_change.RDS")
 
+weight_change4 <- readRDS('../data/R31_weight_change4_perc.RDS')
+
 # the final version after lab meeting discussion and so many other discussions
 final_plot <- plot_grid( p_si_col , 
                          plot_si_col ,
+                         weight_change4,
                      biapenem_plot ,
-                nrow  = 3,
+                nrow  = 4,
                 labels = 'auto',
                 align = 'vh', axis = 'lrtb')
 
@@ -1772,7 +1776,7 @@ combined <- plot_grid(
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/R49_mouse_data_for_host_impacts.pdf',
-      width = 8.5, height = 15, units = "in", device = 'pdf', 
+      width = 8.5, height = 19, units = "in", device = 'pdf', 
       dpi = 300)  
 ```
 

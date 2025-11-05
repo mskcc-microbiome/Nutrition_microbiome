@@ -1510,10 +1510,7 @@ experiment_data <- read_csv('../data/7_9_25Biapenem Rebuttal Experiment_updated.
 
 RB08_7_9_25 <- experiment_data %>% 
   select(treatment:mouse_identifier, log10_cf_us_per_gram_stool = logCFU)
-```
 
-
-```{r}
 w1 <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xlsx') %>% 
   clean_names() %>% 
   mutate(group = if_else(str_detect(treatment, 'PBS'), 'RB08', group)) %>% 
@@ -2128,10 +2125,11 @@ plot_data_percent <- processed_weights %>%
   group_by(experiment_no, mouse_identifier, antibiotic_treatment,diet_treatment ) %>%
   # Calculate percent change relative to the first measurement
   mutate(
-    baseline_weight = first(mice_weights),
+    baseline_weight = dplyr::first(mice_weights),
     percent_change = ((mice_weights - baseline_weight) / baseline_weight) * 100
   ) %>%
-  ungroup()
+  ungroup() |> 
+  relocate(percent_change, .after = day)
 
 # 2. Create the plot
 timeline_percent <- ggplot(plot_data_percent, aes(x = day, y = percent_change)) +
@@ -2694,7 +2692,7 @@ predicted_effects_percent_plot <- ggplot(predicted_effects_percent, aes(x = x, y
 predicted_effects_percent_plot
 ```
 
-## % change in abx treated mice on day 3 only 
+# % change in abx treated mice on day 3 only 
 
 ```{r}
 biapenem_day3_data <- plot_data_percent %>%
@@ -2794,6 +2792,176 @@ saveRDS(biapenem_plot, file = "../data/R31_biapenem_plot_weight_perc_change.RDS"
 biapenem_day3_data |> count(experiment_no) |> nrow()
 
 biapenem_day3_data |> count(experiment_no, diet_treatment) 
+```
+
+### weight % overlay
+
+```{r}
+# make a plot where the X is the day, and the y is the percent change of wegiht from baseline, and the is a line conecting the median, and the error bar of the y in each tretment group (antibiotic treatment + diet treatment ) are shown , use the color palette "PBS + Water" = "lightgray", "PBS + Sucrose" = "lightpink","Abx + Water" = "gray32", "Abx + Sucrose "="deeppink2",
+df_plot_ready <- plot_data_percent %>%
+  mutate(treatment_group = case_when(
+    grepl("PBS_regular_water", plot_group) ~ "PBS + Water",
+    grepl("PBS_sucrose_water", plot_group) ~ "PBS + Sucrose",
+    grepl("biapenem_regular_water", plot_group) ~ "Abx + Water",
+    grepl("biapenem_sucrose_water", plot_group) ~ "Abx + Sucrose"
+  ))
+
+# Now, summarize the data to get the median and interquartile range (for error bars)
+# for each treatment group at each day.
+summary_data <- df_plot_ready %>%
+  group_by(treatment_group, day) %>%
+  summarise(
+    median_change = median(percent_change, na.rm = TRUE),
+    # For error bars, we'll use the 25th (q1) and 75th (q3) percentiles
+    q1 = quantile(percent_change, 0.25, na.rm = TRUE),
+    q3 = quantile(percent_change, 0.75, na.rm = TRUE),
+    .groups = 'drop' # Good practice to drop the grouping
+  )
+
+# Define the custom color palette as a named vector
+color_palette <- c(
+  "PBS + Water" = "lightgray",
+  "PBS + Sucrose" = "lightpink",
+  "Abx + Water" = "gray32",
+  "Abx + Sucrose" = "deeppink2"
+)
+
+# 1. Define the amount of dodging. 
+# This keeps the value consistent for all layers.
+# You can experiment with changing the width (e.g., to 0.4).
+dodge_width <- position_dodge(width = 0.1)
+
+# 2. Apply `position = dodge_width` to all geoms that act on the x-axis.
+weight_change4 <- ggplot(summary_data, aes(x = day, y = median_change, group = treatment_group, color = treatment_group)) +
+  
+  # Apply dodging here:
+  geom_line(linewidth = 1.2, position = dodge_width) +
+  
+  # Apply dodging here:
+  geom_errorbar(aes(ymin = q1, ymax = q3), width = 0.2, linewidth = 0.8, position = dodge_width) +
+  
+  # Apply dodging here:
+  geom_point(size = 3, position = dodge_width) +
+  
+  scale_color_manual(values = color_palette) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  labs(
+    title = "Median Percent Weight Change from Baseline by Treatment",
+    x = "Day of Experiment",
+    y = "Weight Change from Baseline (%)",
+    color = "Treatment Group"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.title = element_text(size = 12),
+    legend.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+weight_change4
+saveRDS(weight_change4, file = "../data/R31_weight_change4_perc.RDS")
+```
+### vardi test 
+
+```{r}
+# Why Informative Censoring Matters
+# In plain terms, "informative censoring" is when a subject (like a mouse) is removed from the experiment for a reason related to what you're measuring.
+# 
+# The Paper's Example: An animal is sacrificed "for humane reasons if its tumour becomes too large".
+# 
+# Your Experiment's Example: You might have to remove a mouse from the study because it lost too much weight or became too sick (which is what your weight-change graph is measuring!).
+# 
+# This creates a serious bias. A simple test (like the Kruskal-Wallis I suggested) would be skewed. Why? Because the mice with the strongest effect (e.g., biggest tumor, most weight loss) are removed early, making their AUC look artificially small. This test is built to correct that bias.
+#How It Works (The Simple Version)
+# Instead of just calculating one AUC for each mouse and comparing the group averages, this Vardi test does something more clever:
+# 
+# It compares every possible pair of mice, with one mouse from Group A and one from Group B.
+# 
+# For each pair, it calculates the difference in their curves (e.g., Mouse A weight - Mouse B weight).
+# 
+# Critically, it only calculates this difference up to the time point that both mice were still in the study.
+# 
+# It then averages all these pairwise comparisons to get a final test statistic.
+library(clinfun)
+library(utils) # For combn
+
+wide_data <- df_plot_ready %>%
+  # Keep only the data we need
+  dplyr::select(mouse_identifier, treatment_group, day, percent_change) %>%
+  
+  # Pivot to the "wide" format
+  pivot_wider(
+    id_cols = c(mouse_identifier, treatment_group),
+    names_from = day,
+    values_from = percent_change,
+    names_prefix = "Day_" # Add prefix to keep column names clean
+  )
+```
+
+
+```{r}
+# ---
+# Step 2: Prepare inputs for the function
+# ---
+
+# The function needs the measurement matrix (meas) and the group vector (grp)
+# We must use as.matrix() for the measurements
+meas_matrix <- wide_data %>%
+  dplyr::select(starts_with("Day_")) %>%
+  as.matrix()
+
+# The group vector
+group_vector <- wide_data$treatment_group
+
+# The time points (as a numeric vector)
+# We extract the numbers from the column names
+time_points <- as.numeric(gsub("Day_", "", colnames(meas_matrix)))
+
+# ---
+# Step 3: Run pairwise tests
+# ---
+
+# Get all unique group names
+all_groups <- unique(group_vector)
+
+# Create all possible 2-group combinations
+all_pairs <- combn(all_groups, 2, simplify = FALSE)
+
+# Run the test for each pair
+test_results <- lapply(all_pairs, function(pair) {
+  
+  # Run the Vardi test, specifying which two groups to compare
+  test <- aucVardiTest(
+    meas = meas_matrix,
+    grp = group_vector,
+    tim = time_points,
+    cgrps = pair,
+    nperm = 5000 # Number of permutations for the p-value
+  )
+  
+  # Return a clean data frame with the results
+  data.frame(
+    Group1 = pair[1],
+    Group2 = pair[2],
+    p.value = test$p.value
+  )
+})
+
+# Combine all results into one table
+results_df <- bind_rows(test_results)
+
+# ---
+# Step 4: Adjust p-values for multiple comparisons
+# ---
+
+results_df$p.adjusted <- p.adjust(results_df$p.value, method = "BH")
+
+# ---
+# Step 5: Print the final results
+# ---
+
+print("--- Vardi Test Pairwise Comparisons (p-values adjusted with 'BH') ---")
+print(results_df)
 ```
 
 
