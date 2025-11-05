@@ -22,6 +22,11 @@ library(gtsummary)
 library(ggpubr)
 library(broom)
 library(rstatix)
+color_palette <- c(
+
+  "regular_water" = "gray32",
+  "sucrose_water" = "deeppink2"
+)
 ```
 
 
@@ -2244,7 +2249,7 @@ faceted_plot <- plot_data_percent %>%
   # Add linear regression lines (method = "lm").
   # By default, 'se = TRUE' which shows the 95% confidence interval ribbon.
   # This is what you requested.
-  geom_smooth(method = "lm") +
+  #geom_smooth(method = "lm") +
   # Add a dashed horizontal line at 0% weight change for reference
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
   # This is the key command: it splits the plot into separate panels
@@ -2387,6 +2392,224 @@ print(model_summary_regular)
 # 
 # Final Conclusion: You have now confirmed this from two different angles. The statistical conclusion is solid: this dataset does not provide evidence for a weight loss associated with the Enterococcus bloom, as neither group's slope is significantly different from zero, and the slopes are not significantly different from each other.
 ```
+```{r}
+data_with_groups <- day3_data_regularwater %>%
+  mutate(
+    bloom_group = if_else(
+      log10_cf_us_per_gram_stool < 5.0, 
+      "Low Bloom (<5)", 
+      "High Bloom (>=5)"
+    )
+  )
+
+# --- 3. New Visualization (Boxplot) ---
+# This plot directly tests the reviewer's idea.
+# We plot the four new groups.
+new_plot <- data_with_groups %>%
+  ggplot(aes(
+    x = antibiotic_treatment, 
+    y = percent_change, 
+    fill = bloom_group
+  )) +
+  geom_boxplot(
+    # Use 'outlier.shape = NA' to hide boxplot outliers
+    # We will show them with geom_jitter() instead
+    outlier.shape = NA 
+  ) +
+  geom_jitter(
+    # 'position_jitterdodge' makes the dots dodge so they
+    # align with their correct boxplot.
+    alpha = 0.7,
+    position = position_jitterdodge(jitter.width = 0.2)
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  labs(
+    title = "Health Impact by Bloom Group (Day 3)",
+    subtitle = "Comparing Low vs. High Bloom Clusters",
+    x = "Antibiotic Treatment",
+    y = "Weight Change from Baseline (%)",
+    fill = "Bloom Group" # This sets the legend title
+  ) +
+  theme_bw()
+
+print(new_plot)
+# the data doesn't show a correlation, it shows a causal split. The antibiotic creates a high-bloom "disease state" that is linked to weight loss. Mice that resist this (the biapenem "Low Bloom" group) are perfectly healthy, just like the PBS controls.
+```
+### the sucrose water treatment          
+
+```{r}
+# Filter for Day 3 and 'sucrose_water'
+day3_sucrose_data <- plot_data_percent %>%
+  filter(
+    day == 3,
+    diet_treatment == "sucrose_water"
+  ) |> 
+  mutate(antibiotic_treatment = factor(antibiotic_treatment, levels = c('biapenem','PBS')))
+
+# --- 2. Create the New Bloom "Groups" ---
+# Create the same categorical variable based on the 5.0 logCFU cutoff.
+data_with_groups_sucrose <- day3_sucrose_data %>%
+  mutate(
+    bloom_group = if_else(
+      log10_cf_us_per_gram_stool < 5.0, 
+      "Low Bloom (<5)", 
+      "High Bloom (>=5)"
+    )
+  )
+
+# --- 3. New Visualization (Boxplot) ---
+# This plot shows the sucrose_water data only.
+sucrose_plot <- data_with_groups_sucrose %>%
+  ggplot(aes(
+    x = antibiotic_treatment, 
+    y = percent_change, 
+    fill = bloom_group
+  )) +
+  geom_boxplot(
+    outlier.shape = NA 
+  ) +
+  geom_jitter(
+    alpha = 0.7,
+    position = position_jitterdodge(jitter.width = 0.2)
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  labs(
+    title = "Health Impact by Bloom Group (Sucrose Water, Day 3)",
+    subtitle = "Comparing Low vs. High Bloom Clusters",
+    x = "Antibiotic Treatment",
+    y = "Weight Change from Baseline (%)",
+    fill = "Bloom Group"
+  ) +
+  theme_bw()
+
+print(sucrose_plot)
+```
+
+
+```{r}
+# --- 4. New Statistical Model (Two-Way ANOVA) ---
+# This group also has an "empty cell" (no 'High Bloom - PBS' mice),
+# so we fit the same "additive model" as before.
+# This tests the main effects of bloom group and antibiotic treatment.
+
+anova_model_sucrose <- aov(
+  percent_change ~ bloom_group + antibiotic_treatment, 
+  data = data_with_groups_sucrose
+)
+
+# Use tidy() to see the results in a clean table
+tidy(anova_model_sucrose)
+
+```
+
+### final 2
+
+```{r}
+# plot the above two together on the same scale 
+day3_data <- plot_data_percent %>%
+  filter(
+    day == 3
+  ) |> 
+  mutate(antibiotic_treatment = factor(antibiotic_treatment, levels = c('biapenem','PBS')))
+
+# --- 2. Create the New Bloom "Groups" ---
+# Create the categorical variable based on the 5.0 logCFU cutoff
+# for all the Day 3 data.
+data_with_groups <- day3_data %>%
+  mutate(
+    bloom_group = if_else(
+      log10_cf_us_per_gram_stool < 5.0, 
+      "Low Bloom (<5)", 
+      "High Bloom (>=5)"
+    )
+  )
+
+# --- 3. New Visualization (Faceted Boxplot) ---
+# This plot shows both diet treatments side-by-side
+faceted_plot <- data_with_groups %>%
+  ggplot(aes(
+    x = antibiotic_treatment, 
+    y = percent_change, 
+    fill = bloom_group
+  )) +
+  geom_boxplot(
+    outlier.shape = NA 
+  ) +
+  geom_jitter(
+    alpha = 0.7,
+    position = position_jitterdodge(jitter.width = 0.2)
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  
+  # --- This is the new line that creates the facets ---
+  facet_wrap(~ diet_treatment) +
+  # ---
+  
+  labs(
+    title = "Health Impact by Bloom Group and Diet (Day 3)",
+    subtitle = "Comparing Low vs. High Bloom Clusters Across Diets",
+    x = "Antibiotic Treatment",
+    y = "Weight Change from Baseline (%)",
+    fill = "Bloom Group"
+  ) +
+  theme_bw()
+
+print(faceted_plot)
+```
+
+
+```{r}
+# --- 4. Statistical Models ---
+# Analyze each diet group separately
+# to compare the impact of the bloom group in each condition.
+
+# --- Model for regular_water ---
+regular_data_grouped <- data_with_groups %>%
+  filter(diet_treatment == "regular_water")
+
+anova_model_regular <- aov(
+  percent_change ~ bloom_group + antibiotic_treatment, 
+  data = regular_data_grouped
+)
+print("--- Regular Water ANOVA ---")
+print(tidy(anova_model_regular))
+
+
+# --- Model for sucrose_water ---
+sucrose_data_grouped <- data_with_groups %>%
+  filter(diet_treatment == "sucrose_water")
+
+anova_model_sucrose <- aov(
+  percent_change ~ bloom_group + antibiotic_treatment, 
+  data = sucrose_data_grouped
+)
+print("--- Sucrose Water ANOVA ---")
+print(tidy(anova_model_sucrose))
+
+```
+
+
+```{r}
+# --- 4. New Statistical Model (Two-Way ANOVA) ---
+# Because there is an "empty cell" in the data (no 'High Bloom - PBS' mice),
+# we cannot test the interaction.
+# Therefore, we fit an "additive model" using '+' instead of '*'.
+# This model tests the two "main effects" that the data can support:
+# 1. Main effect of bloom_group
+# 2. Main effect of antibiotic_treatment
+
+# Fit the model
+anova_model <- aov(
+  percent_change ~ bloom_group + antibiotic_treatment, 
+  data = data_with_groups
+)
+
+# Use tidy() to see the results in a clean table
+# This is the statistical output for your boxplot.
+tidy(anova_model)
+
+```
+
 
 
 ```{r}
@@ -2470,6 +2693,109 @@ predicted_effects_percent_plot <- ggplot(predicted_effects_percent, aes(x = x, y
 
 predicted_effects_percent_plot
 ```
+
+## % change in abx treated mice on day 3 only 
+
+```{r}
+biapenem_day3_data <- plot_data_percent %>%
+  filter(
+    day == 3,
+    # Use str_detect to catch "biapenem" or "Biapenem"
+    stringr::str_detect(antibiotic_treatment, "biapenem")
+  )%>%
+  mutate(
+    diet_treatment = paste("biapenem +", diet_treatment)
+  )
+
+# --- 2. Run Linear Models to Get p-values AND Estimates ---
+# Run a separate model for each diet group to get stats for each slope
+
+# Model for regular_water
+lm_regular_stats <- biapenem_day3_data %>% 
+  filter(diet_treatment == "biapenem + regular_water") %>%
+  lm(percent_change ~ log10_cf_us_per_gram_stool, data = .) %>%
+  broom::tidy() %>%
+  filter(term == "log10_cf_us_per_gram_stool")
+
+p_regular <- lm_regular_stats$p.value
+est_regular <- lm_regular_stats$estimate
+
+# Model for sucrose_water
+lm_sucrose_stats <- biapenem_day3_data %>%
+  filter(diet_treatment == "biapenem + sucrose_water") %>%
+  lm(percent_change ~ log10_cf_us_per_gram_stool, data = .) %>%
+  broom::tidy() %>%
+  filter(term == "log10_cf_us_per_gram_stool")
+  
+p_sucrose <- lm_sucrose_stats$p.value
+est_sucrose <- lm_sucrose_stats$estimate
+
+# --- 3. Create Annotation Data Frame ---
+# This data frame will hold the labels and their coordinates
+annotations <- tibble(
+  # This column must match the new facet labels
+  diet_treatment = c("biapenem + regular_water", "biapenem + sucrose_water"), 
+  
+  # --- NEW: Create labels with both Estimate and p-value ---
+  # Using sprintf() for clean formatting (%.2f = 2 decimal places)
+  slope_label = c(
+    sprintf("Slope: %.2f\np = %.3f", est_regular, p_regular),
+    sprintf("Slope: %.2f\np = %.3f", est_sucrose, p_sucrose)
+  ),
+  
+  # --- NEW: Coordinates for top-left corner ---
+  # We use min(x) and max(y) to place it relative to the data
+  x_coord = c(0, 2.5), # approx min x for each panel
+  y_coord = c(6, 6)  # approx max y for each panel
+)
+
+# --- 4. Generate the Faceted Scatter Plot ---
+# This plot will only have biapenem mice, split by diet
+biapenem_plot <- biapenem_day3_data %>%
+  ggplot(aes(
+    x = log10_cf_us_per_gram_stool,
+    y = percent_change
+  )) +
+  geom_point(alpha = 0.8, size = 3) +
+  # Add regression lines for each group (will be colored by diet)
+  geom_smooth(method = "lm", se = TRUE) +
+  # Add the 0% line for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  
+  # --- Add the new p-value and estimate labels ---
+  geom_text(
+    data = annotations, 
+    aes(x = x_coord, y = y_coord, label = slope_label),
+    hjust = "left",   # --- NEW: Justify text to the left
+    vjust = "top",    # --- NEW: Justify text to the top
+    size = 3.5,
+    fontface = "italic"
+  ) +
+  
+  # --- Facet by diet_treatment (will use the new labels) ---
+  facet_wrap(~ diet_treatment) +
+  
+  labs(
+    title = "Weight change in Biapenem-Treated Mice (Day 3)",
+    subtitle = "Comparing Regular Water vs. Sucrose Water Diets",
+    x = "Enterococcus (Log10 CFU/gram stool)",
+    y = "Weight Change from Baseline (%)",
+    color = "Diet Treatment"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+
+# Display the plot 
+print(biapenem_plot)  
+# ggsave() does not save the ggplot object for later editing.
+saveRDS(biapenem_plot, file = "../data/R31_biapenem_plot_weight_perc_change.RDS")
+
+# how many independent experiments and how many mice 
+biapenem_day3_data |> count(experiment_no) |> nrow()
+
+biapenem_day3_data |> count(experiment_no, diet_treatment) 
+```
+
 
 ## assemble 
 

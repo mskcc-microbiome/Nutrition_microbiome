@@ -113,10 +113,10 @@ print("Head of new metadata table:")
 print(head(meta_table))
 
 # how many mice in each treatment group two batches combined
-meta_table %>% 
-  filter(treatment == 'E. faecalis') |> 
-  count(treatment, water, tissue, batch) |> 
-  arrange(tissue,  water, treatment, batch)
+# meta_table %>% 
+#   filter(treatment == 'E. faecalis') |> 
+#   count(treatment, water, tissue, batch) |> 
+#   arrange(tissue,  water, treatment, batch)
 ```
 
 ## the tally up of the samples count 
@@ -603,7 +603,7 @@ create_volcano_plot <- function(results_df, plot_title) {
     ) +
     
     # Apply a clean theme and adjust the legend
-    theme_minimal(base_size = 14) +
+    theme_minimal(base_size = 12) +
     theme(legend.position = "none") # Hide the legend for a cleaner grid
 }
 
@@ -832,6 +832,7 @@ all_fgsea_res <- bind_rows(
 )
 ```
 
+## lollipop plot
 
 ```{r}
 # Filter for significant pathways and select top N up/down for each condition
@@ -887,10 +888,13 @@ create_diverging_plot <- function(data, plot_condition) {
     theme_bw(base_size = 12) +
     theme(
       plot.title = element_text(hjust = 0.5, face = "bold"),
+      legend.position = 'bottom',
       panel.grid.major.y = element_blank(),
       panel.grid.minor.x = element_blank(),
       axis.text.y = element_text(size = 9)
-    )
+    )+
+  # This line splits the legend into 2 rows.
+  guides(color = guide_legend(nrow = 2, byrow = TRUE))
 }
 
 # --- Generate the Four Plots ---
@@ -1616,8 +1620,6 @@ sucrose_output <- run_deseq_with_batch_correction(
 ```
 
 
-
-
 ```{r}
 #' Get a single vector of leading edge genes from an fgsea result
 #'
@@ -1746,13 +1748,16 @@ plot_pathway_heatmap(
 # assemble  
 
 ```{r}
-final_plot <- plot_grid( p_si_col ,  p_li_col ,
-                      plot_si_col, plot_li_col,    
-                      Bcell_heatmap$gtable, Li_Inflammation$gtable,
+# load the weight loss plot from another script
+biapenem_plot <- readRDS("../data/R31_biapenem_plot_weight_perc_change.RDS")
+
+# the final version after lab meeting discussion and so many other discussions
+final_plot <- plot_grid( p_si_col , 
+                         plot_si_col ,
+                     biapenem_plot ,
                 nrow  = 3,
-                rel_heights = c(1,1,3),
                 labels = 'auto',
-                align = 'vh', axis = '')
+                align = 'vh', axis = 'lrtb')
 
 title <- ggdraw() + 
   draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
@@ -1763,10 +1768,37 @@ combined <- plot_grid(
   title, final_plot,
   ncol = 1,
   # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
+  rel_heights = c(0.01, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/R49_GF_mouse_RNA_seq_all.pdf',
-      width = 15, height = 24, units = "in", device = 'pdf', 
+ggsave('../data/R49_mouse_data_for_host_impacts.pdf',
+      width = 8.5, height = 15, units = "in", device = 'pdf', 
       dpi = 300)  
+```
+
+
+```{r}
+# final_plot <- plot_grid( p_si_col ,  p_li_col ,
+#                       plot_si_col, plot_li_col,    
+#                       Bcell_heatmap$gtable, Li_Inflammation$gtable,
+#                 nrow  = 3,
+#                 rel_heights = c(1,1,3),
+#                 labels = 'auto',
+#                 align = 'vh', axis = '')
+# 
+# title <- ggdraw() + 
+#   draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+#   theme(plot.margin = margin(0, 0, 0, 0))
+# 
+# 
+# combined <- plot_grid(
+#   title, final_plot,
+#   ncol = 1,
+#   # rel_heights values control vertical title margins
+#   rel_heights = c(0.1, 1)
+# ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+# 
+# ggsave('../data/R49_GF_mouse_RNA_seq_all.pdf',
+#       width = 15, height = 24, units = "in", device = 'pdf', 
+#       dpi = 300)  
 ```
