@@ -14,8 +14,11 @@ library(brms)
 library(broom.mixed)
 library(tidybayes)
 library(patchwork)
+library(ape)  
 library(ggridges)
+library(vegan)
 library(ggrepel) # For better label placement
+library(RColorBrewer)
 ```
 
 Model the magnitude of compositional disruption itself. This is done by using a beta-diversity metric (like Bray-Curtis distance) from each patient's baseline sample as a continuous outcome variable. 
@@ -290,9 +293,6 @@ p_bottom_combined
 ```
 
 
-
-
-
 ```{r}
 # quantify the pd of abx * sweets
 posterior_draws <- as_draws_df(model_fit)
@@ -374,10 +374,9 @@ combined <- plot_grid(
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/R30_composition_model.pdf',
-      width = 8.5, height = 11, units = "inch", device = 'pdf', 
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300)    
 ```
-
 
 # using the diet dist
 
@@ -388,5 +387,213 @@ library(lmerTest)
 dist2 <- lmer(stool_dist ~ diet_dist * empirical + intensity + TPN + EN + (1 | pid), data = full_data)
 summary(dist2)
 #The significant negative interaction term (-0.19) means that the relationship between diet change and microbiome disruption is weaker in patients on antibiotics (slope of +0.40) compared to those not on antibiotics (slope of +0.59). This suggests antibiotics create a "ceiling effect" on microbiome disruption.
+```
+
+# pcoa axis idea
+
+## Identify Other "Dominators"
+
+```{r}
+asv_relab_97 <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv')
+
+# --- 1. Aggregate ASVs to Genus Level ---
+# Sums up all ASVs belonging to the same genus within each sample.
+# It also filters out any ASVs that couldn't be assigned a genus (NA).
+genus_relab <- asv_relab_97 %>%
+  filter(!is.na(genus)) %>%
+  group_by(sampleid, genus) %>%
+  summarize(genus_relative = sum(count_relative, na.rm = TRUE), .groups = 'drop')
+
+# --- 2. Find the *single* most abundant genus for each sample ---
+# For each sample, this finds the row with the highest relative abundance.
+# 'slice_max' robustly handles this, 'with_ties = FALSE' picks one if there's a tie.
+dominant_taxa <- genus_relab %>%
+  group_by(sampleid) %>%
+  slice_max(order_by = genus_relative, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# --- 3. Create the 'domination_status' metadata column ---
+# This is the key table: one row per sample, with the domination status.
+# It checks if the top genus is > 30% relative abundance.
+# If not, it's classified as 'Diverse/None'.
+domination_metadata_partial <- dominant_taxa %>%
+  mutate(
+    domination_status = if_else(
+      genus_relative > 0.30,
+      as.character(genus),  # If dominant, use the genus name
+      "Diverse/None"        # If not, label as diverse
+    )
+  ) %>%
+  # Select only the columns we need for a metadata file
+  select(sampleid, domination_status, top_genus_relab = genus_relative)
+
+# --- 4. Ensure all samples are included ---
+# Some samples might have been dropped (e.g., if all their ASVs were NA).
+# This step joins the domination data back to a complete list of all samples.
+# Any sample not in our 'domination_metadata_partial' list will be
+# labeled 'Diverse/None'.
+
+# Get all unique sample IDs from the start
+all_samples <- asv_relab_97 %>%
+  distinct(sampleid)
+
+# Left-join to ensure all samples are present
+sample_metadata_with_domination <- all_samples %>%
+  left_join(domination_metadata_partial, by = "sampleid") %>%
+  # 'replace_na' correctly labels any missing/filtered samples
+  mutate(
+    domination_status = replace_na(domination_status, "Diverse/None")
+  )
+
+# --- 5. Create the Domination Leaderboard ---
+# This counts how many samples fall into each category.
+domination_leaderboard <- sample_metadata_with_domination %>%
+  count(domination_status, sort = TRUE, name = "sample_count")
+
+# --- Display the results ---
+print("--- Domination Leaderboard ---")
+print(domination_leaderboard)
+
+print("\n--- Sample Metadata with Domination Status (first 10 rows) ---")
+print(head(sample_metadata_with_domination, 10))
+```
+
+```{r}
+# -----------------------------------------------------------------
+# --- 6. Create a "Top 10" domination status for cleaner plotting ---
+# -----------------------------------------------------------------
+# Get the names of the top 10 most frequent domination statuses
+top_10_statuses <- domination_leaderboard %>%
+  slice_head(n = 10) %>%
+  pull(domination_status)
+
+# Add a new column to the metadata that recodes rare dominators as 'Other'
+sample_metadata_with_domination <- sample_metadata_with_domination %>%
+  mutate(
+    domination_status_limited = if_else(
+      domination_status %in% top_10_statuses,
+      as.character(domination_status), # Keep it if it's in the top 10
+      "Other"                         # Otherwise, recode to 'Other'
+    )
+  )
+
+print("\n--- New Top 10 Leaderboard ---")
+print(count(sample_metadata_with_domination, domination_status_limited, sort = TRUE))
+```
+
+
+```{r}
+# -----------------------------------------------------------------
+# --- 7. Reshape Data for PCoA ---
+# -----------------------------------------------------------------
+# Create a "wide" data frame: samples as rows, genera as columns.
+# This is the required format for vegan::vegdist.
+genus_relab_wide <- genus_relab %>%
+  pivot_wider(
+    id_cols = sampleid,
+    names_from = genus,
+    values_from = genus_relative,
+    values_fill = 0 # Critically, fill non-observed genera with 0
+  )
+
+# vegan needs a matrix with sample IDs as rownames, not a column
+# 'column_to_rownames' is a handy way to do this
+genus_matrix <- genus_relab_wide %>%
+  tibble::column_to_rownames("sampleid")
+
+# --- 8. Calculate Bray-Curtis Distance & Run PCoA ---
+# Calculate the distance matrix
+bray_dist <- vegdist(genus_matrix, method = "bray")
+
+# Perform the Principal Coordinates Analysis (PCoA)
+pcoa_results <- pcoa(bray_dist)
+
+# --- 9. Format PCoA Results for Plotting ---
+# Extract the PCoA scores (the coordinates for each sample)
+pcoa_scores <- as.data.frame(pcoa_results$vectors)
+
+# 'pcoa_scores' has sample IDs as rownames. Move them to a column for joining.
+pcoa_scores_with_ids <- pcoa_scores %>%
+  tibble::rownames_to_column("sampleid")
+
+# Join PCoA scores with our 'domination_status' metadata
+# This creates the final dataframe for plotting
+plot_data <- pcoa_scores_with_ids %>%
+  left_join(sample_metadata_with_domination, by = "sampleid") %>%
+  # Filter out any samples that might be in metadata but not in PCoA
+  # (e.g., if they had 0 reads)
+  filter(!is.na(domination_status_limited))
+
+# Calculate the percent of variance explained by the first two axes
+variance_explained <- pcoa_results$values$Relative_eig[1:2] * 100
+
+# -----------------------------------------------------------------
+# --- 10. Create the (cleaner) PCoA Plot with Manual Colors ---
+# -----------------------------------------------------------------
+
+# --- 10a. Create a manual color palette ---
+
+# Get the unique, sorted list of the top 10 statuses for consistent coloring
+all_plot_statuses <- plot_data %>%
+  distinct(domination_status_limited) %>%
+  pull()
+
+# Define the "special" statuses that we want to color manually
+special_statuses <- c("Enterococcus", "Diverse/None", "Other")
+
+# Get the list of the *other* genera that need colors from a palette
+genera_to_color <- setdiff(all_plot_statuses, special_statuses)
+
+# Get the "Dark2" palette. It has 8 colors, which should be enough for the
+# 7 other top genera (10 total - 3 special).
+# 'n' must be at least 3 for brewer.pal
+n_colors_needed <- length(genera_to_color)
+palette_dark2 <- brewer.pal(n = max(3, n_colors_needed), name = "Dark2")
+
+# Assign the first N colors from the palette to our N genera
+contrasting_colors <- palette_dark2[1:n_colors_needed]
+names(contrasting_colors) <- genera_to_color
+
+# Create the final named vector by combining the palette
+# with our manually specified colors.
+final_color_vector <- c(
+  contrasting_colors,              # Colors for the other top genera
+  "Enterococcus" = "red",    # Manually set to Dark Green
+  "Diverse/None" = "#333333",    # Manually set to Black
+  "Other" = "#999999"            # Manually set to Medium Gray
+)
+
+
+# --- 10b. Generate the plot ---
+pcoa_plot <- ggplot(
+  plot_data,
+  # Set up the axes and color
+  aes(
+    x = Axis.1,
+    y = Axis.2,
+    color = domination_status_limited # Use the new "limited" column
+  )
+) +
+  geom_point(size = 2, alpha = 0.7) +
+  
+  # Manually apply our new color scale
+  scale_color_manual(
+    values = final_color_vector,
+    name = "Domination Status (Top 10)" # Updated legend title
+  ) +
+  
+  # Add labels showing variance explained
+  labs(
+    title = "Bray-Curtis PCoA (Genus Level) by Domination Status",
+    x = sprintf("Axis 1 (%.2f%%)", variance_explained[1]),
+    y = sprintf("Axis 2 (%.2f%%)", variance_explained[2])
+  ) +
+  theme_bw() + # A clean, classic theme
+  # Center the plot title
+  theme(plot.title = element_text(hjust = 0.5)) + coord_fixed()
+
+# Display the plot
+print(pcoa_plot)
+ggsave('../data/R30_pcoa_domination.pdf', width = 8, height = 8)
 ```
 
