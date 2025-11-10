@@ -20,12 +20,14 @@ library(vegan)
 library(ggrepel) # For better label placement
 library(RColorBrewer)
 library(ggpubr)
-library(brmstools)
+library(brmstools) 
 library(bayesplot)
 library(gt)
 library(ggtext)
+library(cowplot)
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
+scatter_size <- 2
 ```
 
 Model the magnitude of compositional disruption itself. This is done by using a beta-diversity metric (like Bray-Curtis distance) from each patient's baseline sample as a continuous outcome variable. 
@@ -385,7 +387,7 @@ ggsave('../data/R30_composition_model.pdf',
       dpi = 300)    
 ```
 
-# using the diet dist
+### using the diet dist
 
 ```{r}
 library(lme4)
@@ -401,6 +403,8 @@ summary(dist2)
 ## Identify Other "Dominators"
 
 ```{r}
+meta <- read_csv('../data/153_combined_META.csv') 
+
 asv_relab_97 <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv')
 
 # --- 1. Aggregate ASVs to Custom Genus/ASV Level ---
@@ -548,13 +552,23 @@ plot_data <- pcoa_scores_with_ids %>%
   left_join(sample_metadata_with_domination, by = "sampleid") %>%
   # Filter out any samples that might be in metadata but not in PCoA
   # (e.g., if they had 0 reads)
-  filter(!is.na(domination_status_limited))
+  filter(!is.na(domination_status_limited)) |> 
+  full_join(meta |> select(sampleid, simpson_reciprocal))
 
 # Calculate the percent of variance explained by the first two axes
 variance_explained <- pcoa_results$values$Relative_eig[1:2] * 100
 ```
 
-### PCoA
+### PCoA with domination genus
+
+```{r}
+# use our own palette
+library(vdbR)
+connect_database()
+get_table_from_database('asv_annotation_blast_color_ag')
+genus_colors_all <- asv_annotation_blast_color_ag |> distinct(genus, color)
+```
+
 
 ```{r}
 # -----------------------------------------------------------------
@@ -569,23 +583,22 @@ all_plot_statuses <- plot_data %>%
   pull()
 
 # Define the "special" statuses that we want to color manually
-special_statuses <- c("Enterococcus_faecium", "Streptococcus", "Diverse/None", "Other")
+special_statuses <- c("Enterococcus_faecium",  "Diverse/None", "Other")
 
 # Get the list of the *other* genera that need colors from a palette
 genera_to_color <- setdiff(all_plot_statuses, special_statuses)
 
-contrasting_colors <- c('#0072B2','#D55E00','#E69F00','#56B4E9','#CC79A7','#F0E442','#332288')
+contrasting_colors <- genus_colors_all |> 
+  filter(genus %in% genera_to_color) |> deframe()
 
-names(contrasting_colors) <- genera_to_color
 
 # Create the final named vector by combining the palette
 # with our manually specified colors.
 final_color_vector <- c(
   contrasting_colors,              # Colors for the other top genera
-  "Enterococcus_faecium" = "#009E73",    # Dark Green
-  "Streptococcus"   = "#4F7942",    
-  "Diverse/None"         = "#000000",    # Black
-  "Other"                = "#999999"     # Medium Gray
+  "Enterococcus_faecium" = "#129246",    # Dark Green
+  "Diverse/None"         = "#333333",    
+  "Other"                = "#AFB4B5"     # Medium Gray
 )
 
 # --- 10b. Generate the plot ---
@@ -598,7 +611,7 @@ pcoa_plot <- ggplot(
     color = domination_status_limited # Use the new "limited" column
   )
 ) +
-  geom_point(size = 2, alpha = 0.7) +
+  geom_point(size = scatter_size, alpha = 0.7) +
   
   # Add the dashed zero-lines
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
@@ -614,59 +627,103 @@ pcoa_plot <- ggplot(
   # Axis 2 - Right side annotations
   # We use 'annotate' to place text and arrows in data coordinates
   # We also use 'Inf' to place it at the edge of the plot
-  annotate("text", x = 0.55, y = 0.4, 
-           label = "Streptococcus-\nDominated", hjust = 0, size = 3.5)+
-  annotate("segment", x = 0.55, y = 0.1, xend = 0.55, yend = 0.35,
-           arrow = arrow(length = unit(0.2, "cm")), color = "black")+
-  
-  annotate("text", x = 0.55, y = -0.5, 
-           label = "Enterococcus faecium-\nDominated", hjust = 0, size = 3.5)+
-  annotate("segment", x = 0.55, y = -0.1, xend = 0.55, yend = -0.45,
-           arrow = arrow(length = unit(0.2, "cm")), color = "black")+
-           
-  # Axis 1 - Top side annotations
-  annotate("text", x = 0.35, y = 0.6, 
-           label = "Dysbiosis", vjust = 0, size = 3.5)+
-  annotate("segment", x = 0.1, y = 0.6, xend = 0.3, yend = 0.6,
-           arrow = arrow(length = unit(0.2, "cm")), color = "black")+
-           
-  annotate("text", x = -0.45, y = 0.6, 
-           label = "Healthy / Commensal-Dominated", vjust = 0, size = 3.5)+
-  annotate("segment", x = -0.1, y = 0.6, xend = -0.4, yend = 0.6,
-           arrow = arrow(length = unit(0.2, "cm")), color = "black") +
+  # annotate("text", x = 0.55, y = 0.4, 
+  #          label = "Streptococcus-\nDominated", hjust = 0, size = 3.5)+
+  # annotate("segment", x = 0.55, y = 0.1, xend = 0.55, yend = 0.35,
+  #          arrow = arrow(length = unit(0.2, "cm")), color = "black")+
+  # 
+  # annotate("text", x = 0.55, y = -0.5, 
+  #          label = "Enterococcus faecium-\nDominated", hjust = 0, size = 3.5)+
+  # annotate("segment", x = 0.55, y = -0.1, xend = 0.55, yend = -0.45,
+  #          arrow = arrow(length = unit(0.2, "cm")), color = "black")+
+  #          
+  # # Axis 1 - Top side annotations
+  # annotate("text", x = 0.35, y = 0.6, 
+  #          label = "Dysbiosis", vjust = 0, size = 3.5)+
+  # annotate("segment", x = 0.1, y = 0.6, xend = 0.3, yend = 0.6,
+  #          arrow = arrow(length = unit(0.2, "cm")), color = "black")+
+  #          
+  # annotate("text", x = -0.45, y = 0.6, 
+  #          label = "Healthy / Commensal-Dominated", vjust = 0, size = 3.5)+
+  # annotate("segment", x = -0.1, y = 0.6, xend = -0.4, yend = 0.6,
+  #          arrow = arrow(length = unit(0.2, "cm")), color = "black") +
            
   # --- End Annotations ---
   # Add labels showing variance explained
   labs(
-    title = "Bray-Curtis PCoA (Genus Level) by Domination Status\n\n",
+    #title = "Bray-Curtis PCoA (Genus Level) by Domination Status\n\n",
     x = sprintf("Axis 1 (%.2f%%)", variance_explained[1]),
     y = sprintf("Axis 2 (%.2f%%)", variance_explained[2])
   ) +
   theme_bw() +
   theme(
-    plot.title = element_text(hjust = 0.5),
-    # 'clip = "off"' is ESSENTIAL for annotations outside the plot area
-    plot.margin = unit(c(1.5, 3.5, 0.5, 3.5), "cm"), # Give extra space on top/right/left
-    # Increase legend key size
-    legend.key.size = unit(0.5, "cm"),
-    legend.position = 'right'
+    plot.margin = unit(c(1, 1, 1, 1), "cm"), # Give extra space on top/right/left
+    legend.position = 'none'
   ) +
   # 'coord_fixed' ensures axes are 1:1, 'clip="off"' lets annotations show
   coord_fixed(
-    ratio = 1, 
-    clip = "off"
+    ratio = 1
     )
 
 # Display the plot
 print(pcoa_plot)
-ggsave('../data/R30_pcoa_domination.pdf', width = 9.5, height = 8)                                                 
+#ggsave('../data/R30_pcoa_domination.pdf', width = 9.5, height = 8)                                                 
 ```
+### diversity pcoa with customized color palette
+
+```{r}
+# -----------------------------------------------------------------
+# --- 11. Create the NEW DIVERSITY PCoA Plot ---
+# -----------------------------------------------------------------
+# This plot uses the *exact same* PCoA and annotations,
+# but re-colors the points by alpha diversity.
+
+pcoa_plot_diversity <- ggplot(
+  plot_data,
+  # --- KEY CHANGE: Color by simpson_reciprocal ---
+  aes(x = Axis.1, y = Axis.2, color = simpson_reciprocal)
+) +
+  # Add the dashed zero-lines
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  
+  # Plot the points *on top* of the lines
+  geom_point(size = scatter_size, alpha = 0.7) +
+  
+  # scale_color_viridis_c(
+  #   name = "Alpha Diversity\n(Inverse Simpson)",
+  #   option = "C" # Use the 'viridis' palette
+  # ) +
+  scale_color_gradientn( name = bquote(""~alpha*"-Diversity (inverse Simpson index)"),
+                         values = c(0, 0.4,  1), colours = c("#1E90FF", "#FFFF00", "#FF3030"), 
+                         trans="log",
+                          breaks = c(2, 5, 10, 20, 40)) + 
+  
+  # Add labels showing variance explained
+  labs(
+   # title = "Bray-Curtis PCoA (Custom Genus/ASV) Colored by Alpha Diversity",
+    x = sprintf("Axis 1 (%.2f%%)", variance_explained[1]),
+    y = sprintf("Axis 2 (%.2f%%)", variance_explained[2])
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = 'none'
+  ) +
+  # 'coord_fixed' ensures axes are 1:1, 'clip="off"' lets annotations show
+  coord_fixed(
+    ratio = 1
+    )
+
+# Display the new plot
+print(pcoa_plot_diversity)
+#ggsave('../data/R30_pcoa_with_diversity.pdf', width = 7, height = 5)
+```
+
+
 
 ## axis 1 and 2 as the outcome
 
 ```{r}
-meta <- read_csv('../data/153_combined_META.csv') 
-
 meta_Axis <- meta %>% 
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
   mutate(pid = factor(pid)) %>%
@@ -771,6 +828,8 @@ all_results |> write_csv('../data/R30_all_results_axis.csv')
 ### forest
 
 ```{r}
+all_results <- read_csv('../data/R30_all_results_axis.csv')
+
 # the above figure but make it the way the other figure look like
 key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
 
@@ -856,16 +915,21 @@ plot_axis <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
 
 plot_axis
 ```
-
 ### assemble
 
 ```{r}
-final_plot <- plot_grid( pcoa_plot , 
-                         plot_axis ,
-                nrow  = 2,
+top_row <- plot_grid( pcoa_plot , 
+                      pcoa_plot_diversity,
+                nrow  = 1, 
                 labels = 'auto',
-                align = 'vh', axis = 'l')
+                align = 'vh')
 
+final_plot <- plot_grid( top_row, 
+                         plot_axis ,
+                ncol  = 1, 
+                rel_heights = c(2, 2),
+                labels = c(NA, 'c'))
+   
 library(cowplot)
 title <- ggdraw() + 
   draw_label("Rebuttal fig X",fontface = 'bold',x = 0,hjust = 0) +
