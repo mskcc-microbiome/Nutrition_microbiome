@@ -1,0 +1,255 @@
+---
+title: "cal intake predicting alpha diversity"
+output: html_document
+date: "2025-11-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(cowplot)
+library(broom.mixed)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(brmstools)
+library(bayesplot)
+library(gt)
+library(rcompanion)
+library(janitor)
+library(ggtext)
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+```
+
+# previous 2 day average caloric intake
+
+```{r}
+dtb <- read_csv('../data/152_combined_DTB.csv')
+
+meta <- read_csv('../data/153_combined_META.csv')
+
+stool_samples_df <- meta %>%
+  select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
+
+ 
+# This pipe creates a tidy summary of daily intake per category.
+daily_intake_summary <- dtb %>%
+  # Groups the data to sum up weights for each category within a patient-day
+  group_by(pid, fdrt) %>%
+  # Calculates the total dehydrated weight for each group
+  summarise(
+    total_caloric_intake = sum(Calories_kcal, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# --- Part 2: Calculate 2-Day Prior Average Intake for cal ---
+
+# Perform the join and calculate the averages.
+final_model_data <- stool_samples_df %>%
+  # For each stool sample, define the two target food days we're interested in
+  # (sdrt - 1) and (sdrt - 2).
+  mutate(
+    day_prior_1 = sdrt - 1,
+    day_prior_2 = sdrt - 2
+  ) %>%
+  # Reshape the data from wide to long format.
+  # This creates a separate row for each "prior day" (day_prior_1, day_prior_2).
+  # We now have a single 'fdrt' column that holds the target day numbers.
+  pivot_longer(
+    cols = c(day_prior_1, day_prior_2),
+    names_to = "day_type",
+    values_to = "fdrt"
+  ) %>%
+  # Join the caloric intake data.
+  # This matches rows where the 'pid' is the same AND
+  # the food day ('fdrt') is one of the two prior days we just calculated.
+  left_join(
+    daily_intake_summary,
+    by = c("pid", "fdrt")
+  ) %>%
+  # Group the data back together by the original sample (pid and sdrt).
+  group_by(pid, sdrt) %>%
+  # Calculate the average of the 'total_caloric_intake'.
+  # 'na.rm = TRUE' is important: it calculates the mean even if one
+  # of the two prior days had missing food data.
+  summarize(
+    avg_cal_intake_2_day = mean(total_caloric_intake, na.rm = TRUE),
+    .groups = "drop" # Drop the grouping for a clean final dataframe
+  ) |> 
+  # Joins back the original stool sample info.
+  right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid))  %>%
+  # make the effect size be interpreted as per 1000 kcal intake...
+  mutate(across(starts_with("avg_cal_intake_2_day"), ~ .x / 1000))
+```
+
+
+## with interaction model 
+
+```{r}
+# Build the full formula string dynamically
+formula_string <-  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN  + avg_cal_intake_2_day:empirical + (1 | pid) + (1 | timebin)"
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+#Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = final_model_data,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df_cal <- tidy(model_fit, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
+```
+
+
+
+## without interaction model 
+
+```{r}
+formula_string_without <-  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN  + avg_cal_intake_2_day + empirical + (1 | pid) + (1 | timebin)"
+
+# Convert the string to a formula object
+formula_without <- brms::bf(as.formula(formula_string_without))
+
+#Fit the model (using fewer iterations for this example to run quickly)
+model_fit_without <- brm(
+  formula = formula_without,
+  data = final_model_data,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df_cal_without <- tidy(model_fit_without, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
+```
+## plotting together
+
+```{r}
+# Combine the two model dataframes
+combined_results_df <- bind_rows(
+  results_df_cal %>%
+  # Add the new model_type column
+  mutate(model_type = "Model with Interaction"),
+  results_df_cal_without %>%
+  # Add the new model_type column
+  mutate(model_type = "Model without Interaction")
+)
+
+# --- Clean and Plot Combined Data ---
+
+# Use the provided cleaning logic on the combined dataframe
+cleaned_effects <- combined_results_df %>%
+  # Keep only the fixed effects (already done in mock data, but good practice)
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    # This logic cleverly handles both models
+    clean_term = term %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")
+  ) %>%
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign
+  mutate(is_significant = (conf.low * conf.high) > 0)
+
+# Create the shading dataframe
+# This will only find rows in the "Model with Interaction" data
+shading_df <- cleaned_effects %>%
+  # Convert the y-axis term to a numeric factor level for geom_rect
+  mutate(y_numeric = as.numeric(as.factor(clean_term))) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+# Create the plot
+plot_combined_models <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+  # Add shading. This will only apply to the "Model with Interaction"
+  # facet because of the data = shading_df argument.
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#FBEADC", # A light orange/peach color
+    alpha = 0.7,
+    inherit.aes = FALSE
+  ) +
+  # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue", size = 0.8) +
+  # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+  geom_pointrange(
+    aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+    size = 0.25, linewidth = 1,
+  ) +
+  # Add the facet_wrap here to split by model_type
+  # The y-axes will be consistent, allowing direct comparison
+  facet_wrap(~ model_type) +
+  # ---
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  # Use ggtext to bold/color the interaction terms
+  scale_y_discrete(
+    labels = function(x) {
+      ifelse(str_detect(x, '\\*'),
+             str_glue("<b style='color:royalblue'>{x}</b>"),
+             as.character(x))
+    }
+  ) +
+  # Add labels and a clean theme
+  labs(
+    x = "ln(diversity) change",
+    title = "Predictor effects on diversity by model",
+    y = ''
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_markdown(),
+    # Add a border/background to the facet strips for clarity
+    strip.background = element_rect(fill = "grey90", color = "black"),
+    strip.text = element_text(face = "bold")
+  )
+
+# --- View the Final Plot ---
+print(plot_combined_models)
+
+ggsave('../data/R51_plot_combined_models_with_cal.pdf', width = 6, height = 3)
+```
+
