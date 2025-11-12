@@ -1,0 +1,26 @@
+---
+title: "Make meta data table for released shotgun samples"
+output: html_document
+date: "2025-11-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+```{r}
+meta <- read_csv('../data/153_combined_META.csv')
+
+sra <- read_tsv('../data/metadata-15667504-processed-ok.tsv')
+
+shotgun_released <- sra |> 
+  rename(sampleid = library_ID) |> 
+  inner_join(meta |> select(sampleid, pid, sdrt )) |> 
+  select(sampleid, pid, sdrt, accession, bioproject_accession, biosample_accession, filename:filename4)  
+
+shotgun_released |> write_csv('../data/R52_shotgun_released_333_meta.csv')
+```
+
