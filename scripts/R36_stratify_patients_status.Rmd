@@ -257,3 +257,109 @@ ggsave('../data/R36_threeway_intensity.pdf',
       dpi = 300)     
 ```
 
+# the loess in the scatter plot
+
+to answer the reviewer’s  question “Could patients with severe conditioning effects be more likely to consume sweets” 
+
+
+
+```{r}
+
+ptb <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/156_combined_PTB.csv')
+
+dtb <- read_csv('../data/152_combined_DTB.csv') |> 
+  left_join(ptb |> select(pid, intensity))
+  
+  
+
+# --- Data Preparation ---
+
+# First, create a "scaffold" of all unique patient-day combinations.
+# This is essential for the imputation step, ensuring any day a patient
+# had *any* food is represented, even if they didn't have sweets.
+scaffold <- dtb |>
+  distinct(pid, fdrt, intensity)
+
+# --- Plot 1: Daily Sweets Intake ---
+
+# Calculate daily sweets intake.
+# We must first filter for food codes starting with '9' (as strings).
+sweets_summary <- dtb |>
+  mutate(Food_code_str = as.character(Food_code)) |>
+  filter(str_starts(Food_code_str, "9")) |>
+  group_by(pid, fdrt) |>
+  summarize(daily_sweets = sum(dehydrated_weight, na.rm = TRUE)) |>
+  ungroup()
+
+# Join the sweets data back to the main scaffold.
+# A left_join keeps all rows from the scaffold.
+# 'replace_na' fills in 0 for patient-days that had no sweets.
+plot_data_1 <- scaffold |>
+  left_join(sweets_summary, by = c("pid", "fdrt")) |>
+  mutate(daily_sweets = replace_na(daily_sweets, 0))
+
+# Build the plot for sweets
+p1 <- plot_data_1 |>
+  ggplot(aes(x = fdrt, y = daily_sweets, color = intensity)) +
+   geom_point(alpha = 0.2) +
+    
+    # Add the LOESS smoothing line.
+    # 'method = "loess"' specifies the type of smoother.
+    # 'se = FALSE' removes the confidence interval band around the line.
+    # 'color = "blue"' sets the line color to be distinct (you can change this).
+    geom_smooth(method = "loess", se = FALSE,  aes(color = intensity), size = 1.2) +
+    
+    # Apply a minimal, clean theme to the plot.
+    theme_classic(base_size = 11) +
+    scale_y_sqrt() +
+  labs(
+    title = "Daily Sweets Intake vs. Day Relative to Transplant",
+    x = "Day Relative to Transplant",
+    y = "Daily Sweets (dehydrated weight)",
+    color = "Conditioning intensity"
+  ) +
+   theme(aspect.ratio = 1, legend.position = 'bottom')
+
+p1
+
+# --- Plot 2: Daily Sugar Intake ---
+
+# For total sugar, the process is simpler.
+# We just group the *entire* dataset by patient-day and sum 'Sugars_g'.
+# 'na.rm = TRUE' handles any missing sugar values during the sum.
+# This inherently includes all patient-days from the start.
+sugar_summary <- dtb |>
+  group_by(pid, fdrt) |>
+  summarize(daily_sugar = sum(Sugars_g, na.rm = TRUE)) |>
+  ungroup()
+
+plot_data_2 <- scaffold |>
+  left_join(sugar_summary, by = c("pid", "fdrt")) |>
+  mutate(daily_sugar = replace_na(daily_sugar, 0))
+
+# Build the plot for sugar
+p2 <- plot_data_2 |>
+  ggplot(aes(x = fdrt, y = daily_sugar, color = intensity)) +
+   geom_point(alpha = 0.2) +
+    
+    # Add the LOESS smoothing line.
+    # 'method = "loess"' specifies the type of smoother.
+    # 'se = FALSE' removes the confidence interval band around the line.
+    # 'color = "blue"' sets the line color to be distinct (you can change this).
+    geom_smooth(method = "loess", se = FALSE,  aes(color = intensity), size = 1.2) +
+    
+    # Apply a minimal, clean theme to the plot.
+    theme_classic(base_size = 11) +
+    scale_y_sqrt() +
+  labs(
+    title = "Daily Sugar Intake vs. Day Relative to Transplant",
+    x = "Day Relative to Transplant",
+    y = "Daily Sugar (g)",
+    color = "Conditioning intensity"
+  ) + theme(aspect.ratio = 1, legend.position = 'bottom')
+
+# Save the second plot
+final_plot <- plot_grid(p1, p2, nrow = 2)
+ggsave("../data/R36_sugar__and_sweets_intake_scatter_R.pdf", plot = final_plot, width = 7, height = 7, dpi = 300)
+```
+
