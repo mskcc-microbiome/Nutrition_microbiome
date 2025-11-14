@@ -571,7 +571,7 @@ p_corrplot <- ggplot(plot_data_lower_tri, aes(x = measure1, y = measure2, fill =
     axis.title.y = element_blank(),
     axis.text.x = element_text(angle = 45, hjust = 0),
     panel.grid = element_blank(),
-    legend.position = "bottom"
+    legend.position = "right"
   ) +
   labs(title = "Pairwise Repeated-Measures Correlations (rmcorr)") +
   coord_fixed() # Ensure tiles are square
@@ -755,21 +755,15 @@ plot_forest <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
     y = ''
   ) +
   theme_classic(base_size = 11) +
-  theme(legend.position = "none", axis.text.y = element_markdown())
+  theme(legend.position = "none", axis.text.y = element_markdown(),plot.margin = unit(c(1, 10, 1, 1), "cm"))
 
-plot_forest 
 
-```
-
-# assemble 
-
-```{r}
 final_plot <- plot_grid(p_corrplot , 
                       plot_forest,  
                 ncol  = 1,
                 labels = 'auto',
                 rel_heights = c(1,1),
-                align = 'vh', axis = 'lrtb')
+                align = 'vh', axis = 'l')
 
 
 title <- ggdraw() + 
@@ -781,7 +775,7 @@ combined <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,5,1,1), "cm"))
+) +theme(plot.margin = unit(c(1,1,2,1), "cm"))
 
 ggsave('../data/090_macronutrient_correlation.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
