@@ -18,6 +18,12 @@ library(rstan)
 library(cowplot)
 library(rmcorr)      # For the repeated-measures correlation
 library(corrplot) 
+library(broom.mixed)
+library(tidybayes)
+library(brmstools)
+library(bayesplot)
+library(gt)
+library(ggtext)
 options(mc.cores = parallel::detectCores())
 ncores = parallel::detectCores()
 rstan_options(auto_write = TRUE)
@@ -362,7 +368,7 @@ conditional3  %>% write_rds('../intermediate_data//090_conditional3.RDS')
 #   write_csv('../data/090_target_protein_genus_macro_model_post_interaction.csv')
 ```
  
-# pairwise correlation of the macronutrients 
+# _pairwise correlation of the macronutrients 
 
 ```{r}
 # --- Part 1: Load and Aggregate Data ---
@@ -501,15 +507,15 @@ par(mar = c(0, 0, 2, 0)) # bottom, left, top, right
 # DEFINE the correct color palette:
 # We are forcing a "Blue -> White -> Red" scale
 # This maps -1 (lowest) to Blue, 0 to White, and +1 (highest) to Red.
-col_palette <- colorRampPalette(c("#00007F", "yellow", "#7F0000"))(200)
+col_palette <- colorRampPalette(c("#00007F", "green", "#7F0000"))(200)
 
 # Define the colors for the text labels (tl.col)
 # We want "Fat", "Fibers", and "Sugars" to be forestgreen,
 # and all others to be black.
 label_colors <- ifelse(
   macro_cols_new %in% c("Fat", "Fibers", "Sugars"), 
-  "forestgreen", 
-  "forestgreen"
+  "black", 
+  "black"
 )
 
 corrplot(
@@ -528,4 +534,256 @@ corrplot(
 # Reset plotting parameters to default
 par(mar = c(5.1, 4.1, 4.1, 2.1)) 
 ```
+```{r}
+# --- Part 6: Generate and Combine Plots with ggplot2 & patchwork ---
+#
+# Instead of corrplot (base R), we will build the plot in ggplot2
+# so it can be combined with other ggplot objects.
+#
+# We only need the lower triangle + the diagonal for a staircase plot
+plot_data_lower_tri <- rmcorr_results |>
+  # Ensure the factors are in the correct, non-alphabetical order
+  mutate(
+    measure1 = factor(measure1, levels = macro_cols_new),
+    measure2 = factor(measure2, levels = macro_cols_new)
+  )
 
+
+# Create the ggplot correlation plot
+p_corrplot <- ggplot(plot_data_lower_tri, aes(x = measure1, y = measure2, fill = r)) +
+  geom_tile(color = "white") + # Add white borders to the tiles
+  geom_text(aes(label = round(r, 2)), color = "black", size = 3.5) +
+  # Use the same "Blue-White-Red" color scale, centered at 0
+  scale_fill_gradient2(
+    low = "#00007F", 
+    mid = "green", 
+    high = "#7F0000",
+    midpoint = 0,
+    limit = c(-1, 1), # Force the scale to be from -1 to 1
+    name = "r"
+  ) +
+  # Force the y-axis to be in the "matrix" order (reversed)
+  scale_y_discrete(limits = rev(macro_cols_new)) +
+  scale_x_discrete(position = "top") + # Move x-axis labels to the top
+  theme_minimal() + # Use a clean theme
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 0),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  ) +
+  labs(title = "Pairwise Repeated-Measures Correlations (rmcorr)") +
+  coord_fixed() # Ensure tiles are square
+
+p_corrplot
+```
+
+
+# calculate the pariwise correlation for the summarized values that will be use in the model
+
+```{r}
+full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv')
+macro_cols_p2d <- full %>% select(starts_with('ave')) %>% select(-ave_cal) |> colnames()
+
+pairs <- combn(macro_cols_p2d, 2, simplify = FALSE)
+
+# Now, we "map" over (loop through) each pair and run the
+# repeated-measures correlation (rmcorr).
+# This correctly accounts for the non-independent, repeated data
+# from the same patient, which a standard Pearson correlation would not.
+rmcorr_results_p2d <- pairs |>
+  map(\(pair) {
+    m1_name <- pair[1] # First measure in the pair
+    m2_name <- pair[2] # Second measure in the pair
+
+    # Run the rmcorr analysis
+    # rmcorr() conveniently takes the column names as strings
+    result <- rmcorr(
+      participant = pid,
+      measure1 = m1_name,
+      measure2 = m2_name,
+      dataset = full |> mutate(pid = factor(pid))
+    )
+
+    # Return a tidy data frame (tibble) of the key results
+    tibble(
+      measure1 = m1_name,
+      measure2 = m2_name,
+      r = result$r,      # The correlation coefficient
+      p_value = result$p,  # The p-value
+      df = result$df     # Degrees of freedom
+    )
+  }) |>
+  list_rbind()
+rmcorr_results_p2d
+```
+
+# model with all 5 macronutreints in it
+
+```{r}
+all_macro_vars <- macro_cols_p2d
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_macro_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+# Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = full,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2)) 
+```
+```{r}
+
+level_order <- rev(c(
+    "abx", "EN", "TPN",
+    "abx * Sugars", "Sugars",
+    "abx * Fiber", "Fiber",
+    "abx * Fat", "Fat",
+    "abx * Carbohydrates", "Carbohydrates",
+    "abx * Protein", "Protein"
+))
+
+cleaned_effects <- results_df %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = case_when(
+      # Main effects (antibiotics, EN, TPN)
+      # 'empiricalTRUE' seems to correspond to 'abx' in your model
+      term == "empiricalTRUE" ~ "abx",
+      term == "ENTRUE" ~ "EN",
+      term == "TPNTRUE" ~ "TPN",
+      
+      # Interaction terms (abx * nutrient)
+      term == "empiricalTRUE:ave_carb" ~ "abx * Carbohydrates",
+      term == "empiricalTRUE:ave_fat" ~ "abx * Fat",
+      term == "empiricalTRUE:ave_fiber" ~ "abx * Fiber",
+      term == "empiricalTRUE:ave_Protein" ~ "abx * Protein",
+      term == "empiricalTRUE:ave_Sugars" ~ "abx * Sugars",
+      
+      # Nutrient-only terms (the 'FALSE' condition)
+      # These seem to be the main nutrient effects without the interaction.
+      term == "empiricalFALSE:ave_carb" ~ "Carbohydrates",
+      term == "empiricalFALSE:ave_fat" ~ "Fat",
+      term == "empiricalFALSE:ave_fiber" ~ "Fiber",
+      term == "empiricalFALSE:ave_Protein" ~ "Protein",
+      term == "empiricalFALSE:ave_Sugars" ~ "Sugars",
+      
+      # A fallback rule. If a term doesn't match any of the above,
+      # it will just keep its original name.
+      TRUE ~ term 
+    )
+  ) %>%
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) > 0,
+         clean_term = factor(clean_term, levels = level_order))
+
+
+```
+
+
+```{r}
+shading_df <- cleaned_effects %>%
+  mutate(y_numeric = as.numeric(clean_term)) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+plot_forest <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#d8dcc8", # A light orange/peach color like the example
+    alpha = 0.7,
+    inherit.aes = FALSE
+   ) +
+   # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  # Add labels and a clean theme
+  labs(
+    x = "ln(diversity) change",
+    title = "Predictor effects on diversity",
+    #subtitle = "Sensitivity Analysis: Capped at max 5 samples per patient",
+    y = ''
+  ) +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown())
+
+plot_forest 
+
+```
+
+# assemble 
+
+```{r}
+final_plot <- plot_grid(p_corrplot , 
+                      plot_forest,  
+                ncol  = 1,
+                labels = 'auto',
+                rel_heights = c(1,1),
+                align = 'vh', axis = 'lrtb')
+
+
+title <- ggdraw() + 
+  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,5,1,1), "cm"))
+
+ggsave('../data/090_macronutrient_correlation.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)       
+```
