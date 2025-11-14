@@ -15,6 +15,9 @@ library(ggpubr)
 library(tidybayes)  
 library(brms)
 library(rstan)
+library(cowplot)
+library(rmcorr)      # For the repeated-measures correlation
+library(corrplot) 
 options(mc.cores = parallel::detectCores())
 ncores = parallel::detectCores()
 rstan_options(auto_write = TRUE)
@@ -359,3 +362,170 @@ conditional3  %>% write_rds('../intermediate_data//090_conditional3.RDS')
 #   write_csv('../data/090_target_protein_genus_macro_model_post_interaction.csv')
 ```
  
+# pairwise correlation of the macronutrients 
+
+```{r}
+# --- Part 1: Load and Aggregate Data ---
+
+# Define the new, simpler names for the macronutrient columns
+macro_cols_new <- c("Protein", "Fat", "Carbohydrates", "Fibers", "Sugars")
+
+# Load the dataset
+# Make sure the "152_combined_DTB.csv" file is in the same
+# directory as this R script, or provide the full path.
+dtb <- read_csv("../data/152_combined_DTB.csv")
+
+# Aggregate food intake to get daily totals per patient.
+
+#
+# The 'sum(..., na.rm = TRUE)' part handles the "impute zero" request.
+# If a patient ate other foods on that day but 0 of one macro,
+# the sum for that macro will correctly be 0 (not NA).
+daily_macros <- dtb |>
+  group_by(pid, fdrt) |>
+  summarise(
+    Protein = sum(Protein_g, na.rm = TRUE),
+    Fat = sum(Fat_g, na.rm = TRUE),
+    Carbohydrates = sum(Carbohydrates_g, na.rm = TRUE),
+    Fibers = sum(Fibers_g, na.rm = TRUE),
+    Sugars = sum(Sugars_g, na.rm = TRUE),
+    .groups = 'drop' # Ungroups the data after summarising
+  ) |>
+  # The rmcorr() function requires at least 2 observations (days)
+  # per participant ('pid') to calculate a correlation.
+  # This section filters out any participants with only one day of data.
+  add_count(pid) |> # Add a column 'n' with the count of days per pid
+  filter(n > 1) |>  # Keep only pids with more than 1 day
+  select(-n)        # Remove the temporary 'n' column
+
+# Display the first few rows of the aggregated data to check
+print("--- Aggregated Daily Macronutrients (Head) ---")
+print(head(daily_macros))
+```
+
+
+```{r}
+# --- Part 2: Calculate Pairwise Repeated-Measures Correlation ---
+
+# Get all unique combinations (pairs) of the macronutrient names
+pairs <- combn(macro_cols_new, 2, simplify = FALSE)
+
+# Now, we "map" over (loop through) each pair and run the
+# repeated-measures correlation (rmcorr).
+# This correctly accounts for the non-independent, repeated data
+# from the same patient, which a standard Pearson correlation would not.
+rmcorr_results <- pairs |>
+  map(\(pair) {
+    m1_name <- pair[1] # First measure in the pair
+    m2_name <- pair[2] # Second measure in the pair
+
+    # Run the rmcorr analysis
+    # rmcorr() conveniently takes the column names as strings
+    result <- rmcorr(
+      participant = pid,
+      measure1 = m1_name,
+      measure2 = m2_name,
+      dataset = daily_macros |> mutate(pid = factor(pid))
+    )
+
+    # Return a tidy data frame (tibble) of the key results
+    tibble(
+      measure1 = m1_name,
+      measure2 = m2_name,
+      r = result$r,      # The correlation coefficient
+      p_value = result$p,  # The p-value
+      df = result$df     # Degrees of freedom
+    )
+  }) |>
+  list_rbind() # Combine all the individual pair results into one big table
+
+# Print the correlation results to the console
+print("--- Pairwise Repeated-Measures Correlations (rmcorr) ---")
+print(rmcorr_results)
+```
+
+
+```{r}
+# --- Part 3: Visualize the Correlation Matrix ---
+
+# To create a "staircase" plot, we first need to build a
+# full, symmetric matrix from our 'rmcorr_results' (which is
+# just the lower triangle).
+
+# 1. Create the reverse pairs (e.g., Fat vs Protein)
+rmcorr_results_reversed <- rmcorr_results |>
+  rename(
+    measure1 = measure2,
+    measure2 = measure1
+  )
+
+# 2. Create the diagonal entries (e.g., Protein vs Protein)
+#    The correlation of a variable with itself is always 1.
+rmcorr_results_diag <- tibble(
+  measure1 = macro_cols_new,
+  measure2 = macro_cols_new,
+  r = 1
+)
+
+# 3. Combine all parts: original, reversed, and diagonal
+full_corr_data <- bind_rows(
+  rmcorr_results,
+  rmcorr_results_reversed,
+  rmcorr_results_diag
+)
+
+# 4. Pivot the data from a long format to a wide matrix format
+#    that corrplot() expects.
+corr_matrix <- full_corr_data |>
+  select(measure1, measure2, r) |>
+  pivot_wider(
+    names_from = measure2,
+    values_from = r
+  ) |>
+  column_to_rownames(var = "measure1") |> # Set row names
+  as.matrix()                           # Convert to matrix
+
+# 5. Ensure the matrix rows and columns are in the original,
+#    logical order (Protein, Fat, etc.), not alphabetical.
+corr_matrix_ordered <- corr_matrix[macro_cols_new, macro_cols_new]
+
+# 6. Generate the plot!
+print("--- Generating Correlation Plot ---")
+
+# We create a little margin at the top for the title
+par(mar = c(0, 0, 2, 0)) # bottom, left, top, right
+
+# REMOVED: No longer creating 'col_inverted'. We will use the
+# default corrplot colors (Blue-White-Red).
+
+# DEFINE the correct color palette:
+# We are forcing a "Blue -> White -> Red" scale
+# This maps -1 (lowest) to Blue, 0 to White, and +1 (highest) to Red.
+col_palette <- colorRampPalette(c("#00007F", "yellow", "#7F0000"))(200)
+
+# Define the colors for the text labels (tl.col)
+# We want "Fat", "Fibers", and "Sugars" to be forestgreen,
+# and all others to be black.
+label_colors <- ifelse(
+  macro_cols_new %in% c("Fat", "Fibers", "Sugars"), 
+  "forestgreen", 
+  "forestgreen"
+)
+
+corrplot(
+  corr_matrix_ordered,
+  method = "color",       # Use color to represent correlation strength
+  type = "lower",         # Show only the lower triangle ("stair case")
+  addCoef.col = "black",  # Add the correlation coefficient values
+  tl.col = label_colors,  # <-- FIXED: Use the custom label colors
+  tl.srt = 45,            # Rotate text labels 45 degrees
+  diag = FALSE,           # Don't plot the diagonal (self-correlation)
+ col = col_palette, 
+  title = "Pairwise Repeated-Measures Correlations (rmcorr)",
+  mar = c(0, 0, 1, 0)     # Adjust plot margins
+)
+
+# Reset plotting parameters to default
+par(mar = c(5.1, 4.1, 4.1, 2.1)) 
+```
+
