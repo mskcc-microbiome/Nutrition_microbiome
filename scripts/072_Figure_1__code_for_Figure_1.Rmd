@@ -154,7 +154,6 @@ smoothie <- dtb %>%
 schematic <- '../intermediate_data/transplant_schematic.png'
 schematic_plot <- ggdraw() +
   draw_image(schematic,   scale = 1.1)  
-
 ```
 
 
@@ -166,10 +165,10 @@ diet_hist <- dtb %>%
   distinct(pid, Meal, fdrt) %>% 
   gghistogram(x = 'fdrt', xlab = 'Transplant day', ylab = 'Meals recorded', 
               color = diet_line_color, fill = diet_line_color, alpha = 0.5)+
-    scale_x_continuous( breaks = seq(-10, 50, 20)) + 
+    scale_x_continuous( breaks = seq(0, 50, 20)) + 
   geom_vline(xintercept = transplant_day, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
   annotate("text", x = 30, y = 600, label = "173 patients,\n9,419 total meals\n40,702 food items", hjust = 0, size = 2.5) +
-  theme_classic(base_size = 8) +
+  theme_classic(base_size = 14) +
   theme(aspect.ratio=1/1.5,
          axis.title=element_text(size=axis_title_size))
     
@@ -188,9 +187,9 @@ stool_hist <- meta %>%
   geom_histogram(alpha = 0.5, fill = stool_line_color, color = stool_line_color) +
   geom_vline(xintercept = transplant_day, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
   labs(x = 'Transplant day', y = 'Stool samples') +
-  scale_x_continuous( breaks = seq(-10, 50, 20)) + 
+  scale_x_continuous( breaks = seq(0, 50, 20)) + 
   annotate("text", x = 30, y = 60, label = "1,009\nstool samples", hjust = 0, size = 2.5) +
-  theme_classic(base_size = 8) +
+  theme_classic(base_size = 14) +
   theme(aspect.ratio=1/1.5,   axis.title=element_text(size=axis_title_size))
 stool_hist   
 ```
@@ -204,22 +203,21 @@ tree <- ggdraw() +
   draw_image(p,   scale = 1.1) 
 ```
 
-
 # 1M: stool line 
 
 ```{r stool_alpha}
 stool_alpha <- meta %>% 
      ggplot() +
-  rasterise(geom_point(aes(x = sdrt, y = simpson_reciprocal, shape = 'triangle'), alpha = scatter_transparency,size = point_size , shape = 16), dpi = 300) +
+  rasterise(geom_point(aes(x = sdrt, y = simpson_reciprocal, shape = 'triangle'), alpha = 0.3,size = point_size , shape = 16), dpi = 300) +
   geom_smooth(aes(x = sdrt, y = simpson_reciprocal), method = "loess", formula = 'y ~ x', colour = stool_line_color ,  size = 1, fill = 'darkblue') +
   geom_vline(xintercept = transplant_day, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
-  labs( x = 'Transplant day',title = 'Microbiome\nalpha diversity', y = '') +
+  labs( x = '',title = 'Microbiome\nalpha diversity', y = '') +
   scale_y_sqrt() +
-  theme_classic(base_size = 8) +
+  theme_classic(base_size = 14) +
    scale_x_continuous( breaks = seq(0, 50, 20)) + 
-  theme(axis.text=element_text(size=8), axis.title=element_text(size=axis_title_size),
+  theme( axis.title=element_text(size=axis_title_size),
         #plot.title = element_blank(),
-        aspect.ratio=1)
+        aspect.ratio=1/1.5)
 stool_alpha
 ```
 
@@ -256,19 +254,20 @@ day_calori <- dtb %>%
 cal_line <- day_calori %>% 
   mutate(daycal = daycal/1000) %>%
        ggplot() +
-  rasterise(geom_point(aes(x = fdrt, y = daycal), alpha = scatter_transparency,size = point_size , shape = 16), dpi = 300) +
+  rasterise(geom_point(aes(x = fdrt, y = daycal), alpha = 0.3,size = point_size , shape = 16), dpi = 300) +
   geom_smooth(aes(x = fdrt, y = daycal), method = "loess", formula = 'y ~ x', colour = diet_line_color ,  size = 1, fill = 'hotpink') +
   geom_vline(xintercept = transplant_day, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
   labs( x = '',title = 'Caloric intake', y = '*1000 Kcal') +
   scale_x_continuous( breaks = seq(0, 50, 20)) +
   scale_y_sqrt() +
-  theme_classic(base_size = 8) +
-  theme(axis.text.y=element_text(size=8),
-        axis.text.x=element_blank(),
-        axis.title=element_text(size=8),
+  theme_classic(base_size = 14) +
+  theme(
+        #axis.text.x=element_blank(),
+        #axis.title=element_text(size=8),
         strip.background = element_blank(),
         strip.text.x = element_blank(), 
-        plot.title = element_text(size=axis_title_size),aspect.ratio=1)
+        plot.title = element_text(size=axis_title_size),
+        aspect.ratio=1/1.5)
 cal_line
 ```
 # 1J: diet alpha line
@@ -280,19 +279,19 @@ faith <- read_csv('../data/162_all_faith_pid.csv')
 faith_line <- faith %>% 
   mutate(faith_pd = faith_pd/1000) %>%
        ggplot() +
-  rasterise(geom_point(aes(x = fdrt, y = faith_pd), alpha = scatter_transparency,size = point_size , shape = 16), dpi = 300) +
+  rasterise(geom_point(aes(x = fdrt, y = faith_pd), alpha = 0.3,size = point_size , shape = 16), dpi = 300) +
   geom_smooth(aes(x = fdrt, y = faith_pd), method = "loess", formula = 'y ~ x', colour = diet_line_color ,  size = 1, fill = 'hotpink') +
   geom_vline(xintercept = transplant_day, linetype = 'dashed', size = dayzeroline_size, color = day0_line_color) +
-  labs( x = '',title = 'Diet a diversity', y = '*1000') +
+  labs( x = 'Transplant day',title = 'Diet a diversity', y = '*1000') +
   scale_x_continuous( breaks = seq(0, 50, 20)) +
   scale_y_sqrt() +
-  theme_classic(base_size = 8) +
-  theme(axis.text.y=element_text(size=8),
-        axis.text.x=element_blank(),
-        axis.title=element_text(size=8),
+  theme_classic(base_size = 14) +
+  theme(
+        #axis.text.x=element_blank(),
         strip.background = element_blank(),
         strip.text.x = element_blank(), 
-        plot.title = element_text(size=axis_title_size),aspect.ratio=1)
+        plot.title = element_text(size=axis_title_size),
+        aspect.ratio=1/1.5)
 faith_line
 ```
 
@@ -740,5 +739,219 @@ combined <- plot_grid(
 ggsave('../results/F1_overview_raw_072_new_test.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', 
       dpi = 300)    
+```
+
+# NEW fig 1
+
+## generate the bmt schematic using ggplot
+
+```{r}
+# 1. Generate sample data to create the curve
+# A cosine function is a good way to model this dip and recovery.
+# We adjust parameters to get the trough around day 6 and reasonable start/end points.
+day_seq <- seq(-4, 18.5, by = 0.1) # Extended sequence
+plot_data <- data.frame(day = day_seq) |>
+  mutate(
+    # This cosine function:
+    # - Has trough at day 6.5
+    # - Has amplitude of 0.5, so trough (y_min) is (0.5 - 0.5) = 0
+    # - Has period of 22 days, so half-period (dip) is 11 days
+    # - Crosses y=0.5 at day = 6.5 - 5.5 = 1
+    # - Crosses y=0.5 at day = 6.5 + 5.5 = 12
+    # - Peaks at y=1.0 at day = 6.5 + 11 = 17.5
+    n = -0.5 * cos((pi / 11) * (day - 6.5)) + 0.5
+  ) |>
+  # Cap the value at 1.0 to create the flat tail
+  mutate(neutrophils = ifelse(day > 17.5, 1.0, n)) |>
+  # Ensure count doesn't go below zero (though min is 0)
+  mutate(neutrophils = ifelse(neutrophils < 0, 0, neutrophils)) |>
+  select(-n) # Clean up intermediate column
+
+# 2. Create a separate dataset for the "neutropenia" ribbon
+# This ribbon shades the area where neutrophils are below 0.5
+ribbon_data <- plot_data |>
+  filter(neutrophils < 0.5) |> # This filter correctly finds the dip
+  mutate(
+    ymin = neutrophils, # Bottom of ribbon is the curve
+    ymax = 0.5          # Top of ribbon is the horizontal line
+  )
+
+# 2b. Create data for the gradient "nausea" bar
+gradient_days <- seq(-2, 14, by = 0.1) # Fade from -2 to 0, and 12 to 14
+gradient_data <- data.frame(day = gradient_days) |>
+  mutate(
+    y_pos = 0.85, # Y-position for the center of the bar
+    # Create the alpha gradient:
+    # 0 -> 0.8 from day -2 to 0
+    # 0.8 from day 0 to 12
+    # 0.8 -> 0 from day 12 to 14
+    alpha_val = case_when(
+      day < 0  ~ pmax(0, 0.8 * (1 - (day / -2))), # Ramps up
+      day > 12 ~ pmax(0, 0.8 * (1 - ((day - 12) / 2))), # Ramps down
+      TRUE     ~ 0.8 # Solid center
+    )
+  )
+
+# 3. Build the ggplot
+bmt_plot <- ggplot(plot_data, aes(x = day, y = neutrophils)) +
+
+  # --- Annotations (Bars & Shading) ---
+  
+  # "conditioning" bar (using a thick segment)
+  annotate(
+    "segment",
+    x = -4, xend = 0, y = 1.05, yend = 1.05,
+    color = "#6a3d9a", # A deep purple
+    linewidth = 6,
+    lineend = "butt"
+  ) +
+  
+  # "nausea, mucositis" gradient bar (using tiles)
+  geom_tile(
+    data = gradient_data,
+    aes(
+      x = day,
+      y = y_pos,
+      alpha = alpha_val,
+      fill = "#b3cde3", # Set fill *inside* aes
+      height = 0.1
+    ),
+    color = NA # No border on the tiles
+  ) +
+  
+  # "neutropenia" shaded ribbon
+  geom_ribbon(
+    data = ribbon_data,
+    # Override main 'y' aesthetic, map ymin and ymax
+    aes(ymin = ymin, ymax = ymax, y = NULL),
+    fill = "#FBBFBF", # Changed to pink
+    alpha = 0.7       # Made slightly more opaque
+  ) +
+
+  # --- Guidelines ---
+  
+  # Horizontal line at 0.5
+  geom_hline(
+    yintercept = 0.5,
+    linetype = "dashed",
+    color = "grey60"
+  ) +
+  
+  # Vertical lines at day 0 and day 12
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "grey70"
+  ) +
+  geom_vline(
+    xintercept = 12,
+    linetype = "dashed",
+    color = "grey70"
+  ) +
+
+  # --- Main Neutrophil Line ---
+  geom_line(
+    color = "#555555", # Matching red
+    linewidth = .8
+  ) +
+
+  # --- Text Labels ---
+  
+  annotate(
+    "text",
+    x = 6, y = 0.85, # Centered between 0 and 12
+    label = "nausea, mucositis",
+    hjust = 0.5,
+    size = 4.5
+  ) +
+  annotate(
+    "text",
+    x = 6.5, y = 0.15, # Centered at the new trough
+    label = "neutropenia",
+    hjust = 0.5,
+    size = 4.5,
+    color = "#111111"
+  ) +
+
+  # --- Scales and Theme ---
+  
+  # Set axis limits, breaks, and labels
+  scale_x_continuous(
+    breaks = c(0, 12),
+    labels = c("0", "~12"),
+    limits = c(-4.5, 19), # Extended to show flat tail
+    expand = c(0, 0) # Remove padding
+  ) +
+  scale_y_continuous(
+    breaks = c(0, 0.5),
+    limits = c(0, 2),
+    expand = c(0, 0) # Remove padding
+  ) +
+  
+  # Add this scale to use the 'alpha_val' column directly
+  scale_alpha_identity() +
+  
+  # Add this scale to use the fill color directly
+  scale_fill_identity() +
+
+  # Use unicode for the micron (µ) symbol
+  labs(
+    x = "Day",
+    y = "neutrophils\n[k/\u00b5l blood]"
+  ) +
+  
+  # Clean up the theme
+  theme_classic(base_size = 14) +
+  theme(
+    # Remove all gridlines
+    panel.grid = element_blank(),
+    # Style axis titles
+    axis.title.y = element_text(
+      angle = 90,
+      size = 12,
+      margin = margin(r = 0) # Add space
+    ),
+    axis.title.x = element_text(
+      size = 12,
+      margin = margin(t = 0) # Add space
+    ),
+    # Style axis text
+    axis.text = element_text(size = 11, color = "black"),
+    # Style axis lines
+    axis.line = element_line(linewidth = 0.5, color = "black"),
+    aspect.ratio = 1/1.5
+    # Add a plot margin
+    #plot.margin = margin(20, 20, 20, 20)
+  )
+
+# Print the plot
+print(bmt_plot)
+```
+
+## the final figure 1
+
+```{r}
+title <- ggdraw() + 
+  draw_label("Fig. 1",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 5))
+
+f1 <-  plot_grid(bmt_plot, diet_hist, stool_hist, 
+                 cal_line, faith_line, stool_alpha,
+                 align = 'hv',
+                 axis = 'tblr',
+                 labels = 'auto',
+                 #rel_heights = c(1,0.7, 1.5),
+                 nrow = 2)
+
+combined <- plot_grid(
+  title, f1,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,11,1), "cm"))
+
+ggsave('../data/072_F1_parelle_collapse.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
+      dpi = 300)  
 ```
 
