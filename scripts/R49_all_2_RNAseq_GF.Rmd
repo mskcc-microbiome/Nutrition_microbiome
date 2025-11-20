@@ -583,7 +583,7 @@ create_volcano_plot <- function(results_df, plot_title) {
     
     # Use ggrepel to add non-overlapping labels for the significant genes
     geom_text_repel(aes(label = label),
-                    size = 3.5,
+                    size = 4.5,
                     box.padding = 0.5,
                     max.overlaps = Inf, # Allow all labels to be plotted
                     na.rm = TRUE) + # Ignore genes without a label
@@ -598,7 +598,7 @@ create_volcano_plot <- function(results_df, plot_title) {
     
     # Set plot titles and axis labels
     labs(
-      title = plot_title,
+      #title = plot_title,
       x = "Log2 Fold Change",
       y = "-log10(Adjusted P-value)"
     ) +
@@ -831,11 +831,15 @@ all_fgsea_res <- bind_rows(
   fgsea_res_si_suc %>% as_tibble() %>% mutate(condition = "SI - Sucrose"),
   fgsea_res_li_suc %>% as_tibble() %>% mutate(condition = "LI - Sucrose")
 )
+
+all_fgsea_res |> write_csv('../data/R49_all_fgsea_res.csv')
 ```
 
 ## lollipop plot
 
 ```{r}
+all_fgsea_res <- read_csv('../data/R49_all_fgsea_res.csv')
+
 # Filter for significant pathways and select top N up/down for each condition
 top_pathways <- all_fgsea_res %>%
   filter(padj < 0.05) %>%
@@ -881,7 +885,7 @@ create_diverging_plot <- function(data, plot_condition) {
     scale_size_continuous(name = "-log10(Adjusted p-value)") +
     
     labs(
-      title = plot_condition,
+      #title = plot_condition,
       x = "Normalized Enrichment Score (NES)",
       y = ""
     ) +
@@ -1745,6 +1749,9 @@ plot_pathway_heatmap(
 )
 ```
 
+# add arrows
+
+
 
 # assemble  
 
@@ -1759,7 +1766,7 @@ final_plot <- plot_grid( p_si_col ,
                          plot_si_col ,
                          weight_change4,
                      biapenem_plot ,
-                nrow  = 4,
+                nrow  = 2,
                 labels = 'auto',
                 align = 'vh', axis = 'lrtb')
 
@@ -1776,11 +1783,72 @@ combined <- plot_grid(
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/R49_mouse_data_for_host_impacts.pdf',
-      width = 8.5, height = 19, units = "in", device = 'pdf', 
-      dpi = 300)  
+      width = 12, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)
 ```
 
 
+```{r}
+add_direction_arrows <- function(plot_object, 
+                                 up_label = "Upregulated in the E.faecalis\nmonizolonized mice", 
+                                 down_label = "Upregulated in\nthe germ-free mice",
+                                 y_position, 
+                                 x_start = 1,
+                                 arrow_length = 2) {
+  
+  plot_object +
+    # --- Right Arrow (Upregulated) ---
+    annotate("segment", 
+             x = x_start, xend = x_start + arrow_length, 
+             y = y_position, yend = y_position, 
+             arrow = arrow(length = unit(0.3, "cm")), 
+             color = "black", size = 1) +
+    annotate("text", 
+             x = x_start + (arrow_length / 2), y = y_position + 0.5, 
+             label = up_label, 
+             color = "black", fontface = "bold", size = 4) +
+    
+    # --- Left Arrow (Downregulated) ---
+    annotate("segment", 
+             x = -x_start, xend = -(x_start + arrow_length), 
+             y = y_position, yend = y_position, 
+             arrow = arrow(length = unit(0.3, "cm")), 
+             color = "black", size = 1) +
+    annotate("text", 
+             x = -(x_start + (arrow_length / 2)), y = y_position + 0.5, 
+             label = down_label, 
+             color = "black", fontface = "bold", size = 4)
+}
+
+
+# 1. For Panel A (Volcano Plot)
+annotated_volcano <- add_direction_arrows(
+  p_si_col,
+  y_position = 5,      # Just above the highest dot (which is ~4.5)
+  x_start = 0.5,       # Start arrow slightly away from center
+  arrow_length = 2     # Long arrow for FC range
+)
+
+# 2. For Panel B (GSEA Plot)
+annotated_gsea <- add_direction_arrows(
+  plot_si_col,
+  y_position = 17,     # Above the top bar (if you have ~18 bars)
+  x_start = 0.2,       # Start close to center (NES is narrow)
+  arrow_length = 1.5   # Shorter arrow for NES range (-2 to 3)
+)
+
+RNAseq_res <- plot_grid( annotated_volcano , 
+                         annotated_gsea ,
+                nrow  = 1,
+                rel_widths = c(2,1.5),
+                labels = 'auto',
+                align = 'h', axis = '')
+
+ggsave('../data/R49_mouse_data_RNAseq_res.pdf',
+      width = 11, height = 5, units = "in", device = 'pdf', plot = RNAseq_res, 
+      dpi = 300)  
+```
+ 
 ```{r}
 # final_plot <- plot_grid( p_si_col ,  p_li_col ,
 #                       plot_si_col, plot_li_col,    
