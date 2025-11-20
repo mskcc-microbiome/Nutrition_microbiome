@@ -374,12 +374,13 @@ conditional3  %>% write_rds('../intermediate_data//090_conditional3.RDS')
 # --- Part 1: Load and Aggregate Data ---
 
 # Define the new, simpler names for the macronutrient columns
-macro_cols_new <- c("Protein", "Fat", "Carbohydrates", "Fibers", "Sugars")
+macro_cols_new <- c("Protein", "Fat", "Starch", "Fibers", "Sugars")
 
 # Load the dataset
 # Make sure the "152_combined_DTB.csv" file is in the same
 # directory as this R script, or provide the full path.
-dtb <- read_csv("../data/152_combined_DTB.csv")
+dtb <- read_csv("../data/152_combined_DTB.csv") |> 
+  mutate(starch_g = Carbohydrates_g - Fibers_g - Sugars_g)
 
 # Aggregate food intake to get daily totals per patient.
 
@@ -392,7 +393,7 @@ daily_macros <- dtb |>
   summarise(
     Protein = sum(Protein_g, na.rm = TRUE),
     Fat = sum(Fat_g, na.rm = TRUE),
-    Carbohydrates = sum(Carbohydrates_g, na.rm = TRUE),
+    Starch = sum(starch_g, na.rm = TRUE),
     Fibers = sum(Fibers_g, na.rm = TRUE),
     Sugars = sum(Sugars_g, na.rm = TRUE),
     .groups = 'drop' # Ungroups the data after summarising
@@ -452,87 +453,87 @@ print(rmcorr_results)
 
 
 ```{r}
-# --- Part 3: Visualize the Correlation Matrix ---
-
-# To create a "staircase" plot, we first need to build a
-# full, symmetric matrix from our 'rmcorr_results' (which is
-# just the lower triangle).
-
-# 1. Create the reverse pairs (e.g., Fat vs Protein)
-rmcorr_results_reversed <- rmcorr_results |>
-  rename(
-    measure1 = measure2,
-    measure2 = measure1
-  )
-
-# 2. Create the diagonal entries (e.g., Protein vs Protein)
-#    The correlation of a variable with itself is always 1.
-rmcorr_results_diag <- tibble(
-  measure1 = macro_cols_new,
-  measure2 = macro_cols_new,
-  r = 1
-)
-
-# 3. Combine all parts: original, reversed, and diagonal
-full_corr_data <- bind_rows(
-  rmcorr_results,
-  rmcorr_results_reversed,
-  rmcorr_results_diag
-)
-
-# 4. Pivot the data from a long format to a wide matrix format
-#    that corrplot() expects.
-corr_matrix <- full_corr_data |>
-  select(measure1, measure2, r) |>
-  pivot_wider(
-    names_from = measure2,
-    values_from = r
-  ) |>
-  column_to_rownames(var = "measure1") |> # Set row names
-  as.matrix()                           # Convert to matrix
-
-# 5. Ensure the matrix rows and columns are in the original,
-#    logical order (Protein, Fat, etc.), not alphabetical.
-corr_matrix_ordered <- corr_matrix[macro_cols_new, macro_cols_new]
-
-# 6. Generate the plot!
-print("--- Generating Correlation Plot ---")
-
-# We create a little margin at the top for the title
-par(mar = c(0, 0, 2, 0)) # bottom, left, top, right
-
-# REMOVED: No longer creating 'col_inverted'. We will use the
-# default corrplot colors (Blue-White-Red).
-
-# DEFINE the correct color palette:
-# We are forcing a "Blue -> White -> Red" scale
-# This maps -1 (lowest) to Blue, 0 to White, and +1 (highest) to Red.
-col_palette <- colorRampPalette(c("#00007F", "green", "#7F0000"))(200)
-
-# Define the colors for the text labels (tl.col)
-# We want "Fat", "Fibers", and "Sugars" to be forestgreen,
-# and all others to be black.
-label_colors <- ifelse(
-  macro_cols_new %in% c("Fat", "Fibers", "Sugars"), 
-  "black", 
-  "black"
-)
-
-corrplot(
-  corr_matrix_ordered,
-  method = "color",       # Use color to represent correlation strength
-  type = "lower",         # Show only the lower triangle ("stair case")
-  addCoef.col = "black",  # Add the correlation coefficient values
-  tl.col = label_colors,  # <-- FIXED: Use the custom label colors
-  tl.srt = 45,            # Rotate text labels 45 degrees
-  diag = FALSE,           # Don't plot the diagonal (self-correlation)
- col = col_palette, 
-  title = "Pairwise Repeated-Measures Correlations (rmcorr)",
-  mar = c(0, 0, 1, 0)     # Adjust plot margins
-)
-
-# Reset plotting parameters to default
-par(mar = c(5.1, 4.1, 4.1, 2.1)) 
+# # --- Part 3: Visualize the Correlation Matrix ---
+# 
+# # To create a "staircase" plot, we first need to build a
+# # full, symmetric matrix from our 'rmcorr_results' (which is
+# # just the lower triangle).
+# 
+# # 1. Create the reverse pairs (e.g., Fat vs Protein)
+# rmcorr_results_reversed <- rmcorr_results |>
+#   rename(
+#     measure1 = measure2,
+#     measure2 = measure1
+#   )
+# 
+# # 2. Create the diagonal entries (e.g., Protein vs Protein)
+# #    The correlation of a variable with itself is always 1.
+# rmcorr_results_diag <- tibble(
+#   measure1 = macro_cols_new,
+#   measure2 = macro_cols_new,
+#   r = 1
+# )
+# 
+# # 3. Combine all parts: original, reversed, and diagonal
+# full_corr_data <- bind_rows(
+#   rmcorr_results,
+#   rmcorr_results_reversed,
+#   rmcorr_results_diag
+# )
+# 
+# # 4. Pivot the data from a long format to a wide matrix format
+# #    that corrplot() expects.
+# corr_matrix <- full_corr_data |>
+#   select(measure1, measure2, r) |>
+#   pivot_wider(
+#     names_from = measure2,
+#     values_from = r
+#   ) |>
+#   column_to_rownames(var = "measure1") |> # Set row names
+#   as.matrix()                           # Convert to matrix
+# 
+# # 5. Ensure the matrix rows and columns are in the original,
+# #    logical order (Protein, Fat, etc.), not alphabetical.
+# corr_matrix_ordered <- corr_matrix[macro_cols_new, macro_cols_new]
+# 
+# # 6. Generate the plot!
+# print("--- Generating Correlation Plot ---")
+# 
+# # We create a little margin at the top for the title
+# par(mar = c(0, 0, 2, 0)) # bottom, left, top, right
+# 
+# # REMOVED: No longer creating 'col_inverted'. We will use the
+# # default corrplot colors (Blue-White-Red).
+# 
+# # DEFINE the correct color palette:
+# # We are forcing a "Blue -> White -> Red" scale
+# # This maps -1 (lowest) to Blue, 0 to White, and +1 (highest) to Red.
+# col_palette <- colorRampPalette(c("#00007F", "green", "#7F0000"))(200)
+# 
+# # Define the colors for the text labels (tl.col)
+# # We want "Fat", "Fibers", and "Sugars" to be forestgreen,
+# # and all others to be black.
+# label_colors <- ifelse(
+#   macro_cols_new %in% c("Fat", "Fibers", "Sugars"), 
+#   "black", 
+#   "black"
+# )
+# 
+# corrplot(
+#   corr_matrix_ordered,
+#   method = "color",       # Use color to represent correlation strength
+#   type = "lower",         # Show only the lower triangle ("stair case")
+#   addCoef.col = "black",  # Add the correlation coefficient values
+#   tl.col = label_colors,  # <-- FIXED: Use the custom label colors
+#   tl.srt = 45,            # Rotate text labels 45 degrees
+#   diag = FALSE,           # Don't plot the diagonal (self-correlation)
+#  col = col_palette, 
+#   title = "Pairwise Repeated-Measures Correlations (rmcorr)",
+#   mar = c(0, 0, 1, 0)     # Adjust plot margins
+# )
+# 
+# # Reset plotting parameters to default
+# par(mar = c(5.1, 4.1, 4.1, 2.1)) 
 ```
 ```{r}
 # --- Part 6: Generate and Combine Plots with ggplot2 & patchwork ---
@@ -583,8 +584,50 @@ p_corrplot
 # calculate the pariwise correlation for the summarized values that will be use in the model
 
 ```{r}
-full <- read_csv('../data/090_all_samples1009_meta_p2d_fg9_dietall_genera90_pid.csv')
-macro_cols_p2d <- full %>% select(starts_with('ave')) %>% select(-ave_cal) |> colnames()
+#  calculate the prior two day average 
+stool_samples_df <- read_csv('../data/153_combined_META.csv') %>%
+  select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
+
+daily_intake_summary <- daily_macros |> 
+  gather('macronutrient','gram', Protein:Sugars)
+
+stool_samples_with_window <- stool_samples_df %>%
+  mutate(
+    window_start = sdrt - 2,
+    window_end = sdrt - 1
+  )
+
+# Perform the join and calculate the averages.
+final_model_data <- stool_samples_with_window %>%
+  left_join(
+    daily_intake_summary,
+    by = join_by(
+      pid,
+      window_start <= fdrt,
+      window_end >= fdrt
+    )
+  ) %>%
+  # Reshape the data into the final wide format needed for modeling.
+  pivot_wider(
+    id_cols = c(pid, sdrt), # The columns that identify a unique stool sample
+    names_from = macronutrient,
+    values_from = gram,
+    values_fn = ~ sum(.x, na.rm = TRUE) / 2, # The function to apply: sum and average
+    values_fill = 0, # If a category wasn't eaten, its value is 0
+    names_prefix = "avg_intake_" # Adds a clear prefix to the new columns
+  ) %>%
+  # This divides all the new intake columns by 100 for easier model interpretation.
+  mutate(across(starts_with("avg_intake_"), ~ .x / 100)) %>%
+  # Joins back the original stool sample info.
+  right_join(stool_samples_df, by = c("pid", "sdrt")) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
+  mutate(pid = factor(pid)) 
+```
+
+
+```{r}
+macro_cols_p2d <- final_model_data %>% select(starts_with('avg_intake_')) |> colnames()
 
 pairs <- combn(macro_cols_p2d, 2, simplify = FALSE)
 
@@ -603,7 +646,7 @@ rmcorr_results_p2d <- pairs |>
       participant = pid,
       measure1 = m1_name,
       measure2 = m2_name,
-      dataset = full |> mutate(pid = factor(pid))
+      dataset = final_model_data
     )
 
     # Return a tidy data frame (tibble) of the key results
@@ -652,7 +695,7 @@ priors <-
 # Fit the model (using fewer iterations for this example to run quickly)
 model_fit <- brm(
   formula = formula,
-  data = full,
+  data = final_model_data,
   prior = priors,
     warmup = 1000, iter = 3000,
     chains = 4, cores = 4,
@@ -672,7 +715,7 @@ level_order <- rev(c(
     "abx * Sugars", "Sugars",
     "abx * Fiber", "Fiber",
     "abx * Fat", "Fat",
-    "abx * Carbohydrates", "Carbohydrates",
+    "abx * Starch", "Starch",
     "abx * Protein", "Protein"
 ))
 
@@ -691,19 +734,19 @@ cleaned_effects <- results_df %>%
       term == "TPNTRUE" ~ "TPN",
       
       # Interaction terms (abx * nutrient)
-      term == "empiricalTRUE:ave_carb" ~ "abx * Carbohydrates",
-      term == "empiricalTRUE:ave_fat" ~ "abx * Fat",
-      term == "empiricalTRUE:ave_fiber" ~ "abx * Fiber",
-      term == "empiricalTRUE:ave_Protein" ~ "abx * Protein",
-      term == "empiricalTRUE:ave_Sugars" ~ "abx * Sugars",
+      term == "empiricalTRUE:avg_intake_Starch" ~ "abx * Starch",
+      term == "empiricalTRUE:avg_intake_Fat" ~ "abx * Fat",
+      term == "empiricalTRUE:avg_intake_Fibers" ~ "abx * Fiber",
+      term == "empiricalTRUE:avg_intake_Protein" ~ "abx * Protein",
+      term == "empiricalTRUE:avg_intake_Sugars" ~ "abx * Sugars",
       
       # Nutrient-only terms (the 'FALSE' condition)
       # These seem to be the main nutrient effects without the interaction.
-      term == "empiricalFALSE:ave_carb" ~ "Carbohydrates",
-      term == "empiricalFALSE:ave_fat" ~ "Fat",
-      term == "empiricalFALSE:ave_fiber" ~ "Fiber",
-      term == "empiricalFALSE:ave_Protein" ~ "Protein",
-      term == "empiricalFALSE:ave_Sugars" ~ "Sugars",
+      term == "empiricalFALSE:avg_intake_Starch" ~ "Starch",
+      term == "empiricalFALSE:avg_intake_Fat" ~ "Fat",
+      term == "empiricalFALSE:avg_intake_Fibers" ~ "Fiber",
+      term == "empiricalFALSE:avg_intake_Protein" ~ "Protein",
+      term == "empiricalFALSE:avg_intake_Sugars" ~ "Sugars",
       
       # A fallback rule. If a term doesn't match any of the above,
       # it will just keep its original name.
