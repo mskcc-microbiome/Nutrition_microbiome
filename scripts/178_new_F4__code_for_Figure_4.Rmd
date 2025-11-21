@@ -296,7 +296,7 @@ plot_asv1
 ```{r combined_data}
 newest <- readxl::read_excel('../data/Sucrose_All Experiments Consolidated .xlsx') %>% 
   mutate(Log_CFUs_per_GramStool = log10((((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1) ) %>%   
-  filter(Day != 1) %>%  
+  mutate(Day = if_else(Day == 0, 1, Day)) |> 
   separate(Treatment, into = c('diet_treatment','abx_treatment'), sep = ', ', remove = T) %>% 
   mutate(diet_treatment = if_else(diet_treatment == 'Vehicle','vehicle','sucrose'),
          abx_treatment = if_else(str_detect(abx_treatment, 'Bia'),'biapenem',abx_treatment),
@@ -361,6 +361,44 @@ df <- dat_entero_wide %>%
   filter(Day6 < Day0)
 ```
 
+```{r}
+# calculate the trapezoidal auc from the log 10 transformed value
+
+library(DescTools) 
+
+# Now, calculate the AUC for each mouse.
+# We group by mouse ID and treatment, then summarize to get one AUC value per mouse.
+auc_results <- newest %>%
+  group_by(Mouse_identifier, diet_treatment, abx_treatment, Experiment ) %>%
+  summarize(
+    # The AUC function from DescTools calculates the area under the curve.
+    # We use the log-transformed CFU values for this calculation.
+    auc_value = AUC(x = Day, y = Log_CFUs_per_GramStool),
+    # The .groups = 'drop' argument cleans up the grouping structure afterward.
+    .groups = 'drop'
+  ) |> 
+  mutate(groups = paste(abx_treatment, diet_treatment,sep="__"),
+         groups = factor(groups, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+
+# the boxplot of the AUC
+my_comparisons <- list( c("PBS__vehicle", "biapenem__vehicle"), 
+                        c("biapenem__vehicle", "biapenem__sucrose"), 
+                        c("PBS__vehicle", "PBS__sucrose"))
+
+f3_AUC_log10 <- ggboxplot(auc_results,
+          x="groups",add = 'jitter',
+          y="auc_value", color  = 'groups', add.params = list(alpha = 0.5, shape = 16)) +
+  ylab("Trapezoidal\nAUC")+xlab('') +
+   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
+  #scale_y_log10(breaks = c(1 %o% 10^(-1:8)),  labels = trans_format("log10", math_format(10^.x))) +
+  stat_compare_means(comparisons = my_comparisons,label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T) +
+  theme(axis.title=element_text(size=10), 
+        axis.text =  element_text(size = 10),
+        #axis.text.x = element_blank(),
+        legend.position = 'none',aspect.ratio=1/3.1, axis.ticks.x = element_blank())
+
+f3_AUC_log10
+```
 
 ## fold_change
 
