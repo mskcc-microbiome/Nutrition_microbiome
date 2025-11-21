@@ -1,0 +1,6 @@
+outs:
+- md5: 4a17b4bb13090921464fbddf00d58cfa.dir
+  size: 1238996694
+  nfiles: 63
+  hash: md5
+  path: cazyme_data
