@@ -1,0 +1,151 @@
+---
+title: "Difference in Number and RPM of Cazyme Genes in Baseline Samples"
+output: html_document
+date: "2025-10-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+```
+
+```{r}
+proj_home <- '..'
+# Load and Prep data:
+
+cazyme_resultpath <- paste0(proj_home, "/data/cazyme_data/detailed_dbcan")
+cazyme_file_list <- list.files(
+  path = cazyme_resultpath,
+  pattern = "\\.tsv$", # Use a regular expression to match only files ending in .tsv
+  full.names = TRUE,    # Get the full path, not just the file name
+  recursive = FALSE     # Set to TRUE if you have subdirectories
+)
+combined_df <- map_dfr(cazyme_file_list, function(file_path) {
+
+  df <- read_tsv(file_path, show_col_types = FALSE)
+  df <- df %>%
+    mutate(
+      experiment_name = basename(file_path)%>% 
+        str_remove("\\.tsv$")
+    )
+  return(df)
+})
+cazyme_metadata <- read.csv(paste0(proj_home, "/data/cazyme_data/baseline_shotgun_metadata.csv")) %>%
+  janitor::clean_names() %>%
+  select(c(targets_identifier, modal_diet, sampleid))
+
+plot_data <- combined_df %>%
+  janitor::clean_names() %>% 
+  inner_join(cazyme_metadata, by = c("experiment_name" = "targets_identifier")) %>% 
+  filter(number_of_tools == 3) %>% #only take those cazymes that all tools agree on
+  group_by(experiment_name, sampleid, substrate, modal_diet) %>%
+  summarize(tot_RPM = sum(rpm)) %>%
+  ungroup() %>% 
+  group_by(sampleid, substrate, modal_diet) %>%
+  summarize(tot_RPM = mean(tot_RPM)) %>% # for samples that were sequenced more than once we take the mean of RPM across sequencing runs. 
+  ungroup()
+
+```
+
+# assemble 
+
+```{r}
+
+p_value_data <- plot_data %>%
+  mutate(modal_diet = str_replace(modal_diet, " ", "_")) %>%
+  select(modal_diet, substrate, tot_RPM) %>% 
+  group_by(modal_diet, substrate) %>%
+  mutate(num_observation = n()) %>%
+  ungroup() %>%
+  filter(num_observation > 1) %>%
+  group_by(substrate) %>%
+  filter(n_distinct(modal_diet) == 2) %>%
+  # Use 'summarise' to calculate a single p-value for each substrate
+  summarise(
+    # The t.test function tests if 'value' is different across the 'group' factor
+    p_value = t.test(tot_RPM ~ modal_diet)$p.value
+  ) %>%
+  ungroup() %>%
+  mutate(
+    # The number of tests is now based only on the filtered substrates
+    n_tests = n(),
+    p_bonferroni = p_value * n_tests,
+    p_bonferroni_capped = ifelse(p_bonferroni > 1, 1, p_bonferroni)
+  ) %>%
+  select(
+    substrate,
+    p_value_raw = p_value,
+    p_bonferroni = p_bonferroni_capped
+  ) %>%
+  arrange(p_bonferroni)
+
+plot_data %>%
+  mutate(modal_diet = str_replace(modal_diet, " ", "_")) %>%
+  select(modal_diet, substrate, tot_RPM) %>%
+  group_by(modal_diet, substrate) %>%
+  summarize(
+    mean_RPM = mean(tot_RPM),
+    sd_RPM = sd(tot_RPM),
+    sem_RPM = sd_RPM/(sqrt(n()))
+  ) %>%
+  ungroup() %>% 
+  pivot_wider(names_from = modal_diet, values_from = c(mean_RPM, sd_RPM, sem_RPM)) %>% 
+  filter(!is.na(sd_RPM_High_intake)) %>%
+  filter(!is.na(substrate)) %>%
+  mutate(fold_change_low_vs_high = log10(mean_RPM_Low_intake/mean_RPM_High_intake)) %>%
+  left_join(p_value_data, by = "substrate") %>% 
+  mutate(substrate_name = ifelse(p_bonferroni < 0.1, str_to_title(substrate), "Not Significant")) %>%
+  ggplot(aes(x = fold_change_low_vs_high, y = fct_reorder(substrate, fold_change_low_vs_high), fill =substrate_name)) +
+  geom_col() + 
+  labs(
+    x = "Fold Change CAZyme Low vs High Intake Group",
+    y = "CAZyme Substrate",
+    fill = "Cazyme Significance"
+  ) +
+  theme_minimal(base_size = 14) + 
+  theme(legend.position = "bottom") +
+  theme(axis.text.y = element_blank())+
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
+
+
+#ggsave('../data/R37_covariates_contribution.pdf',
+#      width = 8.5, height = 11, units = "in", device = 'pdf', 
+#      dpi = 300)       
+```
+```{r}
+plot_data %>%
+  mutate(modal_diet = str_replace(modal_diet, " ", "_")) %>%
+  select(modal_diet, substrate, tot_RPM) %>%
+  group_by(modal_diet, substrate) %>%
+  summarize(
+    mean_RPM = mean(tot_RPM),
+    sd_RPM = sd(tot_RPM),
+    sem_RPM = sd_RPM/(sqrt(n()))
+  ) %>%
+  ungroup() %>% 
+  pivot_wider(names_from = modal_diet, values_from = c(mean_RPM, sd_RPM, sem_RPM)) %>% 
+  filter(!is.na(sd_RPM_High_intake)) %>%
+  filter(!is.na(substrate)) %>%
+  left_join(p_value_data, by = "substrate") %>% 
+  mutate(substrate_name = ifelse(p_bonferroni < 0.1, str_to_title(substrate), "Not Significant")) %>%
+  ggplot(aes(x = mean_RPM_Low_intake, y = mean_RPM_High_intake, color =substrate_name)) +
+  geom_abline(slope = 1, intercept = 0, color = "goldenrod", size = 1) +
+  geom_point(size = 3) + 
+  geom_errorbar(aes(ymin = mean_RPM_High_intake - sem_RPM_High_intake, ymax = mean_RPM_High_intake + sem_RPM_High_intake)) +
+  geom_errorbarh(aes(xmin = mean_RPM_Low_intake - sem_RPM_Low_intake, xmax = mean_RPM_Low_intake + sem_RPM_Low_intake), orientation = 'y') +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs(
+    x = "RPM Cazyme Low Intake Group",
+    y = "RPM Cazyme High Intake Group",
+    color = "Cazyme Significance"
+  ) +
+  theme_minimal(base_size = 14) + #
+  theme(legend.position = "bottom") +
+  theme(axis.text.y = element_blank())+
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
+```
