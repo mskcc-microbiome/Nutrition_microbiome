@@ -403,9 +403,19 @@ summary(dist2)
 ## Identify Other "Dominators"
 
 ```{r}
+# use our own palette
+library(vdbR)
+connect_database()
+get_table_from_database('asv_annotation_blast_color_ag')
+genus_colors_all <- asv_annotation_blast_color_ag |> distinct(genus, color)
+```
+
+```{r}
 meta <- read_csv('../data/153_combined_META.csv') 
 
-asv_relab_97 <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv')
+asv_relab_97 <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv') |> 
+  inner_join(asv_annotation_blast_color_ag |> distinct(asv_key, color, color_label_group_distinct)) |> 
+  inner_join(meta |> select(sampleid, simpson_reciprocal))
 
 # --- 1. Aggregate ASVs to Custom Genus/ASV Level ---
 # This is the new logic. It uses 'case_when' to re-classify ASVs *before*
@@ -561,13 +571,7 @@ variance_explained <- pcoa_results$values$Relative_eig[1:2] * 100
 
 ### PCoA with domination genus
 
-```{r}
-# use our own palette
-library(vdbR)
-connect_database()
-get_table_from_database('asv_annotation_blast_color_ag')
-genus_colors_all <- asv_annotation_blast_color_ag |> distinct(genus, color)
-```
+
 
 
 ```{r}
@@ -622,33 +626,7 @@ pcoa_plot <- ggplot(
     values = final_color_vector,
     name = "Domination Status (Top 9)" # Updated legend title
   ) +
-    # --- Add Annotations ---
-  
-  # Axis 2 - Right side annotations
-  # We use 'annotate' to place text and arrows in data coordinates
-  # We also use 'Inf' to place it at the edge of the plot
-  # annotate("text", x = 0.55, y = 0.4, 
-  #          label = "Streptococcus-\nDominated", hjust = 0, size = 3.5)+
-  # annotate("segment", x = 0.55, y = 0.1, xend = 0.55, yend = 0.35,
-  #          arrow = arrow(length = unit(0.2, "cm")), color = "black")+
-  # 
-  # annotate("text", x = 0.55, y = -0.5, 
-  #          label = "Enterococcus faecium-\nDominated", hjust = 0, size = 3.5)+
-  # annotate("segment", x = 0.55, y = -0.1, xend = 0.55, yend = -0.45,
-  #          arrow = arrow(length = unit(0.2, "cm")), color = "black")+
-  #          
-  # # Axis 1 - Top side annotations
-  # annotate("text", x = 0.35, y = 0.6, 
-  #          label = "Dysbiosis", vjust = 0, size = 3.5)+
-  # annotate("segment", x = 0.1, y = 0.6, xend = 0.3, yend = 0.6,
-  #          arrow = arrow(length = unit(0.2, "cm")), color = "black")+
-  #          
-  # annotate("text", x = -0.45, y = 0.6, 
-  #          label = "Healthy / Commensal-Dominated", vjust = 0, size = 3.5)+
-  # annotate("segment", x = -0.1, y = 0.6, xend = -0.4, yend = 0.6,
-  #          arrow = arrow(length = unit(0.2, "cm")), color = "black") +
-           
-  # --- End Annotations ---
+
   # Add labels showing variance explained
   labs(
     #title = "Bray-Curtis PCoA (Genus Level) by Domination Status\n\n",
@@ -666,9 +644,126 @@ pcoa_plot <- ggplot(
     )
 
 # Display the plot
-print(pcoa_plot)
-#ggsave('../data/R30_pcoa_domination.pdf', width = 9.5, height = 8)                                                 
+# print(pcoa_plot)
+ggsave('../data/R30_pcoa_domination.pdf', width = 4)                                                 
 ```
+
+### asv level pcoa 
+
+```{r}
+# 1. PREPARE THE MATH MATRIX
+# We need a matrix where rows are samples and columns are ASVs
+# Using count_relative as the abundance metric
+asv_matrix <- asv_relab_97 |> 
+  select(sampleid, asv_key, count_relative) |> 
+  # pivot to wide format: one row per sample, one column per ASV
+  pivot_wider(names_from = asv_key, values_from = count_relative, values_fill = 0) |> 
+  column_to_rownames("sampleid") |> 
+  as.matrix()
+
+# 2. CALCULATE DISTANCE & PCoA
+# calculating bray-curtis distance on the raw ASV data
+dist_matrix <- vegdist(asv_matrix, method = "bray")
+
+# perform the PCoA (MDS)
+pcoa_results <- cmdscale(dist_matrix, k = 2, eig = TRUE)
+
+# 3. PREPARE PLOT DATA
+# extract coordinates and calculate percent variance explained
+axis_1_var <- round(pcoa_results$eig[1] / sum(pcoa_results$eig) * 100, 2)
+axis_2_var <- round(pcoa_results$eig[2] / sum(pcoa_results$eig) * 100, 2)
+```
+
+
+```{r}
+pcoa_df <- pcoa_results$points |> 
+  as.data.frame() |> 
+  rownames_to_column("sampleid") |> 
+  rename(Axis1 = V1, Axis2 = V2) |> 
+  # join back the metadata logic
+  # finding the top bug per sample to determine the color
+  left_join(
+    asv_relab_97 |> 
+      group_by(sampleid) |>
+      # grab the single row with the max abundance for this sample
+      slice_max(count_relative, n = 1, with_ties = FALSE) |>
+      select(sampleid, color, color_label_group_distinct),
+    by = "sampleid"
+  ) |> 
+  left_join(asv_relab_97 |> distinct(sampleid, simpson_reciprocal))
+
+# 4. VISUALIZE
+# plotting using the pre-assigned hex codes in your 'color' column
+pcoa_asv_most <- pcoa_df |> 
+  ggplot(aes(x = Axis1, y = Axis2)) +
+  geom_point(aes(color = color), size = scatter_size, alpha = 0.7, shape = 16) +
+    # Add the dashed zero-lines
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  # this function tells ggplot to use the actual hex codes in the column
+  scale_color_identity(guide = "legend", 
+                       labels = pcoa_df$color_label_group_distinct, 
+                       breaks = pcoa_df$color) +
+  labs(
+    x = paste0("PCoA 1 (", axis_1_var, "%)"),
+    y = paste0("PCoA 2 (", axis_2_var, "%)")
+  ) +
+  theme_bw() +
+  theme(legend.position = 'none')+
+  # 'coord_fixed' ensures axes are 1:1, 'clip="off"' lets annotations show
+  coord_fixed(
+    )
+
+ggsave('../data/R30_pcoa_asv_most_abundant.pdf', width = 7)    
+```
+```{r}
+# same asv level pcoa but colored with diversity  
+pcoa_asv_diversity <- ggplot(
+  pcoa_df,
+  aes(x = Axis1, y = Axis2, color = simpson_reciprocal)
+) +
+  # Add the dashed zero-lines
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  
+  # Plot the points *on top* of the lines
+  geom_point(size = scatter_size, alpha = 0.7,  shape = 16) +
+
+  scale_color_gradientn( name = bquote(""~alpha*"-Diversity (inverse Simpson index)"),
+                         values = c(0, 0.4,  1), colours = c("#1E90FF", "#FFFF00", "#FF3030"), 
+                         trans="log",
+                          breaks = c(2, 5, 10, 20, 40)) + 
+  
+  # Add labels showing variance explained
+  labs(
+    x = paste0("PCoA 1 (", axis_1_var, "%)"),
+    y = paste0("PCoA 2 (", axis_2_var, "%)")
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = 'none'
+  ) +
+  # 'coord_fixed' ensures axes are 1:1, 'clip="off"' lets annotations show
+  coord_fixed(
+    )
+
+# Display the new plot
+ggsave('../data/R30_pcoa_with_diversity_asv.pdf', width = 7, height = 5)
+
+top_row_asv <- plot_grid( pcoa_asv_most , 
+                      pcoa_asv_diversity,
+                nrow  = 1, 
+                labels = 'auto',
+                align = 'vh')
+
+
+ggsave('../data/R30_axis_model_asv.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', plot = top_row_asv,
+      dpi = 300)   
+```
+
+
+
 ### diversity pcoa with customized color palette
 
 ```{r}
@@ -688,7 +783,7 @@ pcoa_plot_diversity <- ggplot(
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
   
   # Plot the points *on top* of the lines
-  geom_point(size = scatter_size, alpha = 0.7) +
+  geom_point(size = scatter_size, alpha = 0.7,  shape = 16) +
   
   # scale_color_viridis_c(
   #   name = "Alpha Diversity\n(Inverse Simpson)",
@@ -946,3 +1041,217 @@ ggsave('../data/R30_axis_model.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
       dpi = 300)    
 ```
+
+
+# Model with asv level pcoa coord
+
+```{r}
+meta_Axis_asv <- meta %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100)) %>% 
+  inner_join(pcoa_df |> select(sampleid:color_label_group_distinct)) %>% 
+  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) 
+
+# Define the outcomes you want to test
+outcomes_to_run <- c("Axis1", "Axis2")
+
+# Get all food variable names from your data (matches screenshot)
+all_food_vars <- meta_Axis_asv %>%
+  select(starts_with('fg_')) %>%
+  colnames()
+
+# Create the interaction terms automatically
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Define your priors. These are global and will be used in every model.
+priors <-
+  prior(normal(0, 1), class = 'b') + # General prior for all effects
+  # Specific priors that override the general one
+  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
+
+# --- 3. Run Models Efficiently using purrr::map ---
+
+# `map` will loop over your 'outcomes_to_run' vector
+# and run the code inside for each item (e.g., first "Axis.1", then "Axis.2")
+model_fits_list <- purrr::map(outcomes_to_run, ~ {
+  
+  # '.x' is the placeholder for the current outcome (e.g., "Axis.1")
+  current_outcome <- .x
+  
+  print(paste("--- Starting model for:", current_outcome, "---"))
+  
+  # Build the formula string dynamically
+  formula_string <- paste(
+    current_outcome, # Use the current outcome variable
+    "~ 0 + intensity + empirical + TPN + EN +",
+    paste(all_food_vars, collapse = " + "),       # Add main food effects
+    "+",
+    paste(interaction_terms, collapse = " + "), # Add interaction effects
+    "+ (1 | pid) + (1 | timebin)"
+  )
+  
+  # Convert the string to a formula object
+  formula <- brms::bf(as.formula(formula_string))
+  
+  # Fit the model
+  model_fit <- brm(
+    formula = formula,
+    data = meta_Axis_asv,
+    prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+    control = list(adapt_delta = 0.99)
+  )
+  
+  print(paste("--- Finished model for:", current_outcome, "---"))
+  
+  # Return the fitted model
+  return(model_fit)
+})
+
+# Name the list for easy access later (e.g., model_fits_list$Axis.1)
+names(model_fits_list) <- outcomes_to_run
+
+
+# --- 4. Tidy and Combine All Results ---
+
+# Now, loop through the list of *fitted models* and tidy them,
+# combining them into a single, convenient data frame.
+# `map_dfr` means "map and combine into a dataframe"
+all_results_asv <- purrr::map_dfr(model_fits_list, ~ {
+  
+  # Use broom.mixed::tidy to get a clean data frame
+  tidy(.x, conf.int = TRUE) %>%
+    mutate(conf.low = round(conf.low, 2),
+           conf.high = round(conf.high, 2))
+    
+}, .id = "outcome") # The .id argument adds a column
+                   # specifying which model the row came from
+
+# --- Display the final combined results ---
+print("--- Combined Model Results ---")
+print(as.data.frame(all_results_asv))
+
+all_results_asv |> write_csv('../data/R30_all_results_axis_asv.csv')
+```
+```{r}
+all_results_asv <- read_csv('../data/R30_all_results_axis_asv.csv')
+
+# the above figure but make it the way the other figure look like
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+level_order <- rev(c(
+    "abx", "EN", "TPN", 
+    "abx * Sweets", "Sweets",
+    "abx * Grains", "Grains",
+    "abx * Milk", "Milk",
+    "abx * Eggs", "Eggs",
+    "abx * Legumes", "Legumes",
+    "abx * Meats", "Meats",
+    "abx * Fruits", "Fruits",
+    "abx * Oils", "Oils",
+    "abx * Vegetables", "Vegetables"
+))
+
+
+# Define the new, descriptive labels
+new_facet_labels <- c(
+  "Axis.1" = "Axis 1: Healthy (left) vs. Dysbiosis (right)",
+  "Axis.2" = "Axis 2: E. faecium (bottom) vs. Strep. (top)"
+)
+
+cleaned_effects <- all_results_asv %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>%
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ") 
+  ) %>%
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) > 0,
+         outcome_label = recode(outcome, !!!new_facet_labels)) %>%
+  mutate(clean_term = factor(clean_term, levels = level_order))
+
+shading_df <- cleaned_effects %>%
+  mutate(y_numeric = as.numeric(clean_term)) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+
+plot_axis_asv <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#FBEADC", # A light orange/peach color like the example
+    alpha = 0.7,
+    inherit.aes = FALSE
+   ) +
+   # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  facet_wrap(~ outcome_label) +
+  # Add labels and a clean theme
+  labs(
+    x = "Predicted Shift in Axis Score",
+    title = "Predictors of Microbiome Compositional State",
+    y = ''
+  ) +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown())
+
+plot_axis_asv
+```
+```{r}
+
+
+final_plot <- plot_grid( top_row_asv, 
+                         plot_axis_asv ,
+                ncol  = 1, 
+                rel_heights = c(2, 2),
+                labels = c(NA, 'c'))
+   
+library(cowplot)
+title <- ggdraw() + 
+  draw_label("Rebuttal fig X",fontface = 'bold',x = 0,hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/R30_axis_model_asv.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
+      dpi = 300)    
+```
+```
+
