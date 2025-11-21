@@ -1,0 +1,228 @@
+---
+title: "Sensitivity analysis"
+output: html_document
+date: "2025-11-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(brms)   
+library(broom.mixed)
+library(tidybayes)
+library(patchwork)
+library(ape)  
+library(ggridges)
+library(vegan)
+library(ggrepel) # For better label placement
+library(RColorBrewer)
+library(ggpubr)
+library(brmstools) 
+library(bayesplot)
+library(gt)
+library(ggtext)
+library(cowplot)
+rstan::rstan_options(auto_write = TRUE)
+theme_set(theme_tidybayes() + panel_border())
+```
+
+```{r}
+# 1. Load your data
+data <- read_csv("../data/153_combined_META.csv") %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100))
+
+# 2. Calculate the 90th percentile cutoff for sweets
+# This determines the threshold for the top 10% of consumers
+sweets_cutoff <- data |>
+  summarise(threshold = quantile(fg_sweets, 0.90, na.rm = TRUE)) |>
+  pull(threshold)
+
+# Print the cutoff to the console so you know what "High" means
+print(paste("The top 10% cutoff is:", round(sweets_cutoff, 2), "grams"))
+
+# 3. Create the "Sensitivity" Dataset
+# We filter to keep only people BELOW that threshold
+data_no_outliers <- data |>
+  filter(fg_sweets <= sweets_cutoff)
+
+# Quick check: How many samples did we lose?
+print(paste("Original samples:", nrow(data)))
+print(paste("Samples after removing top 10%:", nrow(data_no_outliers)))
+
+# 4. (Optional) Visual Check
+# Plot the regression line on this new, restricted dataset
+# If the trend line (blue) is still sloping down, your effect is robust.
+data_no_outliers |>
+  # We usually only care about the effect during antibiotics (empirical == TRUE)
+  filter(empirical == TRUE) |>
+  ggplot(aes(x = fg_sweets, y = log(simpson_reciprocal))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(
+    title = "Sweets vs Diversity (Bottom 90% of Consumers)",
+    subtitle = paste("Excluded intakes above", round(sweets_cutoff, 2), "g"),
+    x = "Dehydrated Sweets (g)",
+    y = "Log(Alpha Diversity)"
+  )
+```
+```{r}
+data_no_outliers |>
+  filter(empirical == "TRUE") |> # Focus on the risky group
+  ggplot(aes(x = fg_sweets, y = simpson_reciprocal)) +
+  # Plot the raw points to show the spread
+  geom_point(alpha = 0.3) +
+  # Add a linear line (Red) - This is your current model
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  # Add a flexible "wiggly" line (Blue) - This checks for thresholds
+  geom_smooth(method = "loess", color = "blue", fill = "blue", alpha = 0.1) +
+  labs(
+    title = "Check for Threshold Effects",
+    subtitle = "If Blue and Red lines overlap, the Linear assumption is safe.",
+    x = "Dehydrated Sweets Intake (g)",
+    y = "Microbiome Diversity"
+  )
+```
+
+```{r}
+sweets_threshold <- quantile(data$fg_sweets, 0.90, na.rm = TRUE)
+
+# 3. Identify the Patients (PIDs) associated with high intake
+# These are the patients who produced at least one sample in the top 10%
+super_consumers <- data |>
+  filter(fg_sweets > sweets_threshold) |>
+  distinct(pid) |>
+  pull(pid)
+
+# 5. (Alternative) Remove the Patients Entirely
+# If you strictly want to banish these patients from the study completely
+# (even their low-sugar days), use this code instead:
+data_clean_patients <- data |>
+  filter(!pid %in% super_consumers)
+```
+
+```{r}
+all_food_vars <- data_no_outliers %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN  +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+#Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = data_no_outliers,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2))
+
+# the above figure but make it the way the other figure look like
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+level_order <- rev(c(
+    "abx", "EN", "TPN", 
+    "abx * Sweets", "Sweets",
+    "abx * Grains", "Grains",
+    "abx * Milk", "Milk",
+    "abx * Eggs", "Eggs",
+    "abx * Legumes", "Legumes",
+    "abx * Meats", "Meats",
+    "abx * Fruits", "Fruits",
+    "abx * Oils", "Oils",
+    "abx * Vegetables", "Vegetables"
+))
+
+cleaned_effects <- results_df %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>%
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ") 
+  ) %>%
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) >= 0) %>%
+  mutate(clean_term = factor(clean_term, levels = level_order))
+
+shading_df <- cleaned_effects %>%
+  mutate(y_numeric = as.numeric(clean_term)) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+plot_ <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#FBEADC", # A light orange/peach color like the example
+    alpha = 0.7,
+    inherit.aes = FALSE
+   ) +
+   # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  # Add labels and a clean theme
+  labs(
+    x = "ln(diversity) change",
+    title = "Predictor effects on diversity",
+    y = ''
+  ) +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown())
+
+plot_
+```
+
