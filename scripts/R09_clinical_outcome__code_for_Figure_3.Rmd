@@ -521,6 +521,54 @@ se <- sqrt((vcov(fit)[2,2] + vcov(fit)[8,8] + 2*vcov(fit)[2,8]))
 
 ```
 
+## KM survival curve
+
+```{r}
+# 1. Prepare the data for plotting
+# We need to bin the continuous antibiotic variable to visualize it.
+# We'll use the median as the cutoff (or you can set a hard number like 8 days).
+km_data <- patient_summary |> 
+  filter(OStime_30 > 0) |> 
+  mutate(
+    # Create binary Abx group (split by median)
+    abx_cat = ifelse(day_exposed > median(day_exposed, na.rm = TRUE), 
+                     "High Abx", "Low Abx"),
+    
+    # Ensure Sugar variable is nicely labeled for the legend
+    sugar_label = ifelse(SugarCal_cat_high == "High" , 
+                         "High Density", "Low Density"),
+    
+    # Create the 4-level Interaction Stratification
+    # This creates the distinct groups for the lines
+    interaction_group = paste(sugar_label, abx_cat, sep = " + ")
+  )
+
+# 2. Fit the Kaplan-Meier Object
+km_fit <- survfit(Surv(OStime_30, OSevent) ~ interaction_group, data = km_data)
+
+# 3. Generate the Plot
+ggsurvplot(
+  km_fit,
+  data = km_data,
+  size = 1.5,                 # Line thickness
+  palette = c("darkorange", "#E7B800", "blue", "#2E9FDF"), # Colors (Gold for High Sugar, Blue for Low)
+  linetype = c("solid", "dashed", "solid", "dashed"),      # Dashed for Low Abx, Solid for High Abx
+  
+  # Aesthetics
+  pval = TRUE,                # Add p-value (Log-rank)
+  conf.int = FALSE,           # Turn off confidence intervals for cleaner look (optional)
+  risk.table = TRUE,          # Add risk table at bottom
+  risk.table.col = "strata",  # Color risk table by groups
+  legend.labs = c("High Density + High Abx", "High Density + Low Abx",  "Low Density + High Abx",  "Low Density + Low Abx"),
+  
+  # Labels
+  title = "Overall Survival by Sugar Density & Antibiotic Exposure",
+  xlab = "Days after HCT",
+  ylab = "Survival Probability"
+)
+
+```
+
 ## model table output
 
 ```{r}

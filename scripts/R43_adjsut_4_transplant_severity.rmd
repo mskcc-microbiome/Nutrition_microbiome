@@ -26,8 +26,6 @@ rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
 ```
 
-
-
 ```{r}
 df_pt <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>% select(pid, source, intensity, gvhd_ppx, disease.simple) %>% janitor::clean_names()
 
