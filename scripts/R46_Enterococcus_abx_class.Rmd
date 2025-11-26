@@ -84,6 +84,8 @@ sample_summary <- exposures %>%
     ),
     .groups = 'drop' # It's good practice to drop the grouping after summarizing.
   )
+
+sample_summary |> write_csv('../data/R46_sample_summary.csv')
 ```
 
 ## tally the exposure numbers to different class 
@@ -115,21 +117,6 @@ summary_data <- sample_summary %>%
 summary_table_for_gt <- summary_data %>%
   # Arrange the data in the desired order before adding the total row.
   arrange(factor(exposure_class_category, levels = c("non_broad_spectrum", "anaerobic_sparing", "anaerobic_targeting"))) %>%
-  # Add the final 'Total' row.
-  bind_rows(
-    summarise(
-      .,
-      # Summing n_samples is correct.
-      n_samples = sum(n_samples),
-      # For patients, we use the pre-calculated total of *unique* patients.
-      n_patients = total_patients,
-      # Percentages for the total row should be 100.
-      percent_samples = 100,
-      percent_patients = 100,
-      # Add the label for the total row.
-      exposure_category_label = "Total"
-    )
-  ) %>%
   # Select and reorder the final columns for the table.
   select(exposure_category_label, n_samples, percent_samples, n_patients, percent_patients)
 
@@ -179,15 +166,7 @@ gt_table <- summary_table_for_gt %>%
     align = "center",
     columns = where(is.numeric)
   ) %>%
-  
-  # Add a separator line and bold text to the 'Total' row for emphasis.
-  tab_style(
-    style = list(
-      cell_borders(sides = "top", color = "black", weight = px(2)),
-      cell_text(weight = "bold")
-    ),
-    locations = cells_body(rows = exposure_category_label == "Total")
-  ) %>%
+
   # Add some final styling options for a polished look.
   opt_table_font(font = "sans-serif") %>%
   opt_table_outline() %>% 
