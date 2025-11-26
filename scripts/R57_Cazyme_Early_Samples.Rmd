@@ -96,27 +96,67 @@ plot_data %>%
   pivot_wider(names_from = modal_diet, values_from = c(mean_RPM, sd_RPM, sem_RPM)) %>% 
   filter(!is.na(sd_RPM_High_intake)) %>%
   filter(!is.na(substrate)) %>%
+  filter(!substrate == 'X') %>%
   mutate(fold_change_low_vs_high = log10(mean_RPM_Low_intake/mean_RPM_High_intake)) %>%
+  mutate(error = log10(sqrt(sem_RPM_Low_intake^2 + sem_RPM_High_intake^2))) %>%
+  mutate(text_hjust= if_else(fold_change_low_vs_high > 0, 1, 0)) %>%
   left_join(p_value_data, by = "substrate") %>% 
-  mutate(substrate_name = ifelse(p_bonferroni < 0.1, str_to_title(substrate), "Not Significant")) %>%
+  mutate(substrate_name = ifelse(p_bonferroni < 0.1, "Significant", "Not Significant")) %>%
   ggplot(aes(x = fold_change_low_vs_high, y = fct_reorder(substrate, fold_change_low_vs_high), fill =substrate_name)) +
-  geom_col() + 
+  geom_col(size = 2) + 
+  geom_text(aes(label = str_to_title(substrate), hjust = text_hjust), # Use the custom label column
+            x = 0,
+            size = 3) +   
+  #geom_errorbarh(aes(xmin = fold_change_low_vs_high - error, xmax = fold_change_low_vs_high + error)) +
   labs(
     x = "Log 10 Low/High Intake Group CAZyme RPM",
     y = "CAZyme Substrate",
-    fill = "Cazyme Significance"
+    fill = "Substrate Significance"
   ) +
   theme_minimal(base_size = 14) + 
   theme(legend.position = "bottom") +
   theme(axis.text.y = element_blank())+
-  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE))+
+  xlim(-.27, .7) 
 
 
 ggsave('../results/R57_cazyme_fold_dif_low_vs_high.pdf',
-      width = 8.5, height = 4, units = "in", device = 'pdf', 
+      width = 8.5, height = 6, units = "in", device = 'pdf', 
       dpi = 300)       
 ```
+
+
+
 ```{r}
+#| label: total_RPM_Cazyme
+plot_data %>%
+  group_by(sampleid, modal_diet) %>%
+  summarize(tot_RPM = sum(tot_RPM)) %>%
+  ungroup() %>% 
+  ggplot(aes(x = modal_diet, y = tot_RPM, fill = modal_diet)) +
+  geom_boxplot(outlier.colour = "transparent") +
+  geom_jitter() +
+  theme_minimal(base_size = 14) + 
+  labs(
+    y = "Total CAZyme RPM",
+    fill = "Diet Cluster",
+    x = ""
+  ) +
+  ggpubr::stat_compare_means() +
+  theme(
+    axis.text.x = element_blank()
+  )
+
+ggsave('../results/R57_total_RPM_Cazyme_High_vs_Low.pdf',
+      width = 8.5, height = 4, units = "in", device = 'pdf', 
+      dpi = 300)     
+  
+```
+
+```{r}
+#| label: unused figure
+
+
 plot_data %>%
   mutate(modal_diet = str_replace(modal_diet, " ", "_")) %>%
   select(modal_diet, substrate, tot_RPM) %>%
@@ -148,6 +188,7 @@ plot_data %>%
   theme(legend.position = "bottom") +
   theme(axis.text.y = element_blank())+
   guides(color = guide_legend(nrow = 2, byrow = TRUE))
+
 
 ggsave('../results/R57_cazyme_low_vs_high_scatterplot.pdf',
      width =5 , height = 5.7, units = "in", device = 'pdf', 
