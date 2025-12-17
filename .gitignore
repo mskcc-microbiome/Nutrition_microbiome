@@ -15,6 +15,7 @@ renv/settings.json # (Optional: if you don't want to track renv settings)
 include_data/
 intermediate_data/
 software/
+results/*
 
 # Files (specific files and files within the results/ and scripts/ directories)
 Snakefile
@@ -29,4 +30,5 @@ scripts/R19_resizing_figures.Rmd
 scripts/R20_poster.Rmd
 scripts/R22_aGVHD_onset_clinical_outcome.Rmd
 scripts/Trajectory_clustering.R
-
+data/*
+/data
