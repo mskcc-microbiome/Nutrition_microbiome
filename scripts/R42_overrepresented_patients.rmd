@@ -311,7 +311,7 @@ robustness_plot <- ggplot(significance_report,
     title = "\n\nRobustness of Predictor Effects on Microbiome Diversity",
     subtitle = paste("Based on", N_ITERATIONS, "random subsamples (capped at 5 samples per patient)"),
     x = "Model Predictor",
-    y = "Proportion of Runs Where Effect Was Significant (95% CI)"
+    y = "Proportion of Runs Where Association Was Significant (95% CI)"
   ) +
   theme_minimal(base_size = 12) +
   theme(
@@ -326,7 +326,7 @@ print(robustness_plot)
 # Clean up parallel workers
 plan(sequential)
 
-
+ 
 ```
 
 ## assemble 
