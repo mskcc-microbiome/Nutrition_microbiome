@@ -104,6 +104,8 @@ super_consumers <- data |>
 # (even their low-sugar days), use this code instead:
 data_clean_patients <- data |>
   filter(!pid %in% super_consumers)
+
+data_clean_patients |> distinct(pid)
 ```
 
 ```{r}
@@ -148,8 +150,17 @@ model_fit <- brm(
 
 results_df <- tidy(model_fit, conf.int = TRUE) %>%
   mutate(conf.low = round(conf.low, 2),
-         conf.high = round(conf.high, 2))
+         conf.high = round(conf.high, 2)) |> 
+  mutate(
+    n_samples = nrow(data_no_outliers),
+    n_patients = n_distinct(data_no_outliers$pid),
+  )
 
+results_df |> write_csv('../data/R56_results_df_rm_super_sugar_eaters.csv')
+```
+
+
+```{r}
 # the above figure but make it the way the other figure look like
 key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
 
@@ -221,8 +232,11 @@ plot_ <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
     y = ''
   ) +
   theme_classic(base_size = 11) +
-  theme(legend.position = "none", axis.text.y = element_markdown())
+  theme(legend.position = "none", axis.text.y = element_markdown(), aspect.ratio = 1.3) 
 
 plot_
+```
+```{r}
+data_no_outliers |> distinct(pid)
 ```
 
