@@ -202,4 +202,7 @@ ggsave('../data/R39_patients_baseline_sugar_degradation.pdf',
       dpi = 300)  
 ```
 
+```{r}
+metadata_df |> ggpubr::ggboxplot(y = 'fg_sweets', add = 'jitter')
+```
 

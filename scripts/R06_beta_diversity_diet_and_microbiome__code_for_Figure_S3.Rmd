@@ -114,7 +114,13 @@ diet_filtered_df <- df_pair %>%
   filter(((sdrt1 == min_sdrt) & (sdrt2 != min_sdrt)) ) 
 ```
 
-# similary do this for the stool samples relative abundance at genus level
+# stool samples relative abundance at genus level
+
+Running PCoA on the ASV level is too high-resolution. It treats every single ASV as a unique feature. In a dysbiotic HCT gut, you might have hundreds of rare, transient ASVs that are just "noise." This noise can dominate the ordination, making your PCoA axes unstable and uninterpretable.
+
+By aggregating to the Genus level first (e.g., using phyloseq::tax_glom), you are "smoothing" the data. You are explicitly telling the analysis, "I don't care about the tiny differences between ASV1 and ASV2 of Enterococcus; I care about the total abundance of the Enterococcus genus."
+
+This focuses the PCoA on the big, ecologically dominant signals (the Enterococcus bloom, the Streptococcus bloom) and gives you the best chance of finding a PCo1 or PCo2 axis that actually represents "domination."
 
 ```{r}
 relab_genus <- read_csv('../data/022_ALL173_stool_samples_genus_counts.csv') %>% 

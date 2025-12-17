@@ -26,8 +26,9 @@ connect_database()
 ```{r}
 library(compositions)
 meta <- read_csv('../data/153_combined_META.csv')
-e_asv <- read_csv('../data/R25_all_enterococcus_asv_in_sample.csv') %>% inner_join(meta %>% select(pid, sampleid))
+e_asv <- read_csv('../data/R25_all_enterococcus_asv_in_sample.csv') %>% inner_join(meta %>% select(pid, sampleid, sdrt))
 # asv_1 is feacium
+e_asv |> write_csv('../data/R29_all_enterococcus_asv_in_sample_and_pid.csv')
 ```
 
 ```{r}
@@ -1080,3 +1081,8 @@ ggsave('../data/R29_Enterococcus_spp.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300) 
 ```
+
+```{r}
+get_table_from_database('asv_alpha_diversity_ag')
+```
+

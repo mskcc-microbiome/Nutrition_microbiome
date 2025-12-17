@@ -91,6 +91,26 @@ meta <- read_csv('../data/153_combined_META.csv') %>%
   select(pid, sdrt)
 ```
 
+
+```{r}
+# # make the df with day exposure type 
+# meds_expanded_simple <- meds_updated %>%
+#     distinct() %>% 
+#     group_by(pid, drug_name_clean, together, startday, stopday, drug_category_for_this_study) %>%
+#     summarize(day = seq(startday, stopday), .groups = "drop") %>% 
+#     group_by(pid, day) %>%
+#   summarise(
+#     exposure_category = case_when(
+#       any(drug_category_for_this_study == "broad_spectrum") ~ "broad_spectrum",  # Only broad_spectrum
+#       any(drug_category_for_this_study == "fluoroquinolones") ~ "fluoroquinolones",
+#       any(drug_category_for_this_study == "other_antibacterials") ~ "other_antibacterials",
+#       TRUE ~ "not_antibacterial"
+#     ), .groups = "drop"
+#   )
+# 
+# meds_expanded_simple |> write_csv('../data/R21_meds_expanded_simple_pid_day_categorized_abx_exposure.csv')
+```
+
 ```{r}
 # heatmap
 df<- meds_expanded

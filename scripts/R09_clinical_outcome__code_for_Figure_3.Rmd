@@ -466,7 +466,7 @@ plot_raw_sugar <- ggplot(patient_summary, aes(x = avg_total_caloric_intake / 100
 # little to no correlation with total calories. This confirms we have
 # successfully removed total intake as a confounder.
 plot_adjusted_sugar <- ggplot(patient_summary, aes(x = avg_total_caloric_intake / 1000, y = avg_sugar_density_per_1000kcal)) +
-  geom_point(alpha = 0.6, color = "green4") +
+  geom_point(alpha = 0.6, color = "black") +
   geom_smooth(method = "lm", se = FALSE, color = "darkred") +
   # Calculate and add the Pearson correlation for this plot
   stat_cor(method = "spearman", label.x = 1, label.y = 170, p.accuracy = 0.001) +
@@ -566,7 +566,7 @@ ggsurvplot(
   xlab = "Days after HCT",
   ylab = "Survival Probability"
 )
-
+ggsave('../data/R09_KM_curve.png', width = 7, height = 5)
 ```
 
 ## model table output
@@ -574,7 +574,7 @@ ggsurvplot(
 ```{r}
 publication_table <- tbl_regression(
   fit,
-  exponentiate = FALSE, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
+  exponentiate = T, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
   # The 'label' argument maps variable names to publication-ready labels.
   # The formula structure is list(variable_name ~ "Desired Label")
   label = list(
@@ -757,21 +757,40 @@ res_plot <- res |>
 
 glimpse(res_plot)
 
+# p_mid <- 
+#   res |>
+#   ggplot(aes(y = fct_rev(Variable))) + 
+#   theme_classic()+
+#   geom_point(aes(x=log.estimate), shape=15, size=3) +
+#   geom_linerange(aes(xmin=log.conf.low, xmax=log.conf.high)) +
+#   geom_vline(xintercept = 0, linetype="dashed") +
+#   labs(x="Log Hazard Ratio", y="") +
+#   coord_cartesian(ylim=c(1,3), xlim=c(-.1, .2)) +
+#   annotate("text", x = -.1, y = 3, label = "Lower risk",hjust=0) +
+#   annotate("text", x = .1, y = 3, label = "Higher risk") + 
+#   theme(axis.line.y = element_blank(),
+#         axis.ticks.y= element_blank(),
+#         axis.text.y= element_blank(),
+#         axis.title.y= element_blank())
+
+# plot the HR not the logged version
 p_mid <- 
   res |>
   ggplot(aes(y = fct_rev(Variable))) + 
   theme_classic()+
-  geom_point(aes(x=log.estimate), shape=15, size=3) +
-  geom_linerange(aes(xmin=log.conf.low, xmax=log.conf.high)) +
-  geom_vline(xintercept = 0, linetype="dashed") +
-  labs(x="Log Hazard Ratio", y="") +
-  coord_cartesian(ylim=c(1,3), xlim=c(-.1, .2)) +
-  annotate("text", x = -.1, y = 3, label = "Lower risk",hjust=0) +
-  annotate("text", x = .1, y = 3, label = "Higher risk") + 
+  geom_point(aes(x=estimate), shape=15, size=3) +
+  geom_linerange(aes(xmin=conf.low, xmax=conf.high)) +
+  geom_vline(xintercept = 1, linetype="dashed") +
+  labs(x="Hazard Ratio", y="") +
+  coord_cartesian(ylim=c(1,3), xlim=c(.9, 1.3)) +
+  annotate("text", x = .9, y = 3, label = "Lower risk",hjust=0) +
+  annotate("text", x = 1.1, y = 3, label = "Higher risk") +
   theme(axis.line.y = element_blank(),
         axis.ticks.y= element_blank(),
         axis.text.y= element_blank(),
         axis.title.y= element_blank())
+
+
 p_mid
 
 
@@ -867,7 +886,7 @@ final %>%
     by=SugarCal_cat_high
   ) %>%
  # Improve the table's appearance and clarity
-  add_p() %>%
+  #add_p() %>%
   bold_labels() %>%
    # Use the `all_stat_cols()` selector to target the columns for the "by" variable
   # modify_header(
@@ -931,5 +950,15 @@ combined <- plot_grid(
 ggsave('../data/R09_sugar_density_OS.pdf',
       width = 17, height = 19, units = "in", device = 'pdf', 
       dpi = 300)       
+```
+
+```{r}
+# problems with the length of stay clinical outcome 
+# Reverse Causality (The "Sick Behavior" Confounder): The strongest counter-argument is that patients who are clinically doing worse (more nausea, pain, slower recovery) naturally default to a "comfort food" diet (high sugar, low intake) because they feel terrible. In this scenario, the diet isn't causing the longer stay; the underlying severity of their condition is causing both the poor diet and the longer stay. While you adjusted for conditioning intensity, unmeasured factors (like mucositis severity beyond opioid use) could drive this.
+# 
+# 
+# The "Low Intake" vs. "Sugar" problem: Cluster 1 is defined by both low intake and high sugar. A critic could argue that the delayed discharge is simply due to malnutrition (caloric deficit) rather than the specific presence of sugar or the microbiome bloom. The "sugar" signal is intertwined with the "starvation" signal.
+# 
+# Discharge is Subjective: Unlike death or engraftment, "discharge" is somewhat subjective. A cautious attending physician might keep a patient who eats poorly (Cluster 1) in the hospital longer purely for nutritional monitoring, regardless of their actual immune recovery or infection status.
 ```
 

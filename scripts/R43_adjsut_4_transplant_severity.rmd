@@ -65,7 +65,7 @@ found <- current_clinical_pull_through_2024 %>% clean_names() %>%
   left_join(df_ci) %>% 
   arrange(pid)
 
-# found %>% write_csv('../data/R43_diet_pt_CI_needed.csv')
+found %>% write_csv('../data/R43_diet_pt_CI_needed.csv')
 
 
 ```
@@ -77,6 +77,7 @@ found <- current_clinical_pull_through_2024 %>% clean_names() %>%
 few <- read_csv('../data/still_missing_hct_ci_2025-10-01_manually_reviewed.csv') %>% 
   mutate(mrn = as.numeric(mrn), hct = mdy(hct), hct_ci_tsoni_manual = as.character(hct_ci_tsoni_manual))
 
+found <- read_csv('../data/R43_diet_pt_CI_needed.csv')
 
 cleaned_ci_data <- found %>%
   left_join(few) %>% 
@@ -171,7 +172,13 @@ model_fit <- brm(
 
 results_df <- tidy(model_fit, conf.int = TRUE) %>%
   mutate(conf.low = round(conf.low, 2),
-         conf.high = round(conf.high, 2))
+         conf.high = round(conf.high, 2)) |> 
+  mutate(
+    n_samples = nrow(meta_CI),
+    n_patients = n_distinct(meta_CI$pid),
+  )
+
+results_df |> write_csv('../data/R43_results_df_adjusting_for_CI.csv')
 ```
 
 ## forest figure 
@@ -444,10 +451,16 @@ model_fit <- brm(
     silent = 2,
   control = list(adapt_delta = 0.99)
 )
-
+ 
 results_df_disease <- tidy(model_fit, conf.int = TRUE) %>%
   mutate(conf.low = round(conf.low, 2),
-         conf.high = round(conf.high, 2))
+         conf.high = round(conf.high, 2))  |> 
+  mutate(
+    n_samples = nrow(meta_disease),
+    n_patients = n_distinct(meta_disease$pid),
+  )
+
+results_df_disease |> write_csv('../data/R43_results_df_adjusting_for_Cancer_type.csv')
 ```
 
 ## forest figure 

@@ -112,7 +112,13 @@ model_fit <- brm(
 
 results_df <- tidy(model_fit, conf.int = TRUE) %>%
   mutate(conf.low = round(conf.low, 2),
-         conf.high = round(conf.high, 2))
+         conf.high = round(conf.high, 2)) |> 
+  mutate(
+    n_samples = nrow(meta_updated),
+    n_patients = n_distinct(meta_updated$pid),
+  )
+
+results_df |> write_csv('../data/R56_results_df_rm_EN_TPN.csv')
 ```
 
 ## forest figure 

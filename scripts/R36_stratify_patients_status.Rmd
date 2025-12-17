@@ -89,6 +89,40 @@ model_fit <- brm(
 model_results <- tidy(model_fit, conf.int = TRUE)  # it is the 95% CI by default
 ```
 ```{r}
+library(emmeans)
+
+# 1. Calculate the "Slope" (Trend) of sweets for every group
+# This function automatically sums the main effects + interaction terms
+sweets_slopes <- model_fit |> 
+  emtrends(
+    specs = ~ intensity + empirical,  # Break it down by these groups
+    var = "fg_sweets"                 # Calculate the slope of this variable
+  )
+
+# 2. Extract the posterior draws to make the plot
+plot_data <- sweets_slopes |>
+  gather_emmeans_draws() |> 
+  # IMPORTANT: Filter to only show the Antibiotics group (empirical = TRUE)
+  # This answers the reviewer's specific concern about patients on Abx
+  filter(empirical == "TRUE") 
+
+# 3. Create the Forest Plot (The "Combined Effect")
+ggplot(plot_data, aes(x = .value, y = intensity)) +
+  # Plot the median (dot) and 95% Credible Interval (line)
+  stat_pointinterval(point_interval = median_qi, .width = 0.95) +
+  # Add a reference line at 0 (No effect)
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  labs(
+    title = "Combined Effect of Sweets on Microbiome Diversity",
+    subtitle = "Marginal effect of sweets intake during antibiotic exposure",
+    x = "Estimated Change in log(Diversity) per 100g Sweets",
+    y = "Conditioning Intensity"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
 # ---  Calculate Conditional Effects Correctly Using Posterior Draws ---
 # This is the statistically sound way to calculate the effect for each group.
 # It uses the full posterior distribution to correctly propagate uncertainty.
@@ -147,15 +181,16 @@ results <- ggplot(plot_data, aes(x = estimate, y = term_label)) +
   
   # Add labels and a title
   labs(
-    title = "\nEffect of Sweets + Antibiotics on Microbiome Diversity",
+    title = "\nAssociation of Sweets + Antibiotics on Microbiome Diversity",
     subtitle = "for each conditioning intensity group",
     x = "Estimated Change in log(Diversity)",
     y = "" # No y-axis label needed
   ) +
   
   # Use a clean theme
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 12) +
   theme(
+    plot.title = element_text(size = 14),
     panel.grid.major.y = element_blank(), # Remove horizontal grid lines
     plot.title.position = "plot"
   )
@@ -235,10 +270,10 @@ table_tally_intensity <- ggdraw() + draw_image("../data/R36_number_tally_intensi
 
 
 final_plot <- plot_grid( table_tally_intensity ,  results , 
-                nrow  =2,
-                 rel_heights = c(.9,1.5),
+                nrow  =1,
+                 rel_widths  = c(1, 0.6),
                 labels = 'auto',
-                align = 'h', axis = 'lrtb')
+                align = 'hv', axis = 'b')
 
 
 title <- ggdraw() + 
@@ -253,8 +288,13 @@ combined <- plot_grid(
 ) +theme(plot.margin = unit(c(1,3,1,1), "cm"))
 
 ggsave('../data/R36_threeway_intensity.pdf',
-      width = 8.5, height = 11, units = "in", device = 'pdf', 
+      width = 11, height = 4, units = "in", device = 'pdf', plot = final_plot,
       dpi = 300)     
+
+
+ggsave('../data/R36_threeway_intensity_model_results.pdf',
+      width = 3, height = 3, units = "in", device = 'pdf', plot = results,
+      dpi = 300)   
 ```
 
 # the loess in the scatter plot
@@ -301,7 +341,7 @@ plot_data_1 <- scaffold |>
 # Build the plot for sweets
 p1 <- plot_data_1 |>
   ggplot(aes(x = fdrt, y = daily_sweets, color = intensity)) +
-   geom_point(alpha = 0.2) +
+   geom_point(alpha = 0.05, shape = 16) +
     
     # Add the LOESS smoothing line.
     # 'method = "loess"' specifies the type of smoother.
@@ -312,13 +352,18 @@ p1 <- plot_data_1 |>
     # Apply a minimal, clean theme to the plot.
     theme_classic(base_size = 11) +
     scale_y_sqrt() +
+  scale_color_manual(values = c(
+    "ablative" = "blue",   # Electric Yellow
+    "reduced" = "#DC143C", # Crimson Red
+    "nonablative" = "green"     # Oxford Blue
+  )) +
   labs(
-    title = "Daily Sweets Intake vs. Day Relative to Transplant",
+    #title = "Daily Sweets Intake vs.\nDay Relative to Transplant",
     x = "Day Relative to Transplant",
     y = "Daily Sweets (dehydrated weight)",
     color = "Conditioning intensity"
   ) +
-   theme(aspect.ratio = 1, legend.position = 'bottom')
+   theme(aspect.ratio = 1, legend.position = 'right')
 
 p1
 
@@ -356,10 +401,10 @@ p2 <- plot_data_2 |>
     x = "Day Relative to Transplant",
     y = "Daily Sugar (g)",
     color = "Conditioning intensity"
-  ) + theme(aspect.ratio = 1, legend.position = 'bottom')
+  ) + theme(aspect.ratio = 1, legend.position = 'right')
 
 # Save the second plot
 final_plot <- plot_grid(p1, p2, nrow = 2)
-ggsave("../data/R36_sugar__and_sweets_intake_scatter_R.pdf", plot = final_plot, width = 7, height = 7, dpi = 300)
+ggsave("../data/R36_sugar__and_sweets_intake_scatter_R.pdf", plot = final_plot, width = 4, height = 7, dpi = 300)
 ```
 
