@@ -26,6 +26,7 @@ library(viridis)
 library(RColorBrewer) 
 library(gridExtra)
 library(tidyverse)
+library(ggrastr)
 ```
 
 Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
@@ -325,10 +326,14 @@ generate_pca_plot <- function(counts_matrix, meta_subset, group_variable, plot_t
   # Generate the PCA plot, coloring by the specified group_variable
   pca_plot <- plotPCA(vst_subset, intgroup = group_variable) +
     ggtitle(plot_title) +
-    theme_minimal(base_size = 14) +
+    theme_classic(base_size = 14) +
     coord_fixed()
   
-  return(pca_plot)
+  # Returning a list so we can access both the visualization and the numbers behind it
+  return(list(
+    plot = pca_plot,
+    data = pca_plot$data
+  ))
 }
 ```
 
@@ -364,10 +369,54 @@ pca_li_suc <- generate_pca_plot(filtered_raw_counts_matrix, meta_li_faecalis, "t
 
 # Combine into a single figure
 sucrose_plot <- plot_grid(pca_si_suc, pca_li_suc, ncol = 2, labels = c("C", "D"))
-save_plot("../data/pca_sucrose_effect.jpg", sucrose_plot, base_height = 6, base_width = 12)
+save_plot("../data/pca_sucrose_effect.pdf", sucrose_plot, base_height = 6, base_width = 12)
 print(sucrose_plot)
 
 
+```
+
+```{r}
+# the p value for the LI sucrose effects pca
+pca_data <- pca_li_suc$data
+
+pc1_test <- t.test(PC1 ~ group, data = pca_data)
+```
+```{r}
+# checking if we have enough samples to even bother with normality testing
+# (Shapiro-Wilk really needs at least 3 samples per group to run without erroring)
+min_samples <- min(table(pca_data$group))
+
+if (min_samples >= 3) {
+  # Checking if the PC1 scores follow a bell curve for each group separately
+  # We group by the condition, run the test, and pull out the p-value
+  shapiro_results <- pca_data |>
+    group_by(group) |>
+    summarise(p_val = shapiro.test(PC1)$p.value)
+
+  # If ALL groups have p > 0.05, we assume the data is normal enough
+  is_normal <- all(shapiro_results$p_val > 0.05)
+} else {
+  # If we have tiny sample sizes, we can't prove normality, so we play it safe
+  # and assume it's not normal (forcing the non-parametric test)
+  is_normal <- FALSE
+}
+
+# The Decision Tree:
+if (is_normal) {
+  # Data looks normal -> T-test
+  # (Parametric, more power if assumptions met)
+  message("Data appears normal. Running T-test...")
+  test_result <- t.test(PC1 ~ group, data = pca_data)
+
+} else {
+  # Data is skewed or sample size is small -> Wilcoxon
+  # (Non-parametric, robust against outliers)
+  message("Data is non-normal or small sample size. Running Wilcoxon test...")
+  test_result <- wilcox.test(PC1 ~ group, data = pca_data)
+}
+
+# Output the results
+print(test_result)
 ```
 
 # Differential gene expression analysis
@@ -642,12 +691,15 @@ create_volcano_plot <- function(shrunken_results, plot_title) {
 
   # Create a column to identify significant genes for coloring and labeling
   results_df <- results_df %>%
+    # filter out the genes that don't have a symbol
+    filter(!is.na(symbol)) |> 
     mutate(significant = ifelse(padj < 0.05 & abs(log2FoldChange) > 1, "Yes", "No"))
 
   # Generate the plot
+    
   ggplot(results_df, aes(x = log2FoldChange, y = -log10(padj))) +
     # Add points, colored by significance
-    geom_point(aes(color = significant), alpha = 0.6) +
+    rasterise(geom_point(aes(color = significant), alpha = 0.6, shape = 16), dpi = 300) +
     scale_color_manual(values = c("No" = "grey", "Yes" = "red"), name = "") +
     
     # Add the dashed line for the FDR 0.05 cutoff
@@ -657,17 +709,17 @@ create_volcano_plot <- function(shrunken_results, plot_title) {
     geom_vline(xintercept = -1, linetype = "dashed", color = "black") +
     geom_vline(xintercept = 1, linetype = "dashed", color = "black") +
     
-    # Add gene symbols for significant genes using ggrepel
-    geom_text_repel(aes(label = symbol),
-                    data = subset(results_df, padj < 0.05 & abs(log2FoldChange) > 1),
-                    max.overlaps = 2.8, # Increase to allow more labels
-                    size = 2,
-                    box.padding = 0.5) +
+    # Add gene symbols for significant genes using ggrepel 
+    # geom_text_repel(aes(label = symbol),
+    #                 data = subset(results_df, padj < 0.05 & abs(log2FoldChange) > 1),
+    #                 max.overlaps = 10.8, # Increase to allow more labels
+    #                 size = 4,
+    #                 box.padding = 0.4) +
     
     labs(title = plot_title,
          x = "Log2 Fold Change",
          y = "-log10(Adjusted P-value)") +
-    theme_minimal(base_size = 11) +
+    theme_classic(base_size = 11) +
     theme(legend.position = "none") # Hide the individual legends
 }
 
@@ -683,10 +735,26 @@ p_li_contrast2 <- create_volcano_plot(shrunken_li_contrast2, "E. faecalis (Sucro
 
 # --- 5. Arrange Plots into a 2x2 Grid ---
 # Use patchwork to combine the plots. The '/' operator stacks plots vertically.
-p_si_contrast2  + p_li_contrast2
-ggsave('../data/R38_DEG_volcano.png', width = 6, height = 4)
+p_li_contrast2
+ggsave('../data/R38_DEG_volcano_li_contrast2.pdf', width = 6, height = 4)
 ```
 
+```{r}
+  results_df <- as.data.frame(shrunken_li_contrast2) %>%
+    rownames_to_column("ensembl_version") %>%
+    mutate(ensembl_id = str_remove(ensembl_version, "\\..*"))
+
+  # Map Ensembl IDs to gene symbols. 'mapIds' will return NA for any ID it can't find.
+  results_df$symbol <- mapIds(org.Mm.eg.db,
+                              keys = results_df$ensembl_id,
+                              column = "SYMBOL",
+                              keytype = "ENSEMBL",
+                              multiVals = "first")
+
+  # Create a column to identify significant genes for coloring and labeling
+  results_df <- results_df %>%
+    mutate(significant = ifelse(padj < 0.05 & abs(log2FoldChange) > 1, "Yes", "No"))
+```
 
 ```{r}
 # the volcano for the non-shrunken resutls
@@ -1097,13 +1165,13 @@ fgsea_results_li1 <- fgsea(
   nPermSimple = 10000 # Number of permutations
 )
 
-
+ 
 # --- Step 4: Explore and Visualize the Results ---
 
 # View the top enriched pathways
 top_pathways_li1 <- fgsea_results_li1 %>%
   as_tibble() %>%
-  arrange(desc(NES))
+  arrange(desc(NES)) 
 
 
 
@@ -1137,6 +1205,54 @@ sig_pw_bar_LI1 <- top_pathways_li1 %>%
 sig_pw_bar_LI1
 ```
 
+```{r}
+plot_data_ <- fgsea_results_li1 %>%
+  filter(padj < 0.05) %>%
+    mutate(
+      pathway_clean = pathway %>%
+        str_replace("HALLMARK_", "") %>%    # Remove the prefix.
+        str_to_title() %>%                  # Convert to Title Case.
+        str_replace_all("_", " ") %>%     # Replace underscores with spaces.
+        str_wrap(width = 48)                # Wrap long names for readability.
+    ) %>%
+    # Calculate -log10(padj) for dot size
+    mutate(neg_log_padj = -log10(padj)) %>%
+    mutate(pathway_clean = reorder(pathway_clean, NES)) %>%
+  mutate(direction = ifelse(NES > 0, "Upregulated", "Downregulated"))
+
+sig_pw_lollipop_LI1 <- ggplot(plot_data_, aes(x = NES, y = pathway_clean, color = direction)) +
+    # Add the "lollipop stick" segment
+    geom_segment(aes(x = 0, xend = NES, y = pathway_clean, yend = pathway_clean), linewidth = 0.8) +
+    
+    # Add the "dot" at the end, with size mapped to significance
+    geom_point(aes(size = neg_log_padj), alpha = 0.8) +
+    
+    # Manually set colors
+    scale_color_manual(values = c("Upregulated" = "#E64B35", "Downregulated" = "royalblue"), name = "Direction") +
+    
+    # Add a legend for dot size
+    scale_size_continuous(name = "-log10(Adjusted p-value)") +
+    
+    labs(
+      #title = plot_condition,
+      x = "Normalized Enrichment Score (NES)",
+      y = ""
+    ) +
+    geom_vline(xintercept = 0, linetype = "dashed") +
+    theme_bw(base_size = 12) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      legend.position = 'right',
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      axis.text.y = element_text(size = 9),
+      aspect.ratio = 2
+    )+
+  # This line splits the legend into 2 rows.
+  guides(color = guide_legend(nrow = 2, byrow = TRUE))
+
+sig_pw_lollipop_LI1
+```
 
 ## SI
 
@@ -1752,6 +1868,26 @@ combined <- plot_grid(
 
 ggsave('../data/R38_combined_heatmaps_figure_top_legend.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
+      dpi = 300)  
+```
+
+# newest version for the final RNA-seq figure
+
+```{r}
+p_rnaseq <- plot_grid(
+  sig_pw_lollipop_LI1, pca_li_suc,
+  p_li_contrast2,
+  ncol = 1,
+  rel_heights = c(1,.5,1)
+)
+
+combined <- plot_grid(
+  p_rnaseq,
+  ncol = 1
+) + theme(plot.margin = unit(c(1,3,1,1), "cm"))
+
+ggsave('../data/R38_combined_RNA-seq.pdf',
+      width = 8.5, height = 11, units = "in", device = cairo_pdf, plot = combined,
       dpi = 300)  
 ```
 
