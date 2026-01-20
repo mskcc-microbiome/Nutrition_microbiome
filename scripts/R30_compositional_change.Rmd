@@ -828,6 +828,33 @@ meta_Axis <- meta %>%
   mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) 
 ```
 
+```{r}
+library(rmcorr)
+# Combined exposure to sweets and antibiotics was also associated with a shift toward low-diversity compositions characterized by community monodomination, for example by Enterococcus faecium.
+
+
+rmc_result <- rmcorr(participant = pid, measure1 = Axis.1, measure2 = simpson_reciprocal, dataset = meta_Axis)
+
+# Visualizing the within-subject relationship
+meta_Axis |> 
+  ggplot(aes(x = Axis.1, y = simpson_reciprocal)) +
+  geom_point(alpha = 0.6) + 
+  # Connecting points from the same participant highlights the repeated measure aspect
+  # This adds the parallel slopes characteristic of rmcorr (visual aid)
+  # It shows the trend assuming the slope is shared across participants
+  geom_line(stat = "smooth", method = "lm", se = FALSE, alpha = 0.5) +
+  labs(
+    title = "Repeated Measures Correlation: Axis 1 vs. Simpson's",
+    subtitle = paste("rmcorr r:", round(rmc_result$r, 2), 
+                     "| P-value:", format.pval(rmc_result$p, digits = 3)),
+    x = "Axis 1",
+    y = "Simpson Reciprocal Index",
+    color = "Patient ID"
+  ) +
+  theme_minimal()
+```
+
+
 ### model 
 
 

@@ -290,6 +290,88 @@ plot_asv1 <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
 
 plot_asv1
 ```
+## marginal effects figure
+
+```{r}
+model_fit_original <- brm(
+  formula = formula,
+  data = meta |> mutate(across(starts_with("fg_"), ~ .x * 100)),
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+
+dat_conditional_mod_entero <- conditional_effects(model_fit_original, surface = T)
+
+condi_dat_mod_entero <- dat_conditional_mod_entero %>% 
+  keep(.p = str_detect(names(.), ':')) %>% 
+  bind_rows(.id = 'grp') %>% 
+  mutate(grp = str_replace(grp, '\\:empirical','')) %>% 
+  left_join(key %>% select(grp = fg1_name, shortname)) %>% 
+  mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
+                 'Oils',
+                 'Fruits',
+                 'Meats',
+                 'Legumes',
+                 'Eggs',
+                 'Milk',
+                 'Grains',
+                 'Sweets'))))
+```
+
+
+```{r}
+library(wesanderson) 
+# the color for the strip background
+palette <- wes_palette("Royal1", 2)
+strip_color <- wes_palette("Royal1", 3)[3]
+axis_text_size <- 10
+axis_title_size <- 10
+
+conditional9_entero <- condi_dat_mod_entero %>%   
+  ggplot() +
+  geom_smooth(aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
+              stat = "identity",
+              alpha = .3, linewidth = 1.5)+ 
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ shortname, nrow = 3, scales = 'free_x') +
+  labs(y = 'Predicted CLR(E. faecium)', x = 'Food group consumed (grams)') +
+  theme_classic() +
+  theme(legend.position = 'top', legend.title = element_text(size = 8, face="bold"),
+        legend.text = element_text( size=8, face="bold"),
+        legend.background=element_rect(fill = alpha("white", 0)),
+       legend.key=element_rect(fill = alpha("white", 0)),
+        aspect.ratio = 1, 
+        strip.background = element_rect(color="white", fill=strip_color, size=1.5,linetype="solid"),
+     axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
+  guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
+
+title <- ggdraw() + 
+  draw_label(
+    "Extended Fig. E19",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+combined <- plot_grid(
+  title, conditional9_entero,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(2,2,8,2), "cm"))
+
+ggsave('../data//E19_conditional9_entero_asv1_171.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined, dpi = 300)  
+```
 
 # 4C: the mouse experiment   
 

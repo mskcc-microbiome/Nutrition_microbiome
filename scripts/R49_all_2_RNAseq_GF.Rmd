@@ -1198,6 +1198,7 @@ print(bcell_combined_plot)
 # What it means: The "UP" and "DN" gene sets were defined in a clean lab experiment with only B-cells and IFN-alpha. Your experiment is in a complex gut. Your result shows that the B-cells are definitely "hearing" the IFN-alpha signal (activating the "UP" genes). However, the mix of all the other cytokines (Il10, Il21, etc.) is overriding IFN-alpha's normal ability to turn off its "DN" genes, causing them to be expressed instead. This is a sign of complex signal integration.
 
 ```
+
 # LI structural remodeling
 
 ```{r}

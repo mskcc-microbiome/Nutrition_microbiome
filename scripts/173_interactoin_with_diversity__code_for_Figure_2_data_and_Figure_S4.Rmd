@@ -143,6 +143,16 @@ samples_prior <- prior_draws(model_div)
 post_res <- suppressWarnings(posterior_samples(model_div)) 
 post_res %>%  write_csv('../results/173_div_model_fg_post_interaction.csv')
 ```
+```{r}
+# to see the median and the 95% CI of the coeff
+post_res <-  read_csv('../results/173_div_model_fg_post_interaction.csv') |> gather()
+
+post_res %>% filter(str_detect(key, '_e$')) %>% 
+  group_by(key) %>% 
+  tidybayes::median_qi(value , .width = c( .95)) %>% 
+  arrange(.lower) |> 
+  mutate(value = round(value, 3))
+```
 
 
 # use conditional_effects function to see the marginal effects  
