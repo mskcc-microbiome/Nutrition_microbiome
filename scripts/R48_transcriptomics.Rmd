@@ -50,6 +50,8 @@ final_data <- left_join(combined_data, metadata, by = "sample_id") |> select(-so
 # A high TPM value for a gene involved in metabolizing sucrose in a sample from the "PBS, Sucrose" group means the bacteria are actively eating the sucrose you provided.
 # 
 # A high TPM value for an antibiotic resistance gene in the "Biapenem" group means the bacteria are actively fighting off the antibiotic to survive.
+
+final_data |> distinct(sample_id, timepoint_day, treatment, source) |> write_csv('../data/R48_shallow_shotgun_meta.csv')
 ```
 
 # composition from the shallow shotgun

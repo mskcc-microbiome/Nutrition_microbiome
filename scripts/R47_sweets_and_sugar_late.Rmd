@@ -84,7 +84,20 @@ daily_intake_final <- all_patient_days_with_intake %>%
 
 daily_intake_final |> count(had_enteral, intake_source)
 ```
+```{r}
+#  x% of the points after day 20 are orange, and y% of the points after day 30 are orange.
+daily_intake_final |> 
+  filter(fdrt > 20) |> 
+  count(intake_source) |> 
+  mutate(perc = round(n/sum(n)*100, 1))
+```
 
+```{r}
+daily_intake_final |> 
+  filter(fdrt > 40) |> 
+  count(intake_source) |> 
+  mutate(perc = round(n/sum(n)*100, 1))
+```
 
 ```{r}
 # --- Plot Generation ---

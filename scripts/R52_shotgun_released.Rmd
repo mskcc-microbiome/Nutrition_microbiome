@@ -21,6 +21,6 @@ shotgun_released <- sra |>
   inner_join(meta |> select(sampleid, pid, sdrt )) |> 
   select(sampleid, pid, sdrt, accession, bioproject_accession, biosample_accession, filename:filename4)  
 
-shotgun_released |> write_csv('../data/R52_shotgun_released_333_meta.csv')
+shotgun_released |> write_csv('../data/R52_shotgun_released_333_meta.csv', na = '')
 ```
 

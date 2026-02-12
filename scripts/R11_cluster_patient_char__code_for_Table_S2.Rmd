@@ -72,27 +72,26 @@ final <- PTB %>%
 ```{r}
 final %>% 
   tbl_summary(
-    statistic = list(all_continuous() ~ "{median} ({IQR})", all_categorical() ~ "{n} ({p}%)"),
+    statistic = list(all_continuous() ~ "{median} ({IQR})"),
     by=modal_diet
   ) %>%
-  add_p() %>%
+  #add_p() %>%
   bold_labels() %>% 
   as_gt() %>%
   gt::gtsave(filename = "../data/11_patient_summary_clusters.png")
 
-table_ <- ggdraw() + draw_image("../data/11_patient_summary_clusters.png", scale = 0.7)
+table_ <- ggdraw() + draw_image("../data/11_patient_summary_clusters.png", scale = 0.8)
 
  title <- ggdraw() + 
   draw_label(
-    "Table S2",
+    "Extended Table E4",
     fontface = 'bold',
     x = 0,
     hjust = 0
   ) +
   theme(
-    plot.margin = margin(0, 0, 0, 5)
+    plot.margin = margin(0, 0, 0, 0)
   )
-
  
 combined <- plot_grid(
   title, table_,
@@ -101,6 +100,6 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 )+theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../results/Table_S2_patient_summary__cluster_11.pdf',
+ggsave('../data/Table_S2_patient_summary__cluster_11.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```

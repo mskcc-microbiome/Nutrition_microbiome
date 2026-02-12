@@ -267,37 +267,90 @@ cluster_cal <- p_cal %>%
 cluster_cal 
 ```
 ```{r}
+# carbohydrate should be the total carbohydrate meaning it includes the sugar and fiber #!!!!!!!  
 # combine the fiber and the carb
 df_g_prop <- p_cal %>% 
-  select(-starts_with('dens')) %>% 
-  select(-d_Calories_kcal) %>% 
-  gather('event','d_gram', d_carb:d_Sugars_g) %>% 
-  group_by(pid,fdrt) |> 
-  mutate(sumvalue = sum(d_gram),
-         prop = d_gram/sumvalue,
-         fdrt = factor(fdrt)) %>% 
-   mutate(cluster_label = if_else(modal_diet == 'cluster2:higher-intake', '2higher','1lower')) %>% 
+  #select(-starts_with('dens')) %>% 
+  select(-d_Calories_kcal)
+
+
+# carbohydrate should be the total carbohydrate meaning it includes the sugar and fiber #!!!!!!!  
+# calculate the new metrics
+df_clean <- df_g_prop |> 
+  mutate(
+    # First, get the denominator: the total mass of the 3 key macros
+    # We treat this as the "whole" for our proportion calculations
+    macro_sum = d_carb + d_Protein_g + d_Fat_g,
+    
+    # Now calculate the shares relative to that sum.
+    # We use a wrapper like if_else or case_when to handle cases where 
+    # macro_sum is 0 (like water or diet soda) to avoid dividing by zero.
+    sugar_prop = if_else(macro_sum > 0, d_Sugars_g / macro_sum, 0),
+    
+    # "Other carb" is just total carbs minus the sugar part
+    other_carb_prop = if_else(macro_sum > 0, (d_carb - d_Sugars_g) / macro_sum, 0),
+    
+    fat_prop = if_else(macro_sum > 0, d_Fat_g / macro_sum, 0),
+    
+    protein_prop = if_else(macro_sum > 0, d_Protein_g / macro_sum, 0)
+  ) %>% 
+  select(pid, fdrt, modal_diet, ends_with('prop') ) |> 
+  gather('event','prop', sugar_prop:protein_prop) %>% 
+  mutate(fdrt = factor(fdrt)) %>% 
+  mutate(cluster_label = if_else(modal_diet == 'cluster2:higher-intake', '2higher','1lower')) %>% 
   split(.$event)
 
+df_clean
+```
 
-prop_plots <- df_g_prop %>% 
+```{r}
+prop_plots <- df_clean %>% 
   imap(function(df, .y){
       
-     ggplot(df, aes(x = fdrt, y = prop)) +
+     ggplot(df, aes(x = fdrt, y = prop, fill = modal_diet, color = modal_diet)) +
         geom_boxplot(
           outlier.shape = NA,    
           outlier.size = 1,    
           outlier.alpha = 0.5,   
           outlier.color = "red" 
         ) +
-        labs(title = str_glue('{.y}'),y = '',x = '') +
-        stat_summary(fun = median, geom = "line", aes(group = 1), color = 'red', size = 1) +
+        labs(title = str_glue('{.y}'),y = 'Daily intake (proportion)',x = 'HCT Day') +
+        stat_summary(fun = median, geom = "line", aes(group = 1), color = 'red', size = .5) +
         scale_x_discrete( breaks = seq(0, 10, 10)) +
       ylim(0,1) +
-        facet_wrap(~ cluster_label ) +theme_bw()  +  theme(aspect.ratio = 3.5)
+  scale_color_manual(values = c( "darkgoldenrod2", "darkslateblue")) +
+  scale_fill_manual(values = c("darkgoldenrod2", "darkslateblue")) +
+        facet_wrap(~ cluster_label ) +theme_bw()  +  theme(aspect.ratio = 3.5, legend.position = 'none', strip.text = element_blank())
      
   })  
 combined <- plot_grid(plotlist = prop_plots, nrow = 1)
 combined
 ```
+```{r}
+res <- plot_grid(
+  '', combined,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,1,3), "cm"))
 
+ggsave('../data/R10_clinical_proportions.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = res, dpi = 300)  
+```
+
+```{r}    
+# to calculate a p value between the two clusters in each macronutrient **proportions** 
+# compared to "cluster2:higher-intake"
+each_res_prop <- df_clean %>% 
+  map(function(df){ 
+    df_ <- df %>% mutate(fdrt = as.numeric(as.character(fdrt)))
+    res_each_prop <- geepack::geeglm(prop ~ modal_diet + splines::ns(fdrt,knots = quantile(df_$fdrt, probs=c(0.2,0.8))),
+       id=pid, corstr="exch", data=df_)
+    return(summary(res_each_prop)$coefficients[2,c(1,4)])
+  }) %>% bind_rows(.id = 'event') %>% 
+  mutate(padj = p.adjust(`Pr(>|W|)`)) %>% 
+  arrange(padj, Estimate) |> 
+  mutate(Estimate = round(Estimate, 2))
+
+each_res_prop
+```

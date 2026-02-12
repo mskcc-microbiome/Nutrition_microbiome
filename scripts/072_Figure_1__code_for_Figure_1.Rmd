@@ -597,7 +597,7 @@ m_panel <- dailymacro %>%
 m_panel
 ```
 
-# 1L: the food group  3 by 3 grid 
+# 1L: the food group 3 by 3 grid 
 
 ```{r 3X3}
 fg_all <- dtb %>%  

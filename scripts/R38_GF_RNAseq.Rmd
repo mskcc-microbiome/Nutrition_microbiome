@@ -75,6 +75,8 @@ meta_table <- tibble(sample_id = sample_names) %>%
 # Display the first few rows of the new table to check the result.
 print(meta_table)
 levels(meta_table$treatment)
+
+meta_table |> write_tsv('../data/R38_batch1_meta.tsv')
 ```
 
 ## normalization to cpm and filtering

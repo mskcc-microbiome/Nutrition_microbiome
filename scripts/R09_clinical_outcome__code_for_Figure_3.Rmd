@@ -150,14 +150,13 @@ input_df <- df_main |>
 
 
 
-fit <- coxph(Surv(OStime_30,OSevent)~`Diet-pattern cluster`*`Abx exposure(days)`  + `Conditioning intensity` + `Graft source and GvHD prophylaxis`,
-             data= input_df)
+fit <- coxph(Surv(OStime_30,OSevent)~modal_diet*day_exposed  + intensity + source_and_gvhdppx,
+             data= df_main |> filter(OStime_30 > 0) |>  mutate(modal_diet = case_when(
+    modal_diet == 'Lower-intake/sugar-enriched' ~ 'Cluster 1 (Lower-intake/sugar-enriched)',
+    modal_diet == 'Higher-intake' ~ 'Cluster 2 (Higher-intake)' 
+  )))
 
-fit |> 
-  tbl_regression(exponentiate = FALSE) |> 
-  bold_p() |> 
-  as_gt() |> 
-  gtsave(filename="../data/09_OS_model_multi.png")
+
 
 
 # just print the multivar table to the correct size
@@ -185,6 +184,65 @@ combined <- plot_grid(
 
 ggsave('../results//Table_S3_OS_multivariate_R09.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+```
+```{r}
+# make the above table publication ready with newer code
+publication_table_OS_output_model_cluster <- tbl_regression(
+  fit,
+  # Just list the main variables you want to see.
+  # gtsummary is smart enough to keep the interaction term 
+  # associated with these variables automatically.
+  include = c(modal_diet, day_exposed, "modal_diet:day_exposed"),
+  exponentiate = T, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
+  # The 'label' argument maps variable names to publication-ready labels.
+  # The formula structure is list(variable_name ~ "Desired Label")
+  label = list(
+    modal_diet ~ "Diet-pattern cluster",
+    day_exposed ~ "Abx exposure(days)"
+    # source_and_gvhdppx ~ "Graft source and GvHD prophylaxis",
+    # intensity ~ "Conditioning intensity"
+    # Note: The interaction term label is automatically created from the main variable labels.
+  )
+  ) %>%
+  # Improve the table's appearance and clarity
+  bold_p(t = 0.05) %>% # Make p-values < 0.05 bold
+  bold_labels() %>%
+  # Add a clear title and a source note for context
+  as_gt() %>% # Convert to a gt object for better customization
+  gt::tab_header(
+    title = "Multivariable Cox Model for Overall Survival"
+  ) 
+
+
+# --- Step 3: Display the Table ---
+# In RStudio or a Quarto/RMarkdown document, this will render a beautiful HTML table.
+publication_table_OS_output_model_cluster %>% 
+  gt::gtsave(filename = "../data/R09_cluster_model_multivariate_output.png") 
+
+# to produce the pdf version of the table in a pdf 
+table_S5 <- ggdraw() + draw_image("../data/R09_cluster_model_multivariate_output.png", scale = 0.7)
+
+ title <- ggdraw() + 
+  draw_label(
+    "Extended Table E5",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 5)
+  )
+
+combined <- plot_grid(
+  title, table_S5,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,10,1), "cm"))
+
+ggsave('../data/Table_S5_cluster_model_multivariate_output_R09.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
+
 ```
  
  
@@ -436,8 +494,8 @@ patient_summary <- daily_intake %>%
   mutate(
     # Create a factor "High" or "Low" based on the median of the cohort
     SugarCal_cat_high = if_else(avg_sugar_density_per_1000kcal > median(avg_sugar_density_per_1000kcal, na.rm = TRUE),
-                                          "High", "Low"),
-    SugarCal_cat_high = factor(SugarCal_cat_high, levels = c('High', 'Low'))
+                                          "Above-median", "Below-median"),
+    SugarCal_cat_high = factor(SugarCal_cat_high, levels = c('Above-median', 'Below-median'))
   )
 ```
 
@@ -574,14 +632,18 @@ ggsave('../data/R09_KM_curve.png', width = 7, height = 5)
 ```{r}
 publication_table <- tbl_regression(
   fit,
+  # Just list the main variables you want to see.
+  # gtsummary is smart enough to keep the interaction term 
+  # associated with these variables automatically.
+  include = c(SugarCal_cat_high, day_exposed, "SugarCal_cat_high:day_exposed"),
   exponentiate = T, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
   # The 'label' argument maps variable names to publication-ready labels.
   # The formula structure is list(variable_name ~ "Desired Label")
   label = list(
-    SugarCal_cat_high ~ "Calorie-Adjusted Sugar Intake",
-    day_exposed ~ "Abx exposure(days)",
-    source_and_gvhdppx ~ "Graft source and GvHD prophylaxis",
-    intensity ~ "Conditioning intensity"
+    SugarCal_cat_high ~ "Averaged Sugar Intake",
+    day_exposed ~ "Abx exposure(days)"
+    # source_and_gvhdppx ~ "Graft source and GvHD prophylaxis",
+    # intensity ~ "Conditioning intensity"
     # Note: The interaction term label is automatically created from the main variable labels.
   )
   ) %>%
@@ -597,6 +659,30 @@ publication_table <- tbl_regression(
 # In RStudio or a Quarto/RMarkdown document, this will render a beautiful HTML table.
 publication_table %>% 
   gt::gtsave(filename = "../data/R09_sugar_density_model_multivariate_output.png") 
+
+# to produce the pdf version of the table in a pdf 
+table_S3 <- ggdraw() + draw_image("../data/R09_sugar_density_model_multivariate_output.png", scale = 0.7)
+
+ title <- ggdraw() + 
+  draw_label(
+    "Extended Table E3",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 5)
+  )
+
+combined <- plot_grid(
+  title, table_S3,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,10,1), "cm"))
+
+ggsave('../data/Table_S3_sugar_density_model_multivariate_output_R09.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
 
 ```{r}
@@ -896,9 +982,33 @@ final %>%
   as_gt() %>%
   # 2. Now you can use any functions from the 'gt' package
   tab_header(
-    title = "Patient Characteristics by Calorie-Adjusted Sugar Intake"
+    title = "Patient Characteristics by Averaged Sugar Intake"
   ) %>% 
   gt::gtsave(filename = "../data/R09_patient_summary_binarized.png")
+```
+```{r}
+table_ <- ggdraw() + draw_image("../data/R09_patient_summary_binarized.png", scale = 0.7)
+
+ title <- ggdraw() + 
+  draw_label(
+    "Extended Table E2",
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 5)
+  )
+ 
+combined <- plot_grid(
+  title, table_,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
+
+ggsave('../data/Table_S2_patient_summary__sugardensity_R09.pdf',
+      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
 
 ## assemble 
