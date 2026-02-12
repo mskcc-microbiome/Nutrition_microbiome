@@ -1,8 +1,8 @@
 # Title: Sugar-rich foods exacerbate antibiotic-induced microbiome disruption.
 
-# Description:
+## Description
 This repository contains the code and processed data used for the analyses presented in the manuscript "Sugar-rich foods exacerbate antibiotic-induced microbiome disruption".  
-The code performs statistical analyses (including Bayesian inference) and generates the figures demonstrating the link between dietary sugar intake, antibiotic exposure, and microbiome disruption in both human patients undergoing hematopoietic cell transplantation and in a mouse model.
+The code performs statistical analyses (including Bayesian inference) and generates the figures demonstrating the link between dietary sugar intake, antibiotic exposure, and microbiome disruption in both human patients undergoing hematopoietic cell transplantation and in a mouse model. See preprint here: https://www.biorxiv.org/content/10.1101/2024.10.14.617881v1.
 
 
 ## Code Roadmap: Figures & Tables
@@ -19,7 +19,7 @@ This section maps the specific analysis scripts to the main figures and tables p
 | **003** | **Table 1** | Generates the patient characteristics table. |
 
 
-## data/ 
+
 
 
 
