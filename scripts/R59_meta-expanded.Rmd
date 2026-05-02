@@ -15,13 +15,30 @@ library(tidyverse)
 ```{r}
 meta <- read_csv('../data/153_combined_META.csv')
 ```
-# CI
+# the vars summarized from corresponding scripts
 
 ```{r}
 cleaned_ci_data <- read_csv('../data/R43_cleaned_ci_data_diet.csv') %>% select(pid, ci_cleaned_numeric)
 ```
 
 ```{r}
-pt_disease_lineage <- read_csv('../data/R43_cleaned_patients_disease_lineage.csv')
+pt_disease_lineage <- read_csv('../data/R43_cleaned_patients_disease_lineage.csv') |> select(pid, disease_lineage)
+
+pca_exposure <- read_csv('../data/084_samples_and_PCA.csv')
+
+abx_exposure_type <- read_csv('../data/R41_stool_sample_abx_exposure_type_4.csv')
+```
+
+```{r}
+# merge the above table to the meta
+meta_expanded <- meta |> 
+  left_join(cleaned_ci_data, by = 'pid' ) |> 
+  left_join(pt_disease_lineage, by = 'pid' ) |> 
+  left_join(pca_exposure, by = 'sampleid' ) |> 
+  left_join(abx_exposure_type, by = 'sampleid' ) 
+```
+
+```{r}
+meta_expanded |> write_csv('../data/R59_meta_expanded.csv')
 ```
 
