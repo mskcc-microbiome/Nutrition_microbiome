@@ -1,0 +1,27 @@
+---
+title: "Making the expanded meta table"
+output: html_document
+date: "2026-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv')
+```
+# CI
+
+```{r}
+cleaned_ci_data <- read_csv('../data/R43_cleaned_ci_data_diet.csv') %>% select(pid, ci_cleaned_numeric)
+```
+
+```{r}
+pt_disease_lineage <- read_csv('../data/R43_cleaned_patients_disease_lineage.csv')
+```
+
