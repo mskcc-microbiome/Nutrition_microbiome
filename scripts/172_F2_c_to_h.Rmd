@@ -1,0 +1,396 @@
+---
+title: "Generating F2 c-h"
+output: html_document
+date: "2026-04-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(brms)   
+library(ggpubr)
+library(tidybayes)
+library(cowplot)
+library(ggtext)
+library(wesanderson)
+library(broom.mixed) 
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+palette <- wes_palette("Royal1", 2)
+```
+
+```{r}
+data <- read_csv("../data/153_combined_META.csv") %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(c(starts_with("fg_"), starts_with("ave_")), ~ .x / 100))
+
+all_food_vars <- data %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN  +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+#Fit the model (using fewer iterations for this example to run quickly)
+model_fit <- brm(
+  formula = formula,
+  data = data,
+  prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, cores = 4,
+    seed = 123,
+    silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df <- tidy(model_fit, conf.int = TRUE) %>%
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2)) |> 
+  mutate(
+    n_samples = nrow(data),
+    n_patients = n_distinct(data$pid),
+  )
+
+results_df |> write_csv('../data/172_results_df_main_fg_diversity.csv')
+```
+
+## 2d
+
+```{r}
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+level_order <- rev(c(
+    "abx", "EN", "TPN", 
+    "abx * Sweets", "Sweets",
+    "abx * Grains", "Grains",
+    "abx * Milk", "Milk",
+    "abx * Eggs", "Eggs",
+    "abx * Legumes", "Legumes",
+    "abx * Meats", "Meats",
+    "abx * Fruits", "Fruits",
+    "abx * Oils", "Oils",
+    "abx * Vegetables", "Vegetables"
+))
+
+cleaned_effects <- results_df %>%
+  # Keep only the fixed effects
+  filter(effect == "fixed") %>%
+  # Create a new column to distinguish main effects from interactions
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    # Create clean labels for plotting
+    clean_term = term %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>%
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ") 
+  ) %>%
+  filter(!str_detect(clean_term, 'intensity')) %>%
+  # Create a new column to identify significant results
+  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
+  mutate(is_significant = (conf.low * conf.high) >= 0) %>%
+  mutate(clean_term = factor(clean_term, levels = level_order))
+
+shading_df <- cleaned_effects %>%
+  mutate(y_numeric = as.numeric(clean_term)) %>%
+  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
+
+plot_ <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#FBEADC", # A light orange/peach color like the example
+    alpha = 0.7,
+    inherit.aes = FALSE
+   ) +
+   # Add a vertical line at zero, which represents "no effect"
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
+   geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25,linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c(
+      "TRUE" = "red",
+      "FALSE" = "black"
+    ), name = "Effect Status" # Legend title
+  ) +
+  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  # Add labels and a clean theme
+  labs(
+    x = "ln(diversity) change",
+    y = ''
+  ) +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown(), aspect.ratio = 1.3) 
+
+plot_
+```
+
+## 2c
+
+```{r}
+intercepts <- results_df %>% 
+  filter(str_detect(term, "intensity")) |> 
+  mutate(
+    shortname  = str_replace(term, 'intensity',''),
+    shortname = str_to_title(shortname),
+    shortname = factor(shortname, levels = c('Nonablative','Reduced','Ablative'))) %>% 
+  
+  ggplot( aes(x = estimate, y = shortname)) +
+  geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high),
+     size = 0.25,linewidth = 1,
+  ) +
+  labs(x = 'ln(diversity)', y = '') +
+   xlim(1.5, 2.5) +
+  scale_x_continuous( breaks = seq(1.4, 2.4, 0.2)) + 
+  theme_classic() +
+  theme(legend.position = 'none') +
+  theme(axis.text = element_text( size = 10),
+          panel.background = element_rect(fill = "gray96",colour = "gray96",size = 0.5, linetype = "solid"),
+        axis.title=element_text(size=10), 
+        aspect.ratio=1.4)
+
+intercepts
+```
+## 2g
+
+```{r}
+# Pulling the conditional effects directly from the model to build the smooth curves
+raw_conditional <- conditional_effects(model_fit, surface = TRUE)
+
+# Filtering down to just the interactions between food groups and antibiotics
+
+condi_dat <- raw_conditional[str_detect(names(raw_conditional), ":empirical")] |> 
+  bind_rows(.id = 'grp') |> 
+  mutate(grp = str_replace(grp, '\\:empirical','')) |> 
+  mutate(
+    # Stretching the x-axis back to normal grams for readability on the final plot
+    effect1__ = effect1__ * 100,
+    across(starts_with("fg_"), ~ .x * 100) 
+  ) |> 
+  left_join(key |> select(grp = fg1_name, shortname)) %>% 
+  mutate(shortname = factor(shortname, levels = rev( c('Vegetables',
+                 'Oils',
+                 'Fruits',
+                 'Meats',
+                 'Legumes',
+                 'Eggs',
+                 'Milk',
+                 'Grains',
+                 'Sweets'))))
+```
+
+
+```{r}
+# Generating the prediction curves (Panels G/H)
+conditional_plots <- condi_dat |>   
+  ggplot() +
+  geom_smooth(
+    aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
+    stat = "identity", alpha = .3, linewidth = 1.5
+  ) + 
+    scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+ facet_wrap(~ shortname, nrow = 2, scales = 'free_x') +
+  ylim(0, 3.3) +
+  labs(y = 'Predicted log(diversity)', x = 'Food group consumed (grams)') +
+  theme_classic() +
+  theme(legend.position = 'none', legend.title = element_text(size = 8, face="bold"),
+        legend.text = element_text( size=8, face="bold"),
+        panel.background = element_rect(fill = "#FAEFD140"),
+        legend.background=element_rect(fill = alpha("white", 0)),
+       legend.key=element_rect(fill = alpha("white", 0)),
+        aspect.ratio = 1/1.5, 
+        strip.background = element_rect(color="white", fill='#ffecdc', size=1.5,linetype="solid"),
+     axis.text=element_text(size=8), axis.title=element_text(size=axis_text_size))    +
+  guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
+
+conditional_plots
+```
+
+# macronutrients
+
+```{r}
+# Define the variables of interest
+macro_vars <- c("ave_Fat_g", "ave_Fibers_g", "ave_Sugars_g")
+
+# Build interaction terms connecting macronutrients with empirical antibiotic use
+interaction_terms_macro <- paste(macro_vars, "empirical", sep = ":")
+
+formula_string_macro <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN  +",
+  paste(interaction_terms_macro, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+formula_macro <- brms::bf(as.formula(formula_string_macro))
+
+# Priors keep the model grounded. The general prior applies to the macro effects.
+priors_macro <-
+    prior(normal(0, 1), class = 'b') + 
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+
+model_fit_macro <- brm(
+  formula = formula_macro,
+  data = data,
+  prior = priors_macro,
+  warmup = 1000, iter = 3000,
+  chains = 4, cores = 4,
+  seed = 123,
+  silent = 2,
+  control = list(adapt_delta = 0.99)
+)
+
+results_df_macro <- tidy(model_fit_macro, conf.int = TRUE) |>
+  mutate(conf.low = round(conf.low, 2),
+         conf.high = round(conf.high, 2)) |> 
+  mutate(
+    n_samples = nrow(data),
+    n_patients = n_distinct(data$pid),
+  )
+
+results_df_macro |> write_csv('../data/172_results_df_macro_diversity.csv')
+```
+
+## 2e
+
+```{r}
+# Set up a dictionary to clean up the macronutrient names for plotting
+macro_dict <- c(
+  "ave_Fat_g" = "Fat", 
+  "ave_Fibers_g" = "Fiber", 
+  "ave_Sugars_g" = "Sugar"
+)
+
+level_order_macro <- rev(c(
+    "abx", "EN", "TPN", 
+    "abx * Sugar", "Sugar",
+    "abx * Fiber", "Fiber",
+    "abx * Fat", "Fat"
+))
+
+cleaned_effects_macro <- results_df_macro |>
+  filter(effect == "fixed") |>
+  mutate(
+    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
+    clean_term = term |>
+      str_replace("empiricalTRUE$", "abx") |>
+      str_remove_all("empiricalFALSE:|TRUE$") |>
+      str_replace_all(macro_dict) |>
+      str_replace("empiricalTRUE:", "abx * ") |>
+      str_replace_all("_", " ") 
+  ) |>
+  filter(!str_detect(clean_term, 'intensity')) |>
+  # Determine significance if confidence bounds don't cross zero
+  mutate(is_significant = (conf.low * conf.high) >= 0) |>
+  mutate(clean_term = factor(clean_term, levels = level_order_macro))
+
+shading_df_macro <- cleaned_effects_macro |>
+  mutate(y_numeric = as.numeric(clean_term)) |>
+  filter(str_detect(clean_term, "\\*")) 
+
+plot_macro <- ggplot(cleaned_effects_macro, aes(x = estimate, y = clean_term)) +
+  geom_rect(
+    data = shading_df_macro,
+    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
+    fill = "#6B8E2340", 
+    alpha = 0.3,
+    inherit.aes = FALSE
+   ) +
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue", size = 0.8) +
+  geom_pointrange(
+   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
+     size = 0.25, linewidth = 1,
+  ) +
+  scale_color_manual(
+    values = c("TRUE" = "red", "FALSE" = "black"), 
+    name = "Effect Status" 
+  ) +
+  scale_y_discrete(labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
+  labs(x = "ln(diversity) change", y = '') +
+  theme_classic(base_size = 11) +
+  theme(legend.position = "none", axis.text.y = element_markdown(), aspect.ratio = 1.3) 
+
+plot_macro
+```
+
+## 2h
+
+```{r}
+raw_conditional_macro <- conditional_effects(model_fit_macro, surface = TRUE)
+
+condi_dat_macro <- raw_conditional_macro[str_detect(names(raw_conditional_macro), ":empirical")] |> 
+  bind_rows(.id = 'grp') |> 
+  mutate(grp = str_replace(grp, '\\:empirical','')) |> 
+  mutate(
+    # Re-scale back to real-world units (grams) to make the plots readable
+    effect1__ = effect1__ * 100,
+    across(starts_with("ave_"), ~ .x * 100) 
+  ) |> 
+  # Apply the macro dictionary to translate variable names to plot labels
+  mutate(shortname = recode(grp, !!!macro_dict)) |> 
+  mutate(shortname = factor(shortname, levels = rev(c("Fat", "Fiber", "Sugar"))))
+
+conditional_plots_macro <- condi_dat_macro |>   
+  ggplot() +
+  geom_smooth(
+    aes(x = effect1__, y = estimate__, ymin = lower__, ymax = upper__, fill = effect2__, color = effect2__),
+    stat = "identity", alpha = .3, linewidth = 1.5
+  ) + 
+  scale_fill_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  scale_colour_manual('antibiotics', values = palette, labels=c('not exposed', 'exposed')) +
+  facet_wrap(~ shortname, nrow = 1, scales = 'free_x') +
+  ylim(0, 3.3) +
+  labs(y = 'Predicted log(diversity)', x = 'Macronutrient consumed (grams)') +
+  theme_classic() +
+  theme(
+    legend.position = 'none', 
+    legend.title = element_text(size = 8, face="bold"),
+    legend.text = element_text(size=8, face="bold"),
+    panel.background = element_rect(fill = "#6B8E2320"),
+    legend.background = element_rect(fill = alpha("white", 0)),
+    legend.key = element_rect(fill = alpha("white", 0)),
+    aspect.ratio = 1/1.5, 
+    strip.background = element_rect(color="white", fill='#6B8E2340', size=1.5, linetype="solid"),
+    axis.text = element_text(size=8), 
+    axis.title = element_text(size=10)
+  ) +
+  guides(fill = guide_legend(direction = "vertical"), color = guide_legend(direction = "vertical"))
+
+conditional_plots_macro
+
+```
+
