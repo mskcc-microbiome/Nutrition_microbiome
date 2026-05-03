@@ -1,0 +1,115 @@
+---
+title: "Extended F4"
+output: html_document
+date: "2026-05-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(cowplot)
+```
+
+```{r}
+# Read the dietary data
+# The color key file is omitted here because the final plot relies only on the food descriptions
+dtb <- read_csv('../data/152_combined_DTB.csv') |> mutate(Food_code = as.character(Food_code))
+```
+
+# d:top 10 food codes in sweets
+
+```{r}
+# Isolate the top 10 most consumed items in the Sweets/Beverages category (food group starting with '9')
+# This sums up both the total dehydrated weight and the sugar content across the entire dataset
+top_sweets <- dtb |>
+  mutate(fgrp1 = str_sub(Food_code, 1, 1)) |>
+  filter(fgrp1 == '9') |>
+  group_by(Food_code, description) |>
+  summarise(
+    total_per_code = sum(dehydrated_weight, na.rm = TRUE),
+    total_sugar_per_code = sum(Sugars_g, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  slice_max(order_by = total_per_code, n = 10)
+
+# Calculate the frequency of consumption for these specific items
+# Counting distinct meals ensures the average reflects a true "per-sitting" portion size
+meal_counts <- dtb |>
+  filter(Food_code %in% top_sweets$Food_code) |>
+  distinct(Food_code, pid, fdrt, Meal) |>
+  count(Food_code, name = "meal_n")
+```
+
+
+```{r}
+# Merge the totals with the meal counts to calculate the effective average,
+# then format the data into a long format required for grouped bar charts
+plot_data <- top_sweets |>
+  inner_join(meal_counts, by = "Food_code") |>
+  mutate(
+    `Total` = total_per_code / meal_n,
+    `Sugar content` = total_sugar_per_code / meal_n
+  ) |>
+  select(description, `Total`, `Sugar content`) |>
+  pivot_longer(
+    cols = c(`Total`, `Sugar content`),
+    names_to = "metric",
+    values_to = "grams"
+  ) |>
+  mutate(
+    metric = factor(metric, levels = c("Sugar content", "Total")),
+    # Hardcode the exact string formats to match the publication figure perfectly.
+    # This prevents awkward automatic wrapping.
+    description = case_when(
+      str_detect(str_to_lower(description), "plus") ~ "Nutritional drink or shake,\nready-to-drink (high calorie)",
+      str_detect(str_to_lower(description), "ready-to-drink") ~ "Nutritional drink or shake,\nready-to-drink",
+      str_detect(str_to_lower(description), "enteral") ~ "Enteral (tube feed) formula",
+      str_detect(str_to_lower(description), "sports drink") ~ "Sports drink",
+      TRUE ~ str_wrap(description, width = 35)
+    )
+  )
+
+# Extract the correct y-axis ordering based purely on the Total grams
+y_axis_order <- plot_data |>
+  filter(metric == "Total") |>
+  arrange(grams) |>
+  pull(description)
+
+# Apply the ordering back to the main dataset
+plot_data <- plot_data |>
+  mutate(description = factor(description, levels = y_axis_order))
+
+# Build the plot using pure ggplot2 integrated with cowplot for a clean, academic look
+fig_e4d <- ggplot(plot_data, aes(x = grams, y = description, fill = metric)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  scale_fill_manual(values = c("Sugar content" = "#ffbcdc", "Total" = "#db2589")) +
+  labs(
+    x = "Effective per-meal\naverage consumption\nin dehydrated weight (grams)",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    legend.position = c(0.75, 0.4), # Places the legend inside the plot area, mimicking panel d
+    legend.title = element_blank(),
+    axis.text.y = element_text(size = 9),
+    axis.line.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey85", linetype = "dashed")
+  )
+
+fig_e4d
+
+# Save the plot with matching dimensions
+ggsave(
+  '../data/E04d_R62_top10_sweets.pdf', 
+  plot = fig_e4d, 
+  width = 80, 
+  height = 90, 
+  units = "mm", 
+  device = 'pdf'
+)
+```
+
