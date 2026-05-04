@@ -1,0 +1,228 @@
+---
+title: "Figure 1 - Longitudinal Trends (Panels I-M)"
+output: html_document
+date: "2026-05-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+library(ggrastr)
+library(geepack)
+library(ggh4x)
+```
+```{r}
+# load table
+dtb  <- read_csv('../data/152_combined_DTB.csv')
+meta <- read_csv('../data/153_combined_META.csv')
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+
+# the diet diversity
+faith <- read_csv('../data/162_all_faith_pid.csv')
+
+# the days where the pts had confirmed zero food intake
+zerodaysall <- read_csv('../data/072_total_patients_zero_eating_days_pid.csv') |> select(-diet_data_status)
+
+diet_line_color <- '#E41A1C'
+stool_line_color <- 'blue'
+strip_color <- 'gray91'
+day0_line_color <- 'gray40'
+
+ggplot_base_size <- 11
+dayzeroline_size <- 1
+point_size <- 0.2
+transplant_day <- 0
+scatter_transparency <- 0.1
+```
+
+# Longitudinal Trajectories (Panels i - m) 
+
+## i
+
+```{r single_lines}
+# Smoothing the daily caloric totals reveals the overarching energy recovery trajectory 
+# across the cohort, cutting through the high variance of individual daily eating habits.
+cal_line <- dtb |> 
+  group_by(pid, fdrt) |> 
+  summarise(daycal = sum(Calories_kcal) / 1000, .groups = "drop") |>
+  ggplot() +
+  rasterise(geom_point(aes(x = fdrt, y = daycal), alpha = 0.3, size = point_size, shape = 16), dpi = 300) +
+  geom_smooth(aes(x = fdrt, y = daycal), method = "loess", formula = 'y ~ x', colour = diet_line_color, linewidth = 1, fill = 'hotpink') +
+  geom_vline(xintercept = transplant_day, linetype = 'dashed', linewidth = dayzeroline_size, color = day0_line_color) +
+  labs(x = '', title = 'Caloric intake', y = '*1000 Kcal') +
+  scale_x_continuous(breaks = seq(0, 50, 20)) +
+  scale_y_sqrt() +
+  theme_classic(base_size = ggplot_base_size) +
+  theme(strip.background = element_blank(), strip.text.x = element_blank(), 
+         aspect.ratio=1)
+cal_line
+```
+
+## j
+
+```{r single_lines}
+# Tracking dietary alpha diversity shows how quickly patients return to a varied diet
+faith_line <- faith |> 
+  mutate(faith_pd = faith_pd / 1000) |>
+  ggplot() +
+  rasterise(geom_point(aes(x = fdrt, y = faith_pd), alpha = 0.3, size = point_size, shape = 16), dpi = 300) +
+  geom_smooth(aes(x = fdrt, y = faith_pd), method = "loess", formula = 'y ~ x', colour = diet_line_color, linewidth = 1, fill = 'hotpink') +
+  geom_vline(xintercept = transplant_day, linetype = 'dashed', linewidth = dayzeroline_size, color = day0_line_color) +
+  labs(x = 'Transplant day', title = 'Diet \u03b1 diversity', y = '*1000') +
+  scale_x_continuous(breaks = seq(0, 50, 20)) +
+  scale_y_sqrt() +
+  theme_classic(base_size = ggplot_base_size) +
+  theme(strip.background = element_blank(), strip.text.x = element_blank(), aspect.ratio=1)
+
+faith_line
+```
+## k
+
+```{r single_lines}
+# Mapping the microbiome diversity highlights the ecological collapse and subsequent 
+# slow recovery in the gut, mirroring the dietary trauma.
+stool_alpha <- meta |> 
+  ggplot() +
+  rasterise(geom_point(aes(x = sdrt, y = simpson_reciprocal, shape = 'triangle'), alpha = 0.3, size = point_size, shape = 16), dpi = 300) +
+  geom_smooth(aes(x = sdrt, y = simpson_reciprocal), method = "loess", formula = 'y ~ x', colour = stool_line_color, linewidth = 1, fill = 'darkblue') +
+  geom_vline(xintercept = transplant_day, linetype = 'dashed', linewidth = dayzeroline_size, color = day0_line_color) +
+  labs(x = '', title = 'Microbiome \u03b1 diversity', y = '') +
+  scale_y_sqrt() +
+  theme_classic(base_size = ggplot_base_size) +
+  scale_x_continuous(breaks = seq(0, 50, 20)) + 
+  theme( aspect.ratio=1)
+
+stool_alpha
+```
+
+## l
+
+```{r zero_fill}
+# Restructuring the data into a long format makes it highly modular.
+# By cross-joining the known zero-eating days with the unique group names, 
+# the dataset is artificially populated with zero values without manual hardcoding.
+fg_all <- dtb |>
+  mutate(fgrp1 = str_sub(as.character(Food_code), 1, 1)) |> 
+  group_by(pid, fdrt, fgrp1) |> 
+  summarise(eachsum = sum(dehydrated_weight), .groups = "drop") |> 
+  left_join(select(key, fgrp1, shortname), by = "fgrp1") |> 
+  select(pid, fdrt, grp = shortname, eachsum)
+
+zero_fgs <- zerodaysall |> 
+  cross_join(tibble(grp = unique(fg_all$grp))) |> 
+  mutate(eachsum = 0)
+
+fg_total <- bind_rows(fg_all, zero_fgs)
+```
+
+```{r}
+# Generating the food group breakdown.
+
+# Pulling the colors into a named vector ensures the lines and fills map correctly
+fg_colors <- setNames(key$color, key$shortname)
+
+# The strip backgrounds require an ordered vector of colors that matches the facet layout (alphabetical)
+strip_colors <- key |> 
+  filter(shortname %in% unique(fg_total$grp)) |> 
+  arrange(shortname) |> 
+  pull(color)
+
+fg_panel <- fg_total |> 
+  ggplot() +
+  rasterise(geom_point(aes(x = fdrt, y = eachsum), alpha = scatter_transparency, size = point_size, shape = 16), dpi = 300) +
+  # Mapping color and fill to the food group (grp) paints the loess line and confidence interval dynamically
+  geom_smooth(aes(x = fdrt, y = eachsum, color = grp, fill = grp), method = "loess", formula = 'y ~ x', linewidth = 1) +
+  geom_vline(xintercept = transplant_day, linetype = 'dashed', linewidth = dayzeroline_size, color = day0_line_color) +
+  labs(x = 'Transplant day', title = 'Food groups', y = 'Grams') +
+  # facet_wrap2 allows injecting a themed strip with the custom background colors
+  ggh4x::facet_wrap2(~ grp, scales = 'free_y', nrow = 3, 
+                     strip = ggh4x::strip_themed(background_x = ggh4x::elem_list_rect(fill = strip_colors))) +
+  scale_color_manual(values = fg_colors) +
+  scale_fill_manual(values = fg_colors) +
+  scale_x_continuous(breaks = seq(0, 50, 20)) + 
+  scale_y_sqrt() +
+  theme_classic(base_size = ggplot_base_size) +
+  theme( strip.background = element_rect(color="white", fill=strip_color, linewidth=1.5, linetype="solid"), aspect.ratio=1, legend.position = 'none')
+
+fg_panel
+
+```
+## m
+
+```{r zero_fill}
+m_all <- dtb |>  
+  select(pid, fdrt, Protein_g:Sugars_g) |> 
+  pivot_longer(cols = Protein_g:Sugars_g, names_to = 'grp', values_to = 'gram') |> 
+  mutate(grp = str_replace(grp, '_g$', '')) |> 
+  group_by(pid, fdrt, grp) |> 
+  summarise(eachsum = sum(gram), .groups = "drop")
+
+zero_macros <- zerodaysall |> 
+  cross_join(tibble(grp = unique(m_all$grp))) |> 
+  mutate(eachsum = 0)
+
+dailymacro <- bind_rows(m_all, zero_macros)
+```
+
+
+```{r grids}
+# Generating the macronutrient breakdown. 
+m_panel <- dailymacro |> 
+  mutate(grp = if_else(str_detect(grp, 'Carbohydrates'), 'Carbs', grp)) |> 
+  ggplot() +
+  rasterise(geom_point(aes(x = fdrt, y = eachsum), alpha = scatter_transparency, size = point_size, shape = 16), dpi = 300) +
+  geom_smooth(aes(x = fdrt, y = eachsum), method = "loess", formula = 'y ~ x', colour = diet_line_color, linewidth = 1, fill = 'hotpink') +
+  geom_vline(xintercept = transplant_day, linetype = 'dashed', linewidth = dayzeroline_size, color = day0_line_color) +
+  labs(x = 'Transplant day', title = 'Macronutrients', y = 'Grams') +
+  facet_wrap(~ grp, nrow = 3, scales = 'free_y') +
+  scale_x_continuous(breaks = seq(0, 50, 20)) + 
+  scale_y_sqrt() +
+  theme_classic(base_size = ggplot_base_size) +
+  theme(
+        strip.background = element_rect(color="white", fill=strip_color, linewidth=1.5, linetype="solid"),
+        aspect.ratio=1)
+
+m_panel
+```
+# output to pdf
+
+```{r}
+ggsave(
+  '../data/F1_R64_Panel_m.pdf', 
+  plot = m_panel, 
+  width = 100, 
+  height = 100, 
+  units = "mm", 
+  device = 'pdf'
+)
+
+ggsave(
+  '../data/F1_R64_Panel_i.pdf', 
+  plot = fg_panel, 
+  width = 100, 
+  height = 100, 
+  units = "mm", 
+  device = 'pdf'
+)
+
+overall_row <- plot_grid(
+  cal_line, faith_line, stool_alpha,
+  labels = c('i', 'j', 'm'),
+  nrow = 1, align = 'h', axis = 'b'
+)
+
+ggsave(
+  '../data/F1_R64_Panels_i_to_k.pdf', 
+  plot = overall_row, 
+  width = 120, 
+  height = 90, 
+  units = "mm", 
+  device = 'pdf'
+)
+```
+
