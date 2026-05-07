@@ -16,6 +16,7 @@ library(ggtext)
 library(wesanderson)
 library(broom.mixed) 
 library(cowplot)
+library(furrr)
 ```
 
 ```{r}
@@ -27,8 +28,14 @@ meta <- read_csv('../data/R59_meta_expanded.csv') |>
 
 key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
 
+asv_relab_genus <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv')
+
+clr_res <- read_csv('../data/171_genus_CLR_res.csv')
+
 palette <- wes_palette("Royal1", 2)
 ```
+
+# ASV1 as outcome
 
 ```{r}
 all_food_vars <- meta %>% select(starts_with('fg')) %>% colnames()
@@ -210,3 +217,126 @@ ggsave('../data/E07e_R63_conditional9_entero_asv1.pdf',
   units = "mm", 
   device = 'pdf', plot = conditional_plots, dpi = 300)  
 ```
+
+# genus as outcome
+
+```{r}
+df_relab <- asv_relab_genus |> 
+  group_by(sampleid, genus) |>
+  summarize(
+    relab = sum(count_relative, na.rm = TRUE),
+    .groups = "drop"
+  ) %>% 
+  filter(sampleid %in% meta$sampleid) 
+
+# I want to only include the genus that are more prevalent and abundant, and most likely exist in human gut
+# 31 left
+target_genera <-  df_relab %>% 
+  group_by(genus) %>% 
+  count(relab > 0.002) %>% 
+  rename(criteria = names(.)[2]) %>% 
+  filter(criteria == 'TRUE') %>% 
+  arrange(-n) %>% 
+  filter(!is.na(genus) ) %>% 
+  filter(!genus %in% c('Ruthenibacterium', 'Drancourtella')) |> 
+  mutate(perc = round(n/nrow(meta)*100, 0)) %>% 
+  filter(perc > 10) %>% 
+  pull(genus)
+
+# joining with the clr of the genera
+clr_wide <- clr_res %>% 
+  filter(genus %in% target_genera) |> 
+  spread('genus','clr')
+
+meta_genus_clr <- meta %>% 
+  inner_join(clr_wide)  
+```
+
+
+```{r}
+# Extract the names of the taxa to be modeled as outcomes.
+# This grabs columns from 'Actinomyces' to the end of the dataframe.
+taxa_outcomes <- meta_genus_clr |> 
+  select(Actinomyces:last_col()) |> 
+  colnames()
+
+# Define the right-hand side of the formula once to avoid repeating work.
+all_food_vars <- meta_genus_clr |> 
+  select(starts_with('fg')) |> 
+  colnames()
+
+interaction_terms <- paste(all_food_vars, "empirical", sep = "*")
+
+base_rhs <- paste(
+  "0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Define the priors once.
+model_priors <- 
+  prior(normal(0, 1), class = 'b') + 
+  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") 
+
+# Create a wrapper function that takes a single outcome name, 
+# dynamically builds the formula, and fits the model.
+fit_taxa_model <- function(outcome, data, rhs, priors) {
+  
+  # Construct the full formula for this specific outcome
+  formula_string <- paste(outcome, "~", rhs)
+  model_formula <- brms::bf(as.formula(formula_string))
+  
+  # Fit the model using the cmdstanr backend for massive speed improvements.
+  # Cores is set to 1 here because parallelization will happen at the model level,
+  # not the chain level, to avoid overloading the CPU.
+  fit <- brm(
+    formula = model_formula,
+    data = data,
+    prior = priors,
+    warmup = 1000, iter = 3000,
+    chains = 4, 
+    cores = 1, 
+    seed = 123,
+    silent = 2,
+    control = list(adapt_delta = 0.99)
+  )
+  
+  # Calculate the tail probabilities for the requested middle intervals.
+  # For example, a 95% interval leaves 2.5% on each side (0.025 and 0.975).
+  ci_probs <- c(0.005, 0.015, 0.025, 0.03, 0.97, 0.975, 0.985, 0.995)
+  
+  # Strip out just the fixed effects summaries to save memory
+  results_summary <- brms::fixef(fit, probs = ci_probs) |> 
+    as_tibble(rownames = "term") |> 
+    mutate(outcome = outcome, .before = 1)
+  
+  return(results_summary)
+}
+
+# Set up parallel processing. 
+# 'workers' defines how many models run at the exact same time.
+# Ensure workers * cores_per_model does not exceed total system RAM and CPU threads.
+future::plan(multisession, workers = 6)
+
+# Record the start time to track the total duration of the modeling process.
+start_time <- Sys.time()
+
+# Map the modeling function over all taxa outcomes in parallel.
+# A progress bar is included to monitor the long computation.
+all_models_results <- taxa_outcomes |> 
+  set_names() |> 
+  future_map_dfr(
+    \(outcome) fit_taxa_model(outcome, meta_genus_clr, base_rhs, model_priors),
+    .options = furrr_options(seed = TRUE),
+    .progress = TRUE
+  )
+
+# Calculate the difference and print the total execution time.
+end_time <- Sys.time()
+print(end_time - start_time)
+
+all_models_results |> write_csv('../data/R63_genus_clr_all_models_results.csv')
+```
+
