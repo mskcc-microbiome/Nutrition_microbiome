@@ -1,0 +1,99 @@
+---
+title: "Export all tables to one supplementary table spreadsheet"
+output: html_document
+date: "2026-05-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(flextable)
+```
+
+
+```{r}
+# Loading and merging the primary datasets
+PTB <- read_csv('../data/003_combined_PTB_pid_updated.csv')
+
+meta <- read_csv('../data/153_combined_META.csv')
+```
+
+# Custom Functions for cleaning Code
+
+```{r}
+# A dedicated function standardizes the data cleaning process. 
+# Running data through a single pipeline guarantees consistent formatting across different tables 
+clean_patient_data <- function(df) {
+  df |> 
+    select(Age = age, Sex = sex, Disease = disease.simple, source, intensity, 
+           `GvHD prophylaxis` = gvhd_ppx, 
+           `Days exposed to broad-spectrum antibiotics` = day_exposed, 
+           `Length of stay at hospital` = leng_of_stay) |> 
+    mutate(
+      Disease = case_when(
+        Disease == 'NHL' ~ "Non-Hodgkin's lymphoma",
+        Disease %in% c('CML', 'Hodgkins', 'AA', 'other') ~ 'Other',
+        Disease == 'AML' ~ 'Acute myeloid leukemia',
+        Disease == 'ALL' ~ 'Acute lymphoid leukemia',
+        Disease == 'CLL' ~ 'Chronic lymphocytic leukemia',
+        TRUE ~ Disease # Keeps MDS/MPN and Myeloma as is
+      ),
+      `Graft type` = case_when(
+        source == 'unmodified' ~ "Unmodified bone marrow or PBSC",
+        source == 'cord' ~ "Cord blood",
+        source == 'TCD' ~ "T-cell depleted PBSC"
+      ),
+      Sex = case_when(
+        Sex == 'F' ~ "Female",
+        Sex == 'M' ~ "Male"
+      ),
+      `Intensity of conditioning regimen` = case_when(
+        intensity == 'nonablative' ~ "Nonmyeloablative",
+        intensity == 'ablative' ~ "Ablative",
+        intensity == 'reduced' ~ "Reduced intensity"
+      ),
+      `GvHD prophylaxis` = case_when(
+        `GvHD prophylaxis` == 'TCD' ~ "T-cell depleted PBSC",
+        TRUE ~ `GvHD prophylaxis` # Keeps CNI-based and PTCy-based
+      )
+    ) |> 
+    # fct_infreq automatically orders factor levels by their frequency (descending)
+    mutate(across(c(`Intensity of conditioning regimen`, `Graft type`, Disease, Sex), fct_infreq)) |> 
+    select(-source, -intensity)
+}
+
+```
+
+# Generate Table 1
+
+```{r}
+# Create Table 1
+table1 <- clean_patient_data(PTB) |> 
+  tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})")) |>
+  bold_labels() |> 
+  # Converting to flextable preserves all visual hierarchy, indents, and bolding
+  as_flex_table() 
+
+# Create Table S1
+
+table_s1 <- PTB |> 
+  filter(pid %in% meta$pid) |> 
+  clean_patient_data() |> 
+  tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})")) |>
+  bold_labels() |> 
+  as_flex_table()
+
+# Exporting directly to a Word document keeps the rich formatting intact. 
+# Multiple tables can be written to the same document.
+save_as_docx(
+  "Table 1: Patient Summary" = table1,
+  "Supplementary Table 1: Patient Summary for Subset 158" = table_s1,
+  path = "../data/Supp_tables_R67_.docx"
+)
+```
+```
+
