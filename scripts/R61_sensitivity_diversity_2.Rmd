@@ -1,0 +1,222 @@
+---
+title: "Sensitivity analysis diversity outcome part 2"
+output: html_document
+date: "2026-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(brms)   
+library(tidybayes)
+library(ggtext)
+library(broom.mixed) 
+library(future)    
+library(furrr)  
+```
+
+```{r}
+meta <- read_csv('../data/153_combined_META.csv') %>% 
+  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
+  mutate(pid = factor(pid)) %>%
+    # This divides all the new intake columns by 100.
+  mutate(across(starts_with("fg_"), ~ .x / 100))
+
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
+```
+
+# calories with or without interaction
+
+
+
+
+# z scoring
+
+```{r}
+
+```
+
+# split out ONS from sweets
+
+# E5l cap at 5 stool samples per patient
+
+```{r}
+median_samples <- meta %>%
+  # Count the number of rows (samples) for each patient ('pid').
+  count(pid) %>%
+  # From that list of counts, calculate the median.
+  summarise(median_n = median(n)) %>% 
+  pull(median_n)
+
+all_food_vars <- meta %>% select(starts_with('fg')) %>% colnames()
+
+# Create the interaction terms for all food variables in this iteration
+interaction_terms <- paste(all_food_vars, "empirical", sep = "*")
+
+# Build the full formula string dynamically
+formula_string <- paste(
+  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN +",
+  paste(interaction_terms, collapse = " + "),
+  "+ (1 | pid) + (1 | timebin)"
+)
+
+# Convert the string to a formula object
+formula <- brms::bf(as.formula(formula_string))
+
+# Build the priors by adding them together.
+# This single prior() call applies to all coefficients listed in `all_food_coefs`.
+priors <-
+    prior(normal(0, 1), class = 'b') + # General prior for all food effects
+    # Specific priors that override the general one for non-food covariates
+    prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
+    prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
+    prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE") +
+    prior(normal(2, .1), class = 'b', coef = "intensityablative") +
+    prior(normal(2, .1), class = 'b', coef = "intensityreduced") +
+    prior(normal(2, .1), class = 'b', coef = "intensitynonablative")
+```
+
+## Iterative Subsampling
+
+```{r}
+# --- Robustness Check via Iterative Subsampling ---
+# This script formalizes the sensitivity analysis by running it many times
+# in parallel to see how consistently each predictor is significant.
+
+# By setting a seed here, the entire set of "random" runs can be
+# reproduced perfectly later on.
+set.seed(1101)
+
+# --- Configuration ---
+# Set the number of times to run the simulation. 50 is a good number.
+N_ITERATIONS <- 50
+# Set the number of cores for parallel processing. A good rule of thumb is
+# your total cores minus 2. For a 10-core machine, 8 is a good choice.
+N_CORES <- 8
+
+
+# --- Setup Parallel Processing ---
+# This tells R to set up 8 parallel sessions in the background.
+plan(multisession, workers = N_CORES)
+
+
+# --- Main Parallel Execution ---
+# Instead of a for-loop, future_map_dfr runs each iteration in parallel on a
+# different core and combines the results into a single data frame at the end.
+final_tally <- future_map_dfr(1:N_ITERATIONS, ~{
+  
+  # Print progress to the console (progress may appear out of order)
+  cat("Starting iteration", .x, "...\n")
+
+  # 1. Subsample the data for this specific iteration.
+  subsampled_df <- meta %>%
+    group_by(pid) %>%
+    slice_sample(n = median_samples) %>%
+    ungroup()
+
+  # 2. Fit the Bayesian model on the subsampled data.
+  # Note: Since the outer loop is parallel, we set cores inside brm to 1.
+  fit <- brm(
+    formula = formula,
+    data = subsampled_df,
+    prior = priors,
+    iter = 2000, warmup = 1000, chains = 2,
+    # Adding control for adapt_delta can help with divergent transitions.
+    control = list(adapt_delta = 0.99),
+    # Each iteration runs on its own core, so we tell brm to only use 1.
+    cores = 1,
+    silent = 2, refresh = 0
+  )
+  
+
+  # 3. Extract results for ALL fixed effects, EXCLUDING intensity.
+  # **THE FIX**: Get parameter names directly from the model fit object.
+  # This is much more reliable than the previous methods.
+  all_pars <- variables(fit)
+  all_b_vars <- all_pars[startsWith(all_pars, "b_")]
+  fixed_effect_names <- all_b_vars[!startsWith(all_b_vars, "b_intensity")]
+
+
+  fit %>%
+    gather_draws(!!!syms(fixed_effect_names)) %>%
+    median_qi(.width = 0.95) %>%
+    mutate(
+      iteration = .x,
+      is_significant = !(.lower < 0 & .upper > 0)
+    )
+}, .options = furrr_options(seed = TRUE))
+```
+
+```{r}
+# --- Tally and Clean the Final Results ---
+# Count how many times each term was significant
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+
+significance_report <- final_tally %>%
+  group_by(.variable) %>%
+  summarise(
+    significant_runs = sum(is_significant),
+    total_runs = N_ITERATIONS,
+    proportion_significant = significant_runs / total_runs
+  ) %>%
+  # Clean up the variable names for plotting
+   mutate(
+    clean_variable = .variable %>%
+      str_replace("^b_", "") %>%
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>% 
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")
+  ) %>% 
+  ungroup()
+
+significance_report
+```
+
+## E5l
+
+```{r}
+# --- Generate the Bar Plot ---
+robustness_plot <- ggplot(significance_report,
+                          aes(x = reorder(clean_variable, proportion_significant),
+                              y = proportion_significant)) +
+  geom_col(fill = "#0072B2", alpha = 0.8) +
+  coord_flip() + # Makes the bar chart horizontal for easy reading
+  scale_y_continuous(labels = scales::percent_format(), expand = c(0, 0.01)) +
+  labs(
+    title = "\n\nRobustness of Predictor Effects on Microbiome Diversity",
+    subtitle = paste("Based on", N_ITERATIONS, "random subsamples (capped at 5 samples per patient)"),
+    x = "Model Predictor",
+    y = "Proportion of Runs Where Association Was Significant (95% CI)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    plot.title.position = "plot"
+  )
+
+# Print the plot
+robustness_plot
+
+# Clean up parallel workers
+plan(sequential)
+
+```
+```{r}
+ggsave(
+  "../data/E05_R61_panel_l.pdf", 
+  plot = robustness_plot, 
+  width = 2.7,     # Physical width in inches
+  height = 3.9,    # Physical height in inches
+  units = "in",
+  device = cairo_pdf # Cairo ensures fonts render perfectly in Adobe Illustrator
+)
+```
+
