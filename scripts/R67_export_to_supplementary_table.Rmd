@@ -10,21 +10,25 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
-library(openxlsx)
 library(flextable)
 ```
-
+# Table 1 and Table S1
 
 ```{r}
+# the cluster label 
+
+# the sugar density label
+
 # Loading and merging the primary datasets
 PTB <- read_csv('../data/003_combined_PTB_pid_updated.csv')
 
 meta <- read_csv('../data/153_combined_META.csv')
+
+
 ```
 
-# Custom Functions for cleaning Code
-
 ```{r}
+# Custom Functions for cleaning Code
 # A dedicated function standardizes the data cleaning process. 
 # Running data through a single pipeline guarantees consistent formatting across different tables 
 clean_patient_data <- function(df) {
@@ -68,7 +72,7 @@ clean_patient_data <- function(df) {
 
 ```
 
-# Generate Table 1
+## Generate Tables
 
 ```{r}
 # Create Table 1
@@ -86,14 +90,50 @@ table_s1 <- PTB |>
   tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})")) |>
   bold_labels() |> 
   as_flex_table()
+```
 
+# Table S6: the two mouse diets in the no fiber  
+
+```{r}
+control_d <- tibble(
+  `Energy (Kcal/g)` = '4.11',
+  `Fiber percent of ration` = '4.4%',
+  `Calories provided by protein` = '24.495%',
+  `Calories provided by fat` = '13.122%',
+  `Calories provided by carbohydrates` = '62.382%'
+) |> 
+  pivot_longer(cols = everything(), names_to = 'Characteristic', values_to = 'Control diet')
+
+
+nofiber_d <- tibble(
+  `Energy (Kcal/g)` = '4.10',
+  `Fiber percent of ration` = '0',
+  `Calories provided by protein` = '17.4%',
+  `Calories provided by fat` = '15.4%',
+  `Calories provided by carbohydrates` = '67.2%'
+) |> 
+  pivot_longer(cols = everything(), names_to = 'Characteristic', values_to = 'No fiber diet')
+
+
+# Joining the two diets on their shared characteristics glues them side-by-side. 
+# Because this is a standard tibble (not a gtsummary object), we use flextable() instead of as_flex_table()
+table_s6 <- control_d |> 
+  full_join(nofiber_d, by = "Characteristic") |> 
+  flextable() |> 
+  autofit()
+```
+
+# Export
+
+```{r}
 # Exporting directly to a Word document keeps the rich formatting intact. 
 # Multiple tables can be written to the same document.
 save_as_docx(
   "Table 1: Patient Summary" = table1,
   "Supplementary Table 1: Patient Summary for Subset 158" = table_s1,
+  "Supplementary Table 6" = table_s6,
   path = "../data/Supp_tables_R67_.docx"
 )
 ```
-```
 
+ 
