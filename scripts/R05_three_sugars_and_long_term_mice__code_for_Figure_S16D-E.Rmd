@@ -15,6 +15,7 @@ library(ggpubr)
 library(readxl)
 library(janitor)
 library(scales)
+source("../functions/save_ggplot_data_to_excel.R")
 ```
 
 # the new mice data: three different kinds of sugars 
@@ -81,10 +82,15 @@ f3_five_days <- f3_five %>%
   theme(axis.text =  element_text(size = 10),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/3)
 f3_five_days %>% write_rds('../data/05_f3_five_days.RDS')
 f3_five_days
+save_ggplot_data_to_excel(f3_five_days, plotdf, "../mouse_data.xlsx", "Sup_Figure_9a_21_day_exp", col_names = c(
+  "xvar" = "Treatment + Day",
+  "cf_us_per_gram_stool" = "CFUs per gram stool",
+  "grp" = "Treatment Group"))
 
 f3_five %>% 
   count(experiment, abx_treatment,  diet_treatment , day) %>% 
   summarise(min_ = min(n), max_ = max(n))
+
 ```
 
 # three sugars
@@ -123,6 +129,10 @@ f3_sugars_days <- f3_sugars %>%
   theme_light() +
   theme(axis.text =  element_text(size = 10),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/3)
 f3_sugars_days
+save_ggplot_data_to_excel(f3_sugars_days, plotdf, "../mouse_data.xlsx", "Sup_Figure_9c_alternate_sugars", col_names = c(
+  "xvar" = "Treatment + Day",
+  "cf_us_per_gram_stool" = "CFUs per gram stool",
+  "grp" = "Treatment Group"))
 f3_sugars_days %>% write_rds('../data/05_f3_sugars_days.RDS')
 ```
 
