@@ -17,6 +17,7 @@ library(scales)
 library(ggrepel)
 library(cowplot)
 library(kableExtra)
+source("../functions/save_ggplot_data_to_excel.R")
 ```
 
 B+S  (Biapenem + Sucrose) PS (PBS + Sucrose) BP (Biapenem +Plain Hydrogel) and PP (PBS + Plain Hydrogel)
@@ -35,7 +36,7 @@ nofiber <- read_csv('../data/R07_no_fiber_experiment_data_CFU.csv') %>%
          diet_treatment = if_else(str_detect(treatment, 'S$'), 'sucrose', 'vehicle'),
          diet_treatment = factor(diet_treatment, levels = c('vehicle','sucrose')),
          abx_treatment = factor(abx_treatment, levels = c('DPBS','biapenem'))) %>% 
-  select(experiment:treatment, CFUs_per_GramStool:diet_treatment) %>% 
+  dplyr::select(experiment:treatment, CFUs_per_GramStool:diet_treatment) %>% 
   mutate(logcfu = log10(CFUs_per_GramStool)) 
 #nofiber %>% distinct(treatment, abx_treatment, diet_treatment)
 nofiber %>% distinct(day)
@@ -80,6 +81,10 @@ nofiber_days <- plotdf %>%
         axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/3)
 
 nofiber_days
+save_ggplot_data_to_excel(nofiber_days, plotdf, "../mouse_data.xlsx", "Sup_Figure_8l_no_fiber_chow_CFU", col_names = c(
+  "xvar" = "Treatment + Day",
+  "logcfu" = "log 10 (Enterococcal CFU/gram stool)",
+  "grp" = "Treatment Group"))
 
 nofiber_days %>% write_rds('../data/07_nofiber_days.RDS')
    
