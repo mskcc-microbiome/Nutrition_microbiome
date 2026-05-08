@@ -12,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(ggpubr)
 library(cowplot)
+source("../functions/save_ggplot_data_to_excel.R")
 ```
 
 ```{r}
@@ -123,6 +124,11 @@ smoothie_longitudinal <- ggplot(processed_data, aes(x = plot_group, y = cf_us_pe
   coord_cartesian( clip = "off")
 
 smoothie_longitudinal
+save_ggplot_data_to_excel(smoothie_longitudinal, processed_data, "../mouse_data.xlsx", "Sup_Figure_9b_smoothie", col_names = c(
+  "plot_group" = "Treatement + Day",
+  "cf_us_per_gram_stool" = "CFUs per gram stool",
+  "treatment_group" = "Treatment",
+  "trajectory_group" = "Treatment + Mouse Number"))
 ```
 
 # assemble 
