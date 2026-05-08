@@ -27,6 +27,7 @@ color_palette <- c(
   "regular_water" = "gray32",
   "sucrose_water" = "deeppink2"
 )
+source("../functions/save_ggplot_data_to_excel.R")
 ```
 
 
@@ -186,7 +187,7 @@ newest <- readxl::read_excel('../data/Sucrose_All Experiments Consolidated .xlsx
   mutate(CFUs_per_GramStool = (((((Colonies_counted*(100/Plated_volume_ul))/100)/(10^Dilution_factor) )*1000)/Stool_weight_mg)+1) %>% 
   select(Experiment:Mouse_identifier, CFUs_per_GramStool, Log_CFUs_per_GramStool)
 
-newest %>% count(Experiment, Treatment)
+newest %>% dplyr::count(Experiment, abx_treatment, diet_treatment)
 ```
 
 # room, only replated RB08 including the sucrose and control group as they were also from RB08 
@@ -308,7 +309,7 @@ ggplot(processed_data, aes(x = plot_group, y = cf_us_per_gram_stool, fill = diet
 weight_data <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xlsx') %>% 
   clean_names() %>% 
   mutate(group = if_else(str_detect(treatment, 'PBS'), 'RB08', group)) %>% 
-  rename(room = group)
+  dplyr::rename(room = group)
 
 processed_weights <- weight_data %>%
   # Determine the number of unique treatments within each room.
@@ -690,7 +691,7 @@ experiment_data <- read_csv('../data/7_31_25_biapenem_rebuttal_RB08 - Sheet1.csv
     TRUE ~ NA_character_ # This handles any mouse IDs outside the specified range
   ))
 
-experiment_data %>% count(strata, treatment)
+experiment_data %>% dplyr::count(strata, treatment)
 ```
 
 
@@ -904,6 +905,8 @@ design <- ggplot() +
     axis.title = element_text(size = 11),
     legend.position = "top"
   )
+
+design
 ggsave('../data/R31_delay_design.pdf')
 ```
 
@@ -1015,6 +1018,11 @@ longitudinal_plot <- ggplot(prepared_data, aes(x = factor(day), y = cf_us_per_gr
     legend.position = "none",
     strip.text = element_text( size = 7) # Make facet titles bold
   )
+longitudinal_plot
+save_ggplot_data_to_excel(nofiber_days, plotdf, "../mouse_data.xlsx", "Sup_Figure_8k_delayed_sucrose_CFU", col_names = c(
+  "xvar" = "Treatment + Day",
+  "logcfu" = "Enterococcal CFU/gram stool",
+  "grp" = "Treatment Group"))
 
 ggsave('../data/R31_sugar_delay.png', width = 12, height = 6, plot = longitudinal_plot)
 ```
@@ -1208,6 +1216,11 @@ auc_plot <- ggplot(auc_data_viz, aes(x = treatment, y = auc, color = treatment))
     axis.title.y = element_blank(),
     plot.subtitle = element_text(hjust = 0.5)
   )
+
+save_ggplot_data_to_excel(auc_plot, auc_data_viz, "../mouse_data.xlsx", "Sup_Figure_8j_delayed_sucrose_auc", col_names = c(
+  "auc" = "AUC of CFU/gram *days",
+  "experiment_no" = "Experiment Number",
+  "treatment" = "Treatment Group"))
 
 # Print the plot
 print(auc_plot)
@@ -1493,7 +1506,7 @@ combined <- plot_grid(
   # rel_heights values control vertical title margins
   rel_heights = c(0.07, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
-
+combined
 ggsave('../data/R31_delayed_sugar.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300)  
@@ -1514,7 +1527,7 @@ RB08_7_9_25 <- experiment_data %>%
 w1 <- readxl::read_excel('../data/7_9_25 weights_biapenem_rebuttal_experiment.xlsx') %>% 
   clean_names() %>% 
   mutate(group = if_else(str_detect(treatment, 'PBS'), 'RB08', group)) %>% 
-  rename(room = group) %>% 
+  dplyr::rename(room = group) %>% 
   filter(room == 'RB08')  %>%  # this room has the all 4 groups
   mutate(experiment_no = "survey_RB08") %>% 
   full_join(RB08_7_9_25)
@@ -1611,7 +1624,7 @@ processed_weights <- weights %>%
 # tally of the data points
 processed_weights_tally <- processed_weights %>% 
   filter(day == 1) %>% 
-  count(experiment_no, diet_treatment, antibiotic_treatment) 
+  dplyr::count(experiment_no, diet_treatment, antibiotic_treatment) 
 ```
 
 ## weight longitudinal
@@ -1662,7 +1675,7 @@ analysis_data <- processed_weights %>%
   # For each mouse, calculate weight gain relative to their Day 1 weight.
   group_by(mouse_identifier) %>%
   mutate(
-    weight_change = mice_weights - first(mice_weights)
+    weight_change = mice_weights - dplyr::first(mice_weights)
   ) %>%
   ungroup()
 
@@ -1688,7 +1701,7 @@ analysis_data_4 <- processed_weights %>%
   # For each mouse, calculate weight gain relative to their Day 1 weight.
   group_by(mouse_identifier) %>%
   mutate(
-    weight_change = mice_weights - first(mice_weights)
+    weight_change = mice_weights - dplyr::first(mice_weights)
   ) %>%
   ungroup()
 
@@ -1734,6 +1747,7 @@ ggplot(processed_weights %>% filter(day < 6), aes(x = plot_group, y = mice_weigh
     axis.text.x = element_text(size = 10, vjust = 0, angle = 90), # Adjust position of day numbers
     plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
   )
+
 ggsave('../data/R31_few_weight_timeline_to_day3.jpg', width = 7, height = 7)
 ```
 ```{r}
@@ -1745,7 +1759,7 @@ analysis_data_4_to_day3 <- processed_weights %>%
   # For each mouse, calculate weight gain relative to their Day 1 weight.
   group_by(mouse_identifier) %>%
   mutate(
-    weight_gain = mice_weights - first(mice_weights)
+    weight_gain = mice_weights - dplyr::first(mice_weights)
   ) %>%
   ungroup()
 
@@ -1916,7 +1930,7 @@ weight_data2_ancova <- weight_data2 %>%
   # Create a new 'baseline_weight' column.
   # 'first(mice_weights)' grabs the weight from the first time point (Day 1)
   # and applies it to all rows for that mouse.
-  mutate(baseline_weight = first(mice_weights)) %>%
+  mutate(baseline_weight = dplyr::first(mice_weights)) %>%
   ungroup() %>%
   # Now, filter out the baseline day itself. The model should only learn
   # from what happened *after* the treatment started.
@@ -2859,6 +2873,20 @@ weight_change4 <- ggplot(summary_data, aes(x = day, y = median_change, group = t
     legend.position = "bottom"
   )
 weight_change4
+save_ggplot_data_to_excel(weight_change4, summary_data, "../mouse_data.xlsx", "Sup_Figure_8m_mouse_percent_weight_change", col_names = c(
+  "day" = "Day",
+  "median_change" = "Median Weight Change",
+  "treatment_group" = "Treatment Group",
+  "q1" = "Quantile 1",
+  "q3" = "Quantile 3"))
+save_full_dataframe_to_excel(df_plot_ready %>% select(c(percent_change, day, treatment, mice_weights, mouse_identifier, experiment_no, baseline_weight)), "../mouse_data.xlsx", "Sup_Figure_8m_all_mouse_data", col_names = c(
+  "day" = "Day",
+  "mice_weights" = "Mouse Weight",
+  "treatment" = "Treatment Group",
+  "mouse_identifier" = "Mouse Identifier",
+  "experiment_no" = "Experiment Number",
+  "baseline_weight" = "Baseline Weight",
+  "percent_change" = "Weight Percent Change from Baseline"))
 saveRDS(weight_change4, file = "../data/R31_weight_change4_perc.RDS")
 ```
 ### vardi test 
