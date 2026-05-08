@@ -65,3 +65,42 @@ save_ggplot_data_to_excel <- function(ggplot_obj, df, filename, tab_name, col_na
   cat("Saved", ncol(plot_data), "columns (", paste(names(plot_data), collapse = ", "), ") to tab '", tab_name, "' in", filename, "\n")
 }
 
+save_full_dataframe_to_excel <- function(plot_data, filename, tab_name, col_names = NULL, overwrite_tab = TRUE) {
+  
+  if (!grepl("\\.xlsx$", filename, ignore.case = TRUE)) {
+    filename <- paste0(filename, ".xlsx")
+  }
+  
+  # Rename columns if mapping provided
+  if (!is.null(col_names)) {
+    current_names <- names(plot_data)
+    for (i in seq_along(current_names)) {
+      if (current_names[i] %in% names(col_names)) {
+        current_names[i] <- col_names[[current_names[i]]]
+      }
+    }
+    names(plot_data) <- current_names
+  }
+  
+  if (file.exists(filename)) {
+    wb <- loadWorkbook(filename)
+  } else {
+    wb <- createWorkbook()
+  }
+  
+  tab_name <- substr(tab_name, 1, 31)
+  if (tab_name %in% names(wb)) {
+    if (overwrite_tab) {
+      removeWorksheet(wb, tab_name)
+    } else {
+      warning(paste0("Tab '", tab_name, "' already exists. Skipping. Use overwrite_tab = TRUE to overwrite."))
+      return(invisible(NULL))
+    }
+  }
+  
+  addWorksheet(wb, tab_name)
+  writeData(wb, tab_name, plot_data)
+  
+  saveWorkbook(wb, filename, overwrite = TRUE)
+  cat("Saved", ncol(plot_data), "columns (", paste(names(plot_data), collapse = ", "), ") to tab '", tab_name, "' in", filename, "\n")
+}

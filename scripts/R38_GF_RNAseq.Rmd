@@ -27,6 +27,7 @@ library(RColorBrewer)
 library(gridExtra)
 library(tidyverse)
 library(ggrastr)
+source("../functions/save_ggplot_data_to_excel.R")
 ```
 
 Basic gene annotation is the main annotation file for most users. To ensure that reads mapped to these alternate regions are correctly counted, I must use the "ALL" GTF file. (mouse genome)
@@ -349,10 +350,12 @@ meta_li_regular <- meta_table %>% filter(tissue == "large_intestine", diet_treat
 
 # Generate PCA plots comparing PBS vs E. faecalis
 pca_si_col <- generate_pca_plot(filtered_raw_counts_matrix, meta_si_regular, "treatment", "SI: Colonization Effect")
+
 pca_li_col <- generate_pca_plot(filtered_raw_counts_matrix, meta_li_regular, "treatment", "LI: Colonization Effect")
 
 # Combine into a single figure
-colonization_plot <- plot_grid(pca_si_col, pca_li_col, ncol = 2, labels = c("A", "B"))
+colonization_plot <- plot_grid(pca_si_col[[1]], pca_li_col[[1]], ncol = 2, labels = c("A", "B"))
+colonization_plot
 save_plot("../data/pca_colonization_effect.jpg", colonization_plot, base_height = 6, base_width = 12)
 print(colonization_plot)
 ```
@@ -368,9 +371,13 @@ meta_li_faecalis <- meta_table %>% filter(tissue == "large_intestine", gavage_tr
 # Generate PCA plots comparing regular_water vs sucrose_water
 pca_si_suc <- generate_pca_plot(filtered_raw_counts_matrix, meta_si_faecalis, "treatment", "SI: Sucrose Effect")
 pca_li_suc <- generate_pca_plot(filtered_raw_counts_matrix, meta_li_faecalis, "treatment", "LI: Sucrose Effect")
-
+save_ggplot_data_to_excel(pca_li_suc[[1]], pca_li_suc[[2]], "../mouse_data.xlsx", "Sup_Figure_9f_pca_e_faec_sugar", col_names = c(
+  "PC1" = "PCA Axis 1",
+  "PC2" = "PCA Axis 2",
+  "group" = "Treatment Group"))
 # Combine into a single figure
-sucrose_plot <- plot_grid(pca_si_suc, pca_li_suc, ncol = 2, labels = c("C", "D"))
+sucrose_plot <- plot_grid(pca_si_suc[[1]], pca_li_suc[[1]], ncol = 2, labels = c("C", "D"))
+
 save_plot("../data/pca_sucrose_effect.pdf", sucrose_plot, base_height = 6, base_width = 12)
 print(sucrose_plot)
 
@@ -699,7 +706,7 @@ create_volcano_plot <- function(shrunken_results, plot_title) {
 
   # Generate the plot
     
-  ggplot(results_df, aes(x = log2FoldChange, y = -log10(padj))) +
+  p <- ggplot(results_df, aes(x = log2FoldChange, y = -log10(padj))) +
     # Add points, colored by significance
     rasterise(geom_point(aes(color = significant), alpha = 0.6, shape = 16), dpi = 300) +
     scale_color_manual(values = c("No" = "grey", "Yes" = "red"), name = "") +
@@ -723,6 +730,8 @@ create_volcano_plot <- function(shrunken_results, plot_title) {
          y = "-log10(Adjusted P-value)") +
     theme_classic(base_size = 11) +
     theme(legend.position = "none") # Hide the individual legends
+  
+  return(p)
 }
 
 # --- 4. Generate Each of the Four Plots ---
@@ -738,6 +747,10 @@ p_li_contrast2 <- create_volcano_plot(shrunken_li_contrast2, "E. faecalis (Sucro
 # --- 5. Arrange Plots into a 2x2 Grid ---
 # Use patchwork to combine the plots. The '/' operator stacks plots vertically.
 p_li_contrast2
+save_full_dataframe_to_excel(p_li_contrast2$data, "../mouse_data.xlsx", "Sup_Figure_9g_volcano_plot_e_faec_sugar", col_names = c(
+  "log2FoldChange" = "log 2 Fold Change",
+  "padj" = "Adjusted P value",
+  "significant" = "Signficant Result"))
 ggsave('../data/R38_DEG_volcano_li_contrast2.pdf', width = 6, height = 4)
 ```
 
@@ -1146,7 +1159,7 @@ sig_pw_bar_LI <- top_pathways_Li %>%
   ) +
   # Apply a clean, minimal theme to the plot.
   theme_minimal()
-
+sig_pw_bar_LI 
 ggsave('../data/R38_sig_pathway_li_contrast2.pdf', height = 8, width = 6)
 # The sucrose water is likely inducing a state of high stress and rapid repair in the large intestine. The gut lining is undergoing massive proliferation, supported by a fundamental shift in cell metabolism to prioritize growth over efficient energy production. However, this comes at a cost: the downregulation of key immune and structural pathways suggests the resulting gut barrier might be weaker and less immunologically prepared.
 
@@ -1254,6 +1267,7 @@ sig_pw_lollipop_LI1 <- ggplot(plot_data_, aes(x = NES, y = pathway_clean, color 
   guides(color = guide_legend(nrow = 2, byrow = TRUE))
 
 sig_pw_lollipop_LI1
+save_full_dataframe_to_excel(plot_data_, "../mouse_data.xlsx", "Sup_Figure_9e_lollipop_gf_e_faec")
 ```
 
 ## SI
