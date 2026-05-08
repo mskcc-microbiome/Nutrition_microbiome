@@ -17,6 +17,8 @@ library(wesanderson)
 library(broom.mixed) 
 library(cowplot)
 library(furrr)
+library(dendextend)
+library(ggdendro)
 ```
 
 ```{r}
@@ -312,7 +314,20 @@ fit_taxa_model <- function(outcome, data, rhs, priors) {
     as_tibble(rownames = "term") |> 
     mutate(outcome = outcome, .before = 1)
   
-  return(results_summary)
+  # Extract raw posterior draws to calculate the fraction that are strictly positive.
+  # Fixed effects are prefixed with 'b_' in the raw posterior dataframe.
+  prob_positive <- as_draws_df(fit) |> 
+    select(starts_with("b_")) |> 
+    summarise(across(everything(), \(x) mean(x > 0))) |> 
+    pivot_longer(cols = everything(), names_to = "term", values_to = "fraction_positive") |> 
+    # Remove the 'b_' prefix so it seamlessly joins with the summary table
+    mutate(term = str_remove(term, "^b_"))
+    
+  # Combine standard credible intervals with the fraction positive metric
+  final_summary <- results_summary |> 
+    left_join(prob_positive, by = "term")
+  
+  return(final_summary)
 }
 
 # Set up parallel processing. 
@@ -338,5 +353,138 @@ end_time <- Sys.time()
 print(end_time - start_time)
 
 all_models_results |> write_csv('../data/R63_genus_clr_all_models_results.csv')
+```
+
+## E7a heatmap
+
+```{r}
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
+
+level_order <- rev(c(
+    "abx * Sweets", "Sweets",
+    "abx * Grains", "Grains",
+    "abx * Milk", "Milk",
+    "abx * Eggs", "Eggs",
+    "abx * Legumes", "Legumes",
+    "abx * Meats", "Meats",
+    "abx * Fruits", "Fruits",
+    "abx * Oils", "Oils",
+    "abx * Vegetables", "Vegetables"
+))
+
+# Load the pre-summarized Bayesian model results
+# Filter to keep only the food group terms, removing baseline intensity variables
+post_summary <- read_csv('../data/R63_genus_clr_all_models_results.csv') |> 
+  filter(str_detect(term, "fg_")) |> 
+  mutate(
+    # Clean up the term names for a prettier x-axis
+    clean_term = term %>% 
+      str_replace("empiricalTRUE$", "abx") %>%
+      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
+      str_replace_all( replacement_dictionary) %>%
+      str_replace("empiricalTRUE:", "abx * ") %>%
+      str_replace_all("_", " ")  ,
+    
+    # Assign significance marks based on tiered credible intervals
+    # Check the strictest thresholds (99%) first, then cascade down to 97% and 94%
+    # The quantiles reflect the leftover tails: e.g., 94% CI means 3% on each tail (Q3 and Q97)
+    mark = case_when(
+      Q0.5 > 0 ~ "***",
+      Q99.5 < 0 ~ "***",
+      Q1.5 > 0 ~ "**",
+      Q98.5 < 0 ~ "**",
+      Q3 > 0 ~ "*",
+      Q97 < 0 ~ "*",
+      .default = ""
+    )
+  ) %>%
+  mutate(clean_term = factor(clean_term, levels = level_order))
+```
+
+## dendrogram
+
+```{r}
+post_matrix <- post_summary %>% 
+  filter(!str_detect(term, 'intensity')) |> 
+  select(outcome, term,fraction_positive ) |> 
+  spread('term','fraction_positive') %>% 
+  column_to_rownames('outcome')
+
+hc <- hclust(dist(post_matrix), method = "complete")
+
+dendro_data <- dendro_data(hc, type = "rectangle")
+
+# Extract the ordered genera names to ensure the heatmap aligns with the dendrogram
+ordered_genera <- hc$labels[hc$order]
+
+# Build the dendrogram plot
+# Removing scale_y_reverse keeps the leaves at the 0 position on the left
+# so the tree branches reach out toward the heatmap that will sit on its left
+dendro_plot <- ggplot(segment(dendro_data)) + 
+  geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+  coord_flip() + 
+  scale_y_continuous(expand = c(0, 0.5)) +
+  scale_x_continuous(expand = c(0, 0.5)) +
+  theme_dendro()
+```
+
+```{r}
+# Lock the outcome variable as a factor using the order from the clustering
+heatmap_data <- post_summary |> 
+  mutate(outcome = factor(outcome, levels = ordered_genera))
+
+# Build the main heatmap visualization
+heatmap_plot <- heatmap_data |> 
+  # make the nonsignificant ones blank to not be too overwhelming
+  mutate(Estimate = if_else(!str_detect(mark , '\\*'), 0, Estimate)) %>% 
+  ggplot(aes(x = clean_term, y = outcome, fill = Estimate)) +
+  geom_tile(color = "black", width = 0.95, height = 0.95) +
+  geom_text(aes(label = mark), nudge_y = -0.15, size = 1.5, color = "black") +
+  # Use a diverging color palette to show positive vs negative effects
+  scale_fill_gradient2(
+    low = "royalblue", 
+    mid = "white", 
+    high = "firebrick", 
+    midpoint = 0
+  ) +
+  labs(fill = "Effect size\n(posterior median)") +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.y = element_markdown(face = "italic"),
+    axis.text.x = element_markdown(angle = 45, hjust = 1),
+    legend.position = 'left', 
+    panel.background = element_rect(colour = "white", fill = "white"),
+    panel.grid = element_blank()
+  )
+heatmap_plot
+```
+```{r}
+# Stitch the dendrogram and heatmap together side-by-side
+# Putting the heatmap first naturally places it on the left
+final_figure <- plot_grid(
+  heatmap_plot, 
+  dendro_plot, 
+  ncol = 2, 
+  rel_widths = c(1, 0.1),
+  align = 'h', 
+  axis = 'tb'
+)
+
+# Output the final figure to the console to view in the environment
+final_figure
+
+# Save the stitched figure to a PDF file
+# The dimensions can be tweaked to prevent text squishing or overlapping 
+ggsave(
+  filename = '../data/E07a_R63_genus_heatmap.pdf',
+  plot = final_figure,
+  width = 140, 
+  height = 95, 
+  units = "mm", 
+  device = 'pdf', 
+  dpi = 300
+)
 ```
 
