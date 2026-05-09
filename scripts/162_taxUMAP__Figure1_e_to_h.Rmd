@@ -36,6 +36,9 @@ DATA_DIR <- "../data/"
 dtb_file       <- file.path(DATA_DIR, "152_combined_DTB.csv")
 color_key_file <- file.path(DATA_DIR, "food_group_color_key_final.csv")
 taxonomy_file  <- file.path(DATA_DIR, "final_table_for_writing_out_to_newick.csv")
+## the below results come from the snakemake pipeline 
+faith <- read_tsv("../data/005_faith_pd/alpha-diversity.tsv") %>%
+  rename(sampleid = 1)   # first column is unnamed
 
 # Outputs (written into the same folder as the inputs)
 food_relabd_out <- file.path(DATA_DIR, "162_food_code_relative.csv")
@@ -60,6 +63,7 @@ Shared aesthetics used by the downstream Figure 1 panels.
 
 ```{r plot-defaults}
 library(tidyverse)
+library(patchwork)
 
 umap_pt_size    <- 0.5
 axis_text_size  <- 10
@@ -162,5 +166,125 @@ top2level <- food_taxa %>% distinct(Kingdom, Phylum)
 run_taxumap.py -t ../data/162_food_taxa.csv -m ../data/162_food_code_relative.csv --agg_levels Kingdom/Phylum/Class/Order -n 173 --weights 0.01/2/10/10  -o ../data
 ```
 
+# Stage 4 — Colorcode the taxUMAP results 
+
+## summary table
+
+```{r}
+# 1. load the taxUMAP results that were just generated
+taxumap <- read_csv("../data/taxumap_embedding.csv")
+
+# ---- 2. Per (pid, fdrt): top food group by dehydrated weight + total calories ----
+# Extract the first digit of Food_code => fgrp1
+dtb_fg <- dtb %>%
+  mutate(fgrp1 = str_sub(as.character(Food_code), 1, 1))
+
+# Sum dehydrated weight per food group within each (pid, fdrt)
+fg_weights <- dtb_fg %>%
+  group_by(pid, fdrt, fgrp1) %>%
+  summarise(fg_dehydrated = sum(dehydrated_weight, na.rm = TRUE),
+            .groups = "drop") %>%
+  group_by(pid, fdrt) %>%
+  mutate(fg_proportion = fg_dehydrated / sum(fg_dehydrated)) %>%
+  ungroup()
+
+# Pick the dominant food group per (pid, fdrt)
+top_fg <- fg_weights %>%
+  group_by(pid, fdrt) %>%
+  slice_max(fg_proportion, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  left_join(color_key, by = "fgrp1") %>%
+  select(pid, fdrt,
+         top_fgrp1   = fgrp1,
+         top_fg_name = shortname,
+         top_fg_desc = fdesc,
+         top_fg_color = color,
+         top_fg_proportion = fg_proportion)
+
+# Total calories per (pid, fdrt)
+cal_totals <- dtb %>%
+  group_by(pid, fdrt) %>%
+  summarise(total_calories = sum(Calories_kcal, na.rm = TRUE),
+            .groups = "drop")
+
+# Combine
+summary_tbl <- top_fg %>%
+  left_join(cal_totals, by = c("pid", "fdrt"))
+
+# ---- 3. Join with faith PD ----
+# Build the matching sample id: "{pid}d{fdrt}" (e.g. P100 + d + -1 -> P100d-1)
+summary_tbl <- summary_tbl %>%
+  mutate(sampleid = paste0(pid, "d", fdrt)) %>%
+  left_join(faith, by = "sampleid") %>%
+  relocate(sampleid, .after = fdrt)
+```
 
 
+```{r}
+# ---- 4. Join TaxUMAP coords ----
+# index_column looks like "PP1_-6"  -->  "P" + pid + "_" + fdrt
+plot_tbl <- summary_tbl %>%
+  mutate(index_column = paste0("P", pid, "_", fdrt)) %>%
+  inner_join(taxumap, by = "index_column")
+
+# Named vector of food-group colors for ggplot scale
+fg_colors <- setNames(color_key$color, color_key$shortname)
+
+# ---- 5. Common theme ----
+theme_umap <- theme_void(base_size = 11) +
+  theme(plot.title    = element_text(hjust = 0.5, face = "bold"),
+        legend.position = c(0.85, 0.25),
+        legend.key.size = unit(0.35, "cm"),
+        legend.title  = element_text(size = 8),
+        legend.text   = element_text(size = 7),
+        axis.title    = element_text(size = 8),
+        axis.title.y  = element_text(angle = 90))
+
+base_aes <- aes(x = taxumap1, y = taxumap2)
+
+# ---- 6. Panel e: day relative to transplant ----
+p_e <- ggplot(plot_tbl, base_aes) +
+  geom_point(aes(color = fdrt), size = 0.8, alpha = 0.85) +
+  scale_color_distiller(palette = "Spectral",
+                        breaks = c(-10, 0, 7, 15, 49)) +
+  labs(title = "Day relative\nto transplant",
+       x = "TaxUMAP1", y = "TaxUMAP2", color = NULL) +
+  theme_umap
+
+# ---- 7. Panel f: caloric intake (x 10^3 kcal) ----
+p_f <- ggplot(plot_tbl, base_aes) +
+  geom_point(aes(color = total_calories / 1000), size = 0.8, alpha = 0.85) +
+  scale_color_viridis_c(option = "plasma") +
+  labs(title = "Caloric intake",
+       x = "TaxUMAP1", y = "TaxUMAP2",
+       color = expression(x~10^3~Kcal)) +
+  theme_umap
+
+# ---- 8. Panel g: most consumed food group ----
+p_g <- ggplot(plot_tbl, base_aes) +
+  geom_point(aes(color = top_fg_name), size = 0.8, alpha = 0.9) +
+  scale_color_manual(values = fg_colors, name = NULL) +
+  labs(title = "Most consumed\nfood group",
+       x = "TaxUMAP1", y = "TaxUMAP2") +
+  theme_umap +
+  theme(legend.position = "right",
+        legend.key.size = unit(0.4, "cm"))
+
+# ---- 9. Panel h: diet alpha-diversity (x 10^3) ----
+p_h <- ggplot(plot_tbl, base_aes) +
+  geom_point(aes(color = faith_pd / 1000), size = 0.8, alpha = 0.85) +
+  scale_color_viridis_c(option = "viridis") +
+  labs(title = expression(Diet~alpha*"-diversity"),
+       x = "TaxUMAP1", y = "TaxUMAP2",
+       color = expression(""%*%10^3)) +
+  theme_umap
+
+# ---- 10. Combine ----
+fig <- (p_e | p_f | p_g | p_h) +
+  plot_annotation(tag_levels = list(c("e", "f", "g", "h"))) &
+  theme(plot.tag = element_text(face = "bold", size = 14))
+
+ggsave("../data/162_taxumap_4panel.pdf", fig, width = 10, height = 4)
+
+fig
+```
