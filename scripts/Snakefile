@@ -1,0 +1,125 @@
+# Snakefile
+#  mamba activate snakemake
+# Data:     expects data files in `../data/` (parallel folder to `scripts/`).
+#
+# Run from inside `scripts/`:
+#     snakemake --cores 1
+#
+# Dry-run (see what would run):
+#     snakemake -n
+#
+# Re-run a single rule (e.g. recompute Faith PD):
+#     snakemake --cores 1 --forcerun alpha_phylogenetic_faith_pd
+#
+# Requires: docker (Docker Desktop) + snakemake on the host.
+# QIIME 2 itself runs inside the container, so you don't need a conda env.
+
+import os
+
+# ---------- configuration ----------------------------------------------------
+
+# Data folder, relative to this Snakefile (which lives in scripts/)
+DATA_DIR = "../data"
+
+# Absolute path - docker requires absolute paths for -v mounts
+DATA_ABS = os.path.abspath(DATA_DIR)
+
+# QIIME 2 image. Bump the tag when you upgrade QIIME 2 releases.
+QIIME2_IMAGE = "quay.io/qiime2/qiime2:2026.4"
+
+# Docker invocation:
+#   --rm           remove container after exit
+#   -v ...:/data   mount your ../data folder as /data inside the container
+#   -w /data       make /data the working dir inside the container
+# We deliberately do NOT pass -i or -t (those are for interactive shells and
+# break when snakemake captures stdin/stdout).
+DOCKER_RUN = (
+    f"docker run --rm "
+    f"-v {DATA_ABS}:/data "
+    f"-w /data "
+    f"{QIIME2_IMAGE}"
+)
+
+# File stems (no extensions). 
+COUNTS = "005_food_code_counts_matrix"
+TREE   = "output_food_tree_datatree"
+FAITH  = "005_faith_pd"
+
+# ---------- target -----------------------------------------------------------
+
+rule all:
+    input:
+        f"{DATA_DIR}/{FAITH}/alpha-diversity.tsv"
+
+# ---------- pipeline ---------------------------------------------------------
+
+rule biom_convert:
+    """TSV counts matrix -> HDF5 BIOM table."""
+    input:
+        f"{DATA_DIR}/{COUNTS}.tsv"
+    output:
+        f"{DATA_DIR}/{COUNTS}.biom"
+    shell:
+        f"""
+        {DOCKER_RUN} biom convert \
+            -i /data/{COUNTS}.tsv \
+            -o /data/{COUNTS}.biom \
+            --to-hdf5 --table-type="Table"
+        """
+
+rule import_feature_table:
+    """BIOM -> QIIME 2 FeatureTable[Frequency] artifact (.qza)."""
+    input:
+        f"{DATA_DIR}/{COUNTS}.biom"
+    output:
+        f"{DATA_DIR}/{COUNTS}.qza"
+    shell:
+        f"""
+        {DOCKER_RUN} qiime tools import \
+            --input-path /data/{COUNTS}.biom \
+            --output-path /data/{COUNTS}.qza \
+            --type 'FeatureTable[Frequency]'
+        """
+
+rule import_tree:
+    """Newick tree -> QIIME 2 Phylogeny[Rooted] artifact (.qza)."""
+    input:
+        f"{DATA_DIR}/{TREE}.newick"
+    output:
+        f"{DATA_DIR}/{TREE}.qza"
+    shell:
+        f"""
+        {DOCKER_RUN} qiime tools import \
+            --input-path /data/{TREE}.newick \
+            --output-path /data/{TREE}.qza \
+            --type 'Phylogeny[Rooted]'
+        """
+
+rule alpha_phylogenetic_faith_pd:
+    """Compute Faith's phylogenetic diversity."""
+    input:
+        table = f"{DATA_DIR}/{COUNTS}.qza",
+        tree  = f"{DATA_DIR}/{TREE}.qza"
+    output:
+        f"{DATA_DIR}/{FAITH}.qza"
+    shell:
+        f"""
+        {DOCKER_RUN} qiime diversity alpha-phylogenetic \
+            --i-table /data/{COUNTS}.qza \
+            --i-phylogeny /data/{TREE}.qza \
+            --p-metric faith_pd \
+            --o-alpha-diversity /data/{FAITH}.qza
+        """
+
+rule export_to_tsv:
+    """Export Faith PD QZA to TSV (alpha-diversity.tsv inside 005_faith_pd/)."""
+    input:
+        f"{DATA_DIR}/{FAITH}.qza"
+    output:
+        f"{DATA_DIR}/{FAITH}/alpha-diversity.tsv"
+    shell:
+        f"""
+        {DOCKER_RUN} qiime tools export \
+            --input-path /data/{FAITH}.qza \
+            --output-path /data/{FAITH}
+        """
