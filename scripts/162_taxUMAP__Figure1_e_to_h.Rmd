@@ -1,0 +1,166 @@
+---
+title: "taxUMAP of the combined cohort (Figure 1)"
+author: "Anqi Dai"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+# Paths
+
+
+```{r paths}
+# ---- edit this one variable if your data lives elsewhere -----------------
+DATA_DIR <- "../data/"   
+# --------------------------------------------------------------------------
+
+# Inputs
+dtb_file       <- file.path(DATA_DIR, "152_combined_DTB.csv")
+color_key_file <- file.path(DATA_DIR, "food_group_color_key_final.csv")
+taxonomy_file  <- file.path(DATA_DIR, "final_table_for_writing_out_to_newick.csv")
+
+# Outputs (written into the same folder as the inputs)
+food_relabd_out <- file.path(DATA_DIR, "162_food_code_relative.csv")
+food_taxa_out   <- file.path(DATA_DIR, "162_food_taxa.csv")
+
+# Verify everything is in place before we start.
+required_inputs <- c(dtb_file, color_key_file, taxonomy_file)
+missing <- required_inputs[!file.exists(required_inputs)]
+if (length(missing) > 0) {
+  stop(
+    "Missing required input file(s):\n  ",
+    paste(missing, collapse = "\n  "),
+    "\nUpdate DATA_DIR in this chunk to point to the folder containing them."
+  )
+}
+```
+
+
+# Plot defaults
+
+Shared aesthetics used by the downstream Figure 1 panels.
+
+```{r plot-defaults}
+library(tidyverse)
+
+umap_pt_size    <- 0.5
+axis_text_size  <- 10
+axis_title_size <- 10
+
+# Food-group color key (used by downstream plotting).
+color_key <- read_csv(color_key_file, col_types = "ccccc")
+```
+
+# Stage 1 — Build the per-day relative-abundance matrix
+
+taxUMAP expects rows of compositional (relative) abundances. The
+diet-tracker records absolute dehydrated weight per meal item, so for
+each `(patient, day)` we sum to a daily total per food code, then divide
+by the daily grand total.
+
+```{r build-relabd-matrix}
+dtb <- read_csv(dtb_file)
+
+# 1. Sum dehydrated weight per (patient, day, food code).
+fc_table <- dtb %>%
+  select(pid, fdrt, Food_code, dehydrated_weight) %>%
+  group_by(pid, fdrt, Food_code) %>%
+  summarise(total = sum(dehydrated_weight), .groups = "drop") %>%
+  mutate(index_column = str_glue("P{pid}_{fdrt}")) %>%
+  select(index_column, Food_code, total)
+
+# 2. Daily total weight per (patient, day) — denominator for relative abundance.
+fc_total <- fc_table %>%
+  group_by(index_column) %>%
+  summarise(daily_total = sum(total), .groups = "drop")
+
+# 3. Pivot to wide form: rows = patient-day, columns = food code, values = rel. abd.
+fc_df <- fc_table %>%
+  left_join(fc_total, by = "index_column") %>%
+  mutate(daily_relative = total / daily_total) %>%
+  select(index_column, Food_code, daily_relative) %>%
+  pivot_wider(
+    names_from  = Food_code,
+    values_from = daily_relative,
+    values_fill = 0
+  )
+
+# Sanity check: every row should sum to ~1.
+stopifnot(all(abs(rowSums(fc_df[ , -1]) - 1) < 1e-8))
+
+write_csv(fc_df, food_relabd_out)
+glue::glue("Wrote {nrow(fc_df)} patient-days x {ncol(fc_df) - 1} food codes -> {food_relabd_out}")
+```
+
+# Stage 2 — Build the taxonomy table
+
+> The taxonomy table is expected to resolve higher taxonomic groups for
+> each ASV/OTU (here, food code) in the abundance table. The index
+> should be the ASV/OTU labels, and columns should be higher taxonomic
+> categories ordered from left to right in **decreasing** taxonomic
+> hierarchy.
+
+We restrict to food codes that actually appear in the abundance matrix,
+and keep four taxonomic levels (L1–L4 → Kingdom / Phylum / Class /
+Order).
+
+```{r build-taxonomy}
+# Food codes present in the abundance matrix (everything except the index col).
+actual_foodids <- setdiff(colnames(fc_df), "index_column")
+
+taxonomy_full <- read_csv(taxonomy_file) %>%
+  mutate(FoodID = as.character(FoodID))
+
+food_taxa <- taxonomy_full %>%
+  filter(FoodID %in% actual_foodids) %>%
+  select(
+    ASV     = FoodID,
+    Kingdom = L1,
+    Phylum  = L2,
+    Class   = L3,
+    Order   = L4
+  )
+
+# Quick coverage check: every food code in the matrix should have taxonomy.
+missing_taxa <- setdiff(actual_foodids, food_taxa$ASV)
+if (length(missing_taxa) > 0) {
+  warning(
+    "No taxonomy found for ", length(missing_taxa),
+    " food code(s); they will be dropped by taxUMAP. First few: ",
+    paste(head(missing_taxa), collapse = ", ")
+  )
+}
+
+write_csv(food_taxa, food_taxa_out)
+
+# Top-two-level summary (handy reference for figure legends).
+top2level <- food_taxa %>% distinct(Kingdom, Phylum)
+```
+
+# Stage 3 — Run taxUMAP
+
+```{bash}
+# run the below command in terminal where the conda env is activated in this dir
+run_taxumap.py -t ../data/162_food_taxa.csv -m ../data/162_food_code_relative.csv --agg_levels Kingdom/Phylum/Class/Order -n 173 --weights 0.01/2/10/10  -o ../data
+```
+
+
+
