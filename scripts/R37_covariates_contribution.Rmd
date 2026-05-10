@@ -235,7 +235,7 @@ print(plot_zoomed_in)
 # assemble 
 
 ```{r}
-final_plot <- plot_grid(plot_all_covariates,plot_zoomed_in,
+final_plot <- plot_grid(NA,plot_zoomed_in,
                         nrow = 2,
                 #rel_heights = c(.6,1),
                 labels ='auto',
@@ -253,7 +253,7 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,4,1,1), "cm"))
 
-ggsave('../data/R37_covariates_contribution.pdf',
+ggsave('../data/E01b_R37_covariates_contribution.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300)       
 ```

@@ -160,7 +160,7 @@ sugars_plot
 
 # assemble 
 final_plot <- plot_grid( sweets_plot ,  sugars_plot ,
-                nrow  = 1,
+                nrow  = 2,
                 align = 'vh', axis = 'lrtb')
 
 
@@ -175,7 +175,7 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,4,8,1), "cm"))
 
-ggsave('../data/R47_sugars_and_sweets_discrepancy.pdf',
+ggsave('../data/E04h_R47_sugars_and_sweets_discrepancy.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
       dpi = 300)        
 ```

@@ -15,7 +15,6 @@ library(broom.mixed)
 library(brms)   
 library(ggpubr)
 library(tidybayes)
-library(brmstools)
 library(bayesplot)
 library(gt)
 library(rcompanion)
@@ -324,7 +323,7 @@ plot_stratify_abx_class
 ```{r}
 table_tally <- ggdraw() + draw_image("../data/R46_number_tally_abx_exposure_class.png", scale = 1)
 
-final_plot <- plot_grid( table_tally ,  plot_stratify_abx_class , 
+final_plot <- plot_grid( NA ,  plot_stratify_abx_class , 
                 nrow  = 2,
                  rel_heights = c(1.6,2),
                 labels = 'auto',
@@ -332,7 +331,7 @@ final_plot <- plot_grid( table_tally ,  plot_stratify_abx_class ,
 
 
 title <- ggdraw() + 
-  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  draw_label("",fontface = 'bold', x = 0,hjust = 0) +
   theme(plot.margin = margin(0, 0, 0, 0))
 
 combined <- plot_grid(
@@ -342,7 +341,7 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/R46_abx_three_levels_class_stratification.pdf',
-      width = 8.5, height = 11, units = "in", device = 'pdf', 
+ggsave('../data/E07f_R46_abx_three_levels_class_stratification.pdf',
+      width = 5, height = 7, units = "in", device = 'pdf', 
       dpi = 300)        
 ```

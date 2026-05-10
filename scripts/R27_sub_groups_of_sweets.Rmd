@@ -17,7 +17,6 @@ library(patchwork)
 library(tidybayes)
 library(cowplot)
 library(ggridges)
-library(brmstools)
 library(bayesplot)
 library(ggtext)
 options(mc.cores = parallel::detectCores())
@@ -1986,8 +1985,8 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/R27_subgroup_sweets_FNDDS.pdf',
-      width = 8.5, height = 11, units = "in", device = 'pdf', 
+ggsave('../data/E04e_R27_subgroup_sweets_FNDDS.pdf',
+      width = 4, height = 6, units = "in", device = 'pdf', plot = plot_subsweets,
       dpi = 300)  
 ```
 

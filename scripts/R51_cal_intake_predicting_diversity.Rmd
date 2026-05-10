@@ -15,7 +15,6 @@ library(broom.mixed)
 library(brms)   
 library(ggpubr)
 library(tidybayes)
-library(brmstools)
 library(bayesplot)
 library(gt)
 library(rcompanion)
@@ -250,6 +249,6 @@ plot_combined_models <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term
 # --- View the Final Plot ---
 print(plot_combined_models)
 
-ggsave('../data/R51_plot_combined_models_with_cal.pdf', width = 6, height = 3)
+ggsave('../data/E04c_R51_plot_combined_models_with_cal.pdf', width = 3, height = 2)
 ```
 

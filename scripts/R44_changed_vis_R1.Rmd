@@ -250,7 +250,7 @@ combined <- plot_grid(
   rel_heights = c(0.05, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/R44_breakdown_beeswarm.pdf',
+ggsave('../data/E01f_R44_breakdown_beeswarm.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', 
       dpi = 300)       
 ```

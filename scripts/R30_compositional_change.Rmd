@@ -20,7 +20,6 @@ library(vegan)
 library(ggrepel) # For better label placement
 library(RColorBrewer)
 library(ggpubr)
-library(brmstools) 
 library(bayesplot)
 library(gt)
 library(ggtext)
@@ -571,9 +570,6 @@ variance_explained <- pcoa_results$values$Relative_eig[1:2] * 100
 
 ### PCoA with domination genus
 
-
-
-
 ```{r}
 # -----------------------------------------------------------------
 # --- 10. Create the (cleaner) PCoA Plot with Manual Colors ---
@@ -716,6 +712,7 @@ pcoa_asv_most <- pcoa_df |>
 
 ggsave('../data/R30_pcoa_asv_most_abundant.pdf', width = 7)    
 ```
+
 ```{r}
 # same asv level pcoa but colored with diversity  
 pcoa_asv_diversity <- ggplot(
@@ -829,31 +826,30 @@ meta_Axis <- meta %>%
 ```
 
 ```{r}
-library(rmcorr)
-# Combined exposure to sweets and antibiotics was also associated with a shift toward low-diversity compositions characterized by community monodomination, for example by Enterococcus faecium.
-
-
-rmc_result <- rmcorr(participant = pid, measure1 = Axis.1, measure2 = simpson_reciprocal, dataset = meta_Axis)
-
-# Visualizing the within-subject relationship
-meta_Axis |> 
-  ggplot(aes(x = Axis.1, y = simpson_reciprocal)) +
-  geom_point(alpha = 0.6) + 
-  # Connecting points from the same participant highlights the repeated measure aspect
-  # This adds the parallel slopes characteristic of rmcorr (visual aid)
-  # It shows the trend assuming the slope is shared across participants
-  geom_line(stat = "smooth", method = "lm", se = FALSE, alpha = 0.5) +
-  labs(
-    title = "Repeated Measures Correlation: Axis 1 vs. Simpson's",
-    subtitle = paste("rmcorr r:", round(rmc_result$r, 2), 
-                     "| P-value:", format.pval(rmc_result$p, digits = 3)),
-    x = "Axis 1",
-    y = "Simpson Reciprocal Index",
-    color = "Patient ID"
-  ) +
-  theme_minimal()
+# library(rmcorr)
+# # Combined exposure to sweets and antibiotics was also associated with a shift toward low-diversity compositions characterized by community monodomination, for example by Enterococcus faecium.
+# 
+# 
+# rmc_result <- rmcorr(participant = pid, measure1 = Axis.1, measure2 = simpson_reciprocal, dataset = meta_Axis)
+# 
+# # Visualizing the within-subject relationship
+# meta_Axis |> 
+#   ggplot(aes(x = Axis.1, y = simpson_reciprocal)) +
+#   geom_point(alpha = 0.6) + 
+#   # Connecting points from the same participant highlights the repeated measure aspect
+#   # This adds the parallel slopes characteristic of rmcorr (visual aid)
+#   # It shows the trend assuming the slope is shared across participants
+#   geom_line(stat = "smooth", method = "lm", se = FALSE, alpha = 0.5) +
+#   labs(
+#     title = "Repeated Measures Correlation: Axis 1 vs. Simpson's",
+#     subtitle = paste("rmcorr r:", round(rmc_result$r, 2), 
+#                      "| P-value:", format.pval(rmc_result$p, digits = 3)),
+#     x = "Axis 1",
+#     y = "Simpson Reciprocal Index",
+#     color = "Patient ID"
+#   ) +
+#   theme_minimal()
 ```
-
 
 ### model 
 
@@ -1046,7 +1042,7 @@ top_row <- plot_grid( pcoa_plot ,
                 labels = 'auto',
                 align = 'vh')
 
-final_plot <- plot_grid( top_row, 
+final_plot <- plot_grid( NA, 
                          plot_axis ,
                 ncol  = 1, 
                 rel_heights = c(2, 2),
@@ -1054,7 +1050,7 @@ final_plot <- plot_grid( top_row,
    
 library(cowplot)
 title <- ggdraw() + 
-  draw_label("Rebuttal fig X",fontface = 'bold',x = 0,hjust = 0) +
+  draw_label("E03c",fontface = 'bold',x = 0,hjust = 0) +
   theme(plot.margin = margin(0, 0, 0, 0))
 
 combined <- plot_grid(
@@ -1064,221 +1060,11 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/R30_axis_model.pdf',
+ggsave('../data/E03c_R30_axis_model.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
       dpi = 300)    
 ```
 
 
-# Model with asv level pcoa coord
 
-```{r}
-meta_Axis_asv <- meta %>% 
-  mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>%
-  mutate(pid = factor(pid)) %>%
-    # This divides all the new intake columns by 100.
-  mutate(across(starts_with("fg_"), ~ .x / 100)) %>% 
-  inner_join(pcoa_df |> select(sampleid:color_label_group_distinct)) %>% 
-  mutate(timebin = cut_width(sdrt, 7, boundary=0, closed = 'left')) 
-
-# Define the outcomes you want to test
-outcomes_to_run <- c("Axis1", "Axis2")
-
-# Get all food variable names from your data (matches screenshot)
-all_food_vars <- meta_Axis_asv %>%
-  select(starts_with('fg_')) %>%
-  colnames()
-
-# Create the interaction terms automatically
-interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
-
-# Define your priors. These are global and will be used in every model.
-priors <-
-  prior(normal(0, 1), class = 'b') + # General prior for all effects
-  # Specific priors that override the general one
-  prior(normal(0, 0.1), class = 'b', coef = "TPNTRUE") +
-  prior(normal(0, 0.1), class = 'b', coef = "ENTRUE") +
-  prior(normal(0, 0.5), class = 'b', coef = "empiricalTRUE")
-
-# --- 3. Run Models Efficiently using purrr::map ---
-
-# `map` will loop over your 'outcomes_to_run' vector
-# and run the code inside for each item (e.g., first "Axis.1", then "Axis.2")
-model_fits_list <- purrr::map(outcomes_to_run, ~ {
-  
-  # '.x' is the placeholder for the current outcome (e.g., "Axis.1")
-  current_outcome <- .x
-  
-  print(paste("--- Starting model for:", current_outcome, "---"))
-  
-  # Build the formula string dynamically
-  formula_string <- paste(
-    current_outcome, # Use the current outcome variable
-    "~ 0 + intensity + empirical + TPN + EN +",
-    paste(all_food_vars, collapse = " + "),       # Add main food effects
-    "+",
-    paste(interaction_terms, collapse = " + "), # Add interaction effects
-    "+ (1 | pid) + (1 | timebin)"
-  )
-  
-  # Convert the string to a formula object
-  formula <- brms::bf(as.formula(formula_string))
-  
-  # Fit the model
-  model_fit <- brm(
-    formula = formula,
-    data = meta_Axis_asv,
-    prior = priors,
-    warmup = 1000, iter = 3000,
-    chains = 4, cores = 4,
-    seed = 123,
-    silent = 2,
-    control = list(adapt_delta = 0.99)
-  )
-  
-  print(paste("--- Finished model for:", current_outcome, "---"))
-  
-  # Return the fitted model
-  return(model_fit)
-})
-
-# Name the list for easy access later (e.g., model_fits_list$Axis.1)
-names(model_fits_list) <- outcomes_to_run
-
-
-# --- 4. Tidy and Combine All Results ---
-
-# Now, loop through the list of *fitted models* and tidy them,
-# combining them into a single, convenient data frame.
-# `map_dfr` means "map and combine into a dataframe"
-all_results_asv <- purrr::map_dfr(model_fits_list, ~ {
-  
-  # Use broom.mixed::tidy to get a clean data frame
-  tidy(.x, conf.int = TRUE) %>%
-    mutate(conf.low = round(conf.low, 2),
-           conf.high = round(conf.high, 2))
-    
-}, .id = "outcome") # The .id argument adds a column
-                   # specifying which model the row came from
-
-# --- Display the final combined results ---
-print("--- Combined Model Results ---")
-print(as.data.frame(all_results_asv))
-
-all_results_asv |> write_csv('../data/R30_all_results_axis_asv.csv')
-```
-```{r}
-all_results_asv <- read_csv('../data/R30_all_results_axis_asv.csv')
-
-# the above figure but make it the way the other figure look like
-key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
-
-replacement_dictionary <- setNames(key$shortname, key$fg1_name)
-
-level_order <- rev(c(
-    "abx", "EN", "TPN", 
-    "abx * Sweets", "Sweets",
-    "abx * Grains", "Grains",
-    "abx * Milk", "Milk",
-    "abx * Eggs", "Eggs",
-    "abx * Legumes", "Legumes",
-    "abx * Meats", "Meats",
-    "abx * Fruits", "Fruits",
-    "abx * Oils", "Oils",
-    "abx * Vegetables", "Vegetables"
-))
-
-
-# Define the new, descriptive labels
-new_facet_labels <- c(
-  "Axis.1" = "Axis 1: Healthy (left) vs. Dysbiosis (right)",
-  "Axis.2" = "Axis 2: E. faecium (bottom) vs. Strep. (top)"
-)
-
-cleaned_effects <- all_results_asv %>%
-  # Keep only the fixed effects
-  filter(effect == "fixed") %>%
-  # Create a new column to distinguish main effects from interactions
-  mutate(
-    effect_type = if_else(str_detect(term, ":"), "Interaction", "Main Effect"),
-    # Create clean labels for plotting
-    clean_term = term %>%
-      str_replace("empiricalTRUE$", "abx") %>%
-      str_remove_all("empiricalFALSE:|avg_intake_|TRUE$") %>%
-      str_replace_all( replacement_dictionary) %>%
-      str_replace("empiricalTRUE:", "abx * ") %>%
-      str_replace_all("_", " ") 
-  ) %>%
-  filter(!str_detect(clean_term, 'intensity')) %>%
-  # Create a new column to identify significant results
-  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
-  mutate(is_significant = (conf.low * conf.high) > 0,
-         outcome_label = recode(outcome, !!!new_facet_labels)) %>%
-  mutate(clean_term = factor(clean_term, levels = level_order))
-
-shading_df <- cleaned_effects %>%
-  mutate(y_numeric = as.numeric(clean_term)) %>%
-  filter(str_detect(clean_term, "\\*")) # Filter for interaction terms
-
-
-plot_axis_asv <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
-  geom_rect(
-    data = shading_df,
-    aes(ymin = y_numeric - 0.5, ymax = y_numeric + 0.5, xmin = -Inf, xmax = Inf),
-    fill = "#FBEADC", # A light orange/peach color like the example
-    alpha = 0.7,
-    inherit.aes = FALSE
-   ) +
-   # Add a vertical line at zero, which represents "no effect"
-  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
-   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
-   geom_pointrange(
-   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
-     size = 0.25,linewidth = 1,
-  ) +
-  scale_color_manual(
-    values = c(
-      "TRUE" = "red",
-      "FALSE" = "black"
-    ), name = "Effect Status" # Legend title
-  ) +
-  scale_y_discrete( labels = function(x) { ifelse(str_detect(x, '\\*'),  str_glue("<b style='color:royalblue'>{x}</b>"), as.character(x)) }) +
-  facet_wrap(~ outcome_label) +
-  # Add labels and a clean theme
-  labs(
-    x = "Predicted Shift in Axis Score",
-    title = "Predictors of Microbiome Compositional State",
-    y = ''
-  ) +
-  theme_classic(base_size = 11) +
-  theme(legend.position = "none", axis.text.y = element_markdown())
-
-plot_axis_asv
-```
-```{r}
-
-
-final_plot <- plot_grid( top_row_asv, 
-                         plot_axis_asv ,
-                ncol  = 1, 
-                rel_heights = c(2, 2),
-                labels = c(NA, 'c'))
-   
-library(cowplot)
-title <- ggdraw() + 
-  draw_label("Rebuttal fig X",fontface = 'bold',x = 0,hjust = 0) +
-  theme(plot.margin = margin(0, 0, 0, 0))
-
-combined <- plot_grid(
-  title, final_plot,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
-
-ggsave('../data/R30_axis_model_asv.pdf',
-      width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
-      dpi = 300)    
-```
-```
 
