@@ -22,6 +22,11 @@ knitr::opts_chunk$set(
   message = FALSE,
   warning = FALSE
 )
+library(tidyverse)
+library(patchwork)
+library(RColorBrewer)
+library(ggrastr)
+library(cowplot)
 ```
 
 # Paths
@@ -62,15 +67,17 @@ if (length(missing) > 0) {
 Shared aesthetics used by the downstream Figure 1 panels.
 
 ```{r plot-defaults}
-library(tidyverse)
-library(patchwork)
+
 
 umap_pt_size    <- 0.5
 axis_text_size  <- 10
 axis_title_size <- 10
+gray_bg_color <- 'gray98'
 
 # Food-group color key (used by downstream plotting).
 color_key <- read_csv(color_key_file, col_types = "ccccc")
+
+dtb <- read_csv(dtb_file)
 ```
 
 # Stage 1 — Build the per-day relative-abundance matrix
@@ -81,7 +88,7 @@ each `(patient, day)` we sum to a daily total per food code, then divide
 by the daily grand total.
 
 ```{r build-relabd-matrix}
-dtb <- read_csv(dtb_file)
+
 
 # 1. Sum dehydrated weight per (patient, day, food code).
 fc_table <- dtb %>%
@@ -217,74 +224,245 @@ summary_tbl <- summary_tbl %>%
   mutate(sampleid = paste0(pid, "d", fdrt)) %>%
   left_join(faith, by = "sampleid") %>%
   relocate(sampleid, .after = fdrt)
-```
 
-
-```{r}
 # ---- 4. Join TaxUMAP coords ----
 # index_column looks like "PP1_-6"  -->  "P" + pid + "_" + fdrt
 plot_tbl <- summary_tbl %>%
   mutate(index_column = paste0("P", pid, "_", fdrt)) %>%
   inner_join(taxumap, by = "index_column")
-
-# Named vector of food-group colors for ggplot scale
-fg_colors <- setNames(color_key$color, color_key$shortname)
-
-# ---- 5. Common theme ----
-theme_umap <- theme_void(base_size = 11) +
-  theme(plot.title    = element_text(hjust = 0.5, face = "bold"),
-        legend.position = c(0.85, 0.25),
-        legend.key.size = unit(0.35, "cm"),
-        legend.title  = element_text(size = 8),
-        legend.text   = element_text(size = 7),
-        axis.title    = element_text(size = 8),
-        axis.title.y  = element_text(angle = 90))
-
-base_aes <- aes(x = taxumap1, y = taxumap2)
-
-# ---- 6. Panel e: day relative to transplant ----
-p_e <- ggplot(plot_tbl, base_aes) +
-  geom_point(aes(color = fdrt), size = 0.8, alpha = 0.85) +
-  scale_color_distiller(palette = "Spectral",
-                        breaks = c(-10, 0, 7, 15, 49)) +
-  labs(title = "Day relative\nto transplant",
-       x = "TaxUMAP1", y = "TaxUMAP2", color = NULL) +
-  theme_umap
-
-# ---- 7. Panel f: caloric intake (x 10^3 kcal) ----
-p_f <- ggplot(plot_tbl, base_aes) +
-  geom_point(aes(color = total_calories / 1000), size = 0.8, alpha = 0.85) +
-  scale_color_viridis_c(option = "plasma") +
-  labs(title = "Caloric intake",
-       x = "TaxUMAP1", y = "TaxUMAP2",
-       color = expression(x~10^3~Kcal)) +
-  theme_umap
-
-# ---- 8. Panel g: most consumed food group ----
-p_g <- ggplot(plot_tbl, base_aes) +
-  geom_point(aes(color = top_fg_name), size = 0.8, alpha = 0.9) +
-  scale_color_manual(values = fg_colors, name = NULL) +
-  labs(title = "Most consumed\nfood group",
-       x = "TaxUMAP1", y = "TaxUMAP2") +
-  theme_umap +
-  theme(legend.position = "right",
-        legend.key.size = unit(0.4, "cm"))
-
-# ---- 9. Panel h: diet alpha-diversity (x 10^3) ----
-p_h <- ggplot(plot_tbl, base_aes) +
-  geom_point(aes(color = faith_pd / 1000), size = 0.8, alpha = 0.85) +
-  scale_color_viridis_c(option = "viridis") +
-  labs(title = expression(Diet~alpha*"-diversity"),
-       x = "TaxUMAP1", y = "TaxUMAP2",
-       color = expression(""%*%10^3)) +
-  theme_umap
-
-# ---- 10. Combine ----
-fig <- (p_e | p_f | p_g | p_h) +
-  plot_annotation(tag_levels = list(c("e", "f", "g", "h"))) &
-  theme(plot.tag = element_text(face = "bold", size = 14))
-
-ggsave("../data/162_taxumap_4panel.pdf", fig, width = 10, height = 4)
-
-fig
 ```
+## old code 
+
+## e: day relative to transplant
+
+```{r}
+# cuztomizing the times bins of the drt
+cutoff = 0 # Day 0 is conveneint but this can be varied
+n_groups_pre = 3;  # all HCT days <0 will be split into 3 bins; can vary this number to play
+n_groups_post = 6; # all HCT days >0 will be split into 6 bins; can vary this number to play
+
+# split the fdrt into groups:
+umap_time <- plot_tbl %>% 
+  select(taxumap1, taxumap2, fdrt)  
+
+times <- umap_time %>% select( fdrt)  
+
+splits <- times %>% 
+  split(.$fdrt <= 0)
+pre <- splits %>% 
+  pluck('TRUE') %>% 
+  mutate(bin = cut_number(fdrt, n_groups_pre))
+post <- splits %>% 
+  pluck('FALSE') %>% 
+  mutate(bin = cut_number(fdrt, n_groups_post)) 
+both <- bind_rows(pre, post) %>% 
+  distinct(fdrt, .keep_all = T)
+
+umap_time_df <- umap_time %>% 
+  left_join(both)
+
+umap_drt_high_to_low_bin <- umap_time_df %>% 
+  arrange(desc(fdrt)) %>% 
+    ggplot() +
+  rasterise(geom_point(aes(x = taxumap1, y = taxumap2, color = bin), alpha = 1,size = umap_pt_size , shape = 16), dpi = 300) +
+   scale_color_manual(values = RColorBrewer::brewer.pal(9,"Spectral"))  +
+  labs(title = 'Day relative to\ntransplant') +
+   theme_classic() +
+   theme(line = element_blank(),
+         legend.position = "none",
+         legend.title = element_blank(),
+         axis.title=element_blank(),
+         axis.text= element_blank(),
+         axis.ticks = element_blank(),
+              panel.background = element_rect(fill=gray_bg_color), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), #remove major gridlines
+    panel.grid.minor = element_blank(), #remove minor gridlines
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') ,
+        aspect.ratio=1)
+
+umap_drt_high_to_low_bin
+```
+
+## f: caloric intake
+
+```{r} 
+out2_caloric <- plot_tbl %>% 
+  mutate(transform_cal = sqrt(total_calories)) %>% 
+    ggplot() +
+  rasterise(geom_point(aes(x = taxumap1, y = taxumap2, color = transform_cal), alpha = 1,size = umap_pt_size , shape = 16), dpi = 300) +
+  paletteer::scale_color_paletteer_c("viridis::plasma") +
+  labs(title = 'Caloric intake\n(*1000 Kcal)') +
+  theme_classic() +
+  #lemon::coord_capped_cart(bottom = 'both', left = 'both') +
+  theme(line = element_blank(),
+        legend.position = "none",
+        legend.title = element_blank(),
+        axis.title=element_blank(),
+        axis.text= element_blank(),
+        axis.ticks = element_blank(),
+         panel.background = element_rect(fill=gray_bg_color), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), #remove major gridlines
+    panel.grid.minor = element_blank(), #remove minor gridlines
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') ,
+        aspect.ratio=1)  
+```
+
+## g: dominant food group
+
+```{r}
+# Build the color lookup from the data itself
+color_key <- plot_tbl |> 
+  distinct(top_fg_name, top_fg_color) |> 
+  deframe()  # turns two-col tibble into a named vector
+
+out2_dominant <- plot_tbl %>% 
+  ggplot() +
+  rasterise(geom_point(aes(x = taxumap1, y = taxumap2, color = top_fg_name), alpha = 1,size = umap_pt_size , shape = 16), dpi = 300) +
+  labs(x = 'TaxUMAP1', y = 'TaxUMAP2', title = 'Most consumed food group') +
+  scale_color_manual(values = color_key) +
+  theme_classic() +
+  #lemon::coord_capped_cart(bottom = 'both', left = 'both') +
+  theme(line = element_blank(),
+        legend.position = "none",
+        legend.title = element_blank(),
+        axis.title=element_blank(),
+        axis.text= element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_rect(fill=gray_bg_color), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') , aspect.ratio=1) +
+  guides(colour = guide_legend(override.aes = list(alpha=1)))
+out2_dominant
+```
+
+## h: faith alpha diversity
+
+```{r}
+umap_faith <- plot_tbl %>% 
+  mutate(log10faith = log10(faith_pd + 1)) %>% 
+    ggplot() +
+  rasterise(geom_point(aes(x = taxumap1, y = taxumap2, color = faith_pd), alpha = 1,size = umap_pt_size , shape = 16), dpi = 300) +
+  viridis::scale_color_viridis() +
+  labs(title = 'Diet a diversity\n(*1000)') +
+  theme_classic() +
+  theme(line = element_blank(),
+        legend.title = element_blank(),
+        axis.title=element_blank(),
+        axis.text= element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = 'none', 
+        aspect.ratio=1,
+                 panel.background = element_rect(fill=gray_bg_color), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), #remove major gridlines
+    panel.grid.minor = element_blank(), #remove minor gridlines
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') 
+        )
+```
+
+
+## assemble taxUMAPs
+
+```{r}
+middle_maps <- plot_grid(umap_drt_high_to_low_bin,  out2_caloric, out2_dominant, umap_faith, 
+          nrow = 1, hjust = 0,
+          align = 'hv',
+          labels = c( 'e', "f", 'g','h'),
+          axis = 'tblr')
+
+ggsave('../data/F1efgh_162_four_taxUMAPs.pdf', plot = middle_maps)
+```
+
+
+```{r}
+# # ---- Panel-e binning parameters ----
+# cutoff         <- 0
+# n_groups_pre   <- 3
+# n_groups_post  <- 6
+# 
+# pre_breaks  <- quantile(plot_tbl$fdrt[plot_tbl$fdrt <  cutoff],
+#                         probs = seq(0, 1, length.out = n_groups_pre  + 1),
+#                         na.rm = TRUE)
+# post_breaks <- quantile(plot_tbl$fdrt[plot_tbl$fdrt >= cutoff],
+#                         probs = seq(0, 1, length.out = n_groups_post + 1),
+#                         na.rm = TRUE)
+# 
+# # Force the boundary at the cutoff so pre/post share an edge -> no orphan bin
+# pre_breaks[length(pre_breaks)] <- cutoff
+# fdrt_breaks <- unique(c(pre_breaks, post_breaks))
+# 
+# plot_tbl <- plot_tbl %>%
+#   mutate(fdrt_bin = cut(fdrt, breaks = fdrt_breaks,
+#                         include.lowest = TRUE, dig.lab = 3))
+# 
+# # Derive bin count from the actual factor — not assumed
+# n_bins <- nlevels(plot_tbl$fdrt_bin)
+# spectral_cols <- rev(colorRampPalette(brewer.pal(11, "Spectral"))(n_bins))
+# 
+# # ---- Common theme: legend OUTSIDE each panel ----
+# theme_umap <- theme_bw(base_size = 11) +
+#   theme(
+#     plot.title       = element_text(hjust = 0.5, face = "bold"),
+#     panel.grid       = element_blank(),
+#     legend.position  = "right",
+#     legend.key.size  = unit(0.4, "cm"),
+#     legend.title     = element_text(size = 9),
+#     legend.text      = element_text(size = 8),
+#     axis.title       = element_text(size = 9),
+#     axis.text        = element_blank(),
+#     axis.ticks       = element_blank()
+#   )
+# 
+# base_aes <- aes(x = taxumap1, y = taxumap2)
+# 
+# # ---- e. Day relative to transplant (binned Spectral) ----
+# p_e <- ggplot(plot_tbl, base_aes) +
+#   geom_point(aes(color = fdrt_bin), size = 0.8, alpha = 0.85) +
+#   scale_color_manual(values = spectral_cols, name = NULL, drop = FALSE) +
+#   labs(title = "Day relative\nto transplant",
+#        x = "TaxUMAP1", y = "TaxUMAP2") +
+#   theme_umap
+# 
+# # ---- f. Caloric intake ----
+# p_f <- ggplot(plot_tbl, base_aes) +
+#   geom_point(aes(color = total_calories / 1000), size = 0.8, alpha = 0.85) +
+#   scale_color_viridis_c(option = "plasma") +
+#   labs(title = "Caloric intake",
+#        x = "TaxUMAP1", y = "TaxUMAP2",
+#        color = expression(x~10^3~Kcal)) +
+#   theme_umap
+# 
+# # ---- g. Most consumed food group ----
+# fg_colors <- setNames(color_key$color, color_key$shortname)
+# 
+# p_g <- ggplot(plot_tbl, base_aes) +
+#   geom_point(aes(color = top_fg_name), size = 0.8, alpha = 0.9) +
+#   scale_color_manual(values = fg_colors, name = NULL) +
+#   labs(title = "Most consumed\nfood group",
+#        x = "TaxUMAP1", y = "TaxUMAP2") +
+#   theme_umap
+# 
+# # ---- h. Diet alpha-diversity ----
+# p_h <- ggplot(plot_tbl, base_aes) +
+#   geom_point(aes(color = faith_pd / 1000), size = 0.8, alpha = 0.85) +
+#   scale_color_viridis_c(option = "viridis") +
+#   labs(title = expression(Diet~alpha*"-diversity"),
+#        x = "TaxUMAP1", y = "TaxUMAP2",
+#        color = expression(""%*%10^3)) +
+#   theme_umap
+# 
+# # ---- Combine ----
+# fig <- (p_e | p_f | p_g | p_h) +
+#   plot_annotation(tag_levels = list(c("e", "f", "g", "h"))) &
+  # theme(plot.tag = element_text(face = "bold", size = 14))
+```
+
+
+
