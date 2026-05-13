@@ -10,7 +10,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
-library(LCAtoolbox)
 library(gtsummary)
 library(ggsurvfit)
 library(tidycmprsk)
@@ -21,8 +20,8 @@ library(cowplot)
 library(survminer)
 library(patchwork)
 library(geepack)
+library(broom)
 ```
-
 
 # load the cleaned data
 
@@ -404,7 +403,70 @@ ggplot(results, aes(x = LogHR, y = Cluster, color = Cluster)) +
   # Set x-axis limits - adjust these based on your actual CI ranges for a good view
   coord_cartesian(xlim = c(-0.15, 0.25))  
 ```
- 
+## cluster model + ave caloric intake 
+
+```{r}
+df_main <- read_rds('../data/R09_df_main_for_nutrition_clinical_outcome.RDS') |> 
+  inner_join(read_rds('../data/R02_cleaned_clinical_outcome.rds') |> select(pid, modal_diet))
+
+fit_cal_cluster <- coxph(Surv(OStime_30,OSevent)~ modal_diet*day_exposed  + intensity + source_and_gvhdppx + avg_total_caloric_intake,
+             data= df_main |> filter(OStime_30 > 0)) 
+```
+### plotting 
+
+```{r}
+# Pull tidy coefficients from the fitted coxph object and keep just the two
+# antibiotic-exposure effects we want to display (one per cluster).
+plot_df <- fit_cal_cluster |>
+  tidy(conf.int = TRUE) |>
+  filter(term %in% c("day_exposed", "modal_dietHigh intake:day_exposed")) |>
+  # Cluster 1 effect is day_exposed alone; Cluster 2 is day_exposed + interaction.
+  # Easier path: refit and use emmeans, but here we just reconstruct manually.
+  mutate(
+    cluster = if_else(term == "day_exposed", "Cluster 1", "Cluster 2"),
+    # For Cluster 2, the displayed effect should be the sum of main + interaction.
+    # Pull both rows, then combine below.
+  )
+
+# Cleaner: grab the main effect and the sum (main + interaction) with their SEs
+# from the variance-covariance matrix so the CIs are correct.
+vc <- vcov(fit_cal_cluster)
+b  <- coef(fit_cal_cluster)
+
+main_est  <- b["day_exposed"]
+main_se   <- sqrt(vc["day_exposed", "day_exposed"])
+
+sum_est <- b["day_exposed"] + b["modal_dietHigh intake:day_exposed"]
+sum_se  <- sqrt(
+  vc["day_exposed", "day_exposed"] +
+  vc["modal_dietHigh intake:day_exposed", "modal_dietHigh intake:day_exposed"] +
+  2 * vc["day_exposed", "modal_dietHigh intake:day_exposed"]
+)
+
+forest_df <- tibble(
+  cluster  = c("Cluster 1", "Cluster 2"),
+  estimate = c(main_est, sum_est),
+  se       = c(main_se,  sum_se)
+) |>
+  mutate(
+    conf.low  = estimate - 1.96 * se,
+    conf.high = estimate + 1.96 * se,
+    # Reverse the factor so Cluster 1 appears on top, matching the published figure.
+    cluster   = fct_rev(factor(cluster))
+  )
+
+# Plot on the log-HR scale to match Figure 3b exactly.
+ggplot(forest_df, aes(x = estimate, y = cluster)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey60") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0, linewidth = 0.5) +
+  geom_point(shape = 22, fill = "black", color = "black", size = 2) +
+  scale_x_continuous(limits = c(-0.1, 0.2), breaks = seq(-0.1, 0.2, 0.1)) +
+  labs(x = "Log HR per day\nof antibiotic exposure", y = NULL) +
+  theme_classic(base_size = 12) 
+
+ggsave('../data/R09_forest_fit_cal_cluster.png', width = 3, height = 2)
+```
+
 
 #  now F3
 
@@ -497,6 +559,8 @@ patient_summary <- daily_intake %>%
                                           "Above-median", "Below-median"),
     SugarCal_cat_high = factor(SugarCal_cat_high, levels = c('Above-median', 'Below-median'))
   )
+
+patient_summary |> write_rds('../data/R09_df_main_for_nutrition_clinical_outcome.RDS')
 ```
 
 ## two scatter correlation
@@ -578,6 +642,197 @@ p <- aod::wald.test(Sigma=vcov(fit)[c(2,8),c(2,8)],
 se <- sqrt((vcov(fit)[2,2] + vcov(fit)[8,8] + 2*vcov(fit)[2,8]))
 
 ```
+### divide the sugar density by three or four bins
+
+```{r}
+# Calculate the tertiles and explicitly convert them into a categorical factor.
+# If left as pure integers (1, 2, 3), the math assumes moving from bucket 1 to 2 
+# is the exact same risk jump as moving from 2 to 3. Factoring breaks that assumption.
+patient_data_modeled <- patient_summary |>
+  filter(OStime_30 > 0) |>
+  mutate(sugar_tertile = factor(ntile(avg_sugar_density_per_1000kcal, 3)))
+
+# Fit the updated model. 
+# The Cox model will automatically set the bottom 33% (Tertile 1) as the baseline
+# and compare the middle and top tiers directly against it.
+fit_tertile <- coxph(
+  Surv(OStime_30, OSevent) ~ sugar_tertile * day_exposed + source_and_gvhdppx + intensity, 
+  data = patient_data_modeled
+)
+
+summary(fit_tertile)
+#(summary(fit_tertile)) This is the full diagnostic report. It includes everything from the first print, plus two critical additions:
+#Confidence Intervals (lower .95 and upper .95): This is the range where the true hazard ratio likely lives. For example, your Unmodified+CNI group has a hazard ratio of 8.5, but the summary shows the 95% confidence interval is between 2.15 and 34.0. That is a massive range of uncertainty. Global Model Tests: It gives you three different ways to test if the model as a whole is better than nothing (Likelihood ratio, Wald, and Score tests), plus "Concordance," which grades the model's overall predictive accuracy (0.706, or about 70%).
+```
+```{r}
+fit_tertile <- coxph(
+  Surv(OStime_30, OSevent) ~ SugarCal_cat_high + day_exposed + source_and_gvhdppx , 
+  data = patient_data_modeled
+)
+
+summary(fit_tertile)
+```
+
+### spline the sugar density
+
+```{r}
+# Filter out early drop-offs to keep the timeline clean
+working_data <- patient_summary |> 
+  filter(OStime_30 > 0)
+
+# Build the model using pspline() for penalized splines.
+# df = 3 tells the math to allow the line to bend, taking up roughly 3 "slots" 
+# of statistical power to draw a flexible curve instead of a rigid straight line.
+# The interaction term is removed here to prevent the model from completely collapsing.
+spline_fit <- coxph(
+  Surv(OStime_30, OSevent) ~ pspline(avg_sugar_density_per_1000kcal, df = 2) + 
+                             day_exposed + source_and_gvhdppx  + intensity , 
+  data =  patient_summary |>  filter(OStime_30 > 0)
+)
+
+# The summary will now show two p-values for sugar: 
+# one for the overall linear trend, and one specifically for the "curve" (non-linear).
+summary(spline_fit)
+# The model is globally valid ($p = 0.02$). Antibiotic exposure has emerged as a clear, statistically significant danger, raising mortality risk by ~10% for every additional day. The sugar spline shows that a straight-line risk is completely dead ($p=0.70$), while a curved biological relationship is strongly hinted at but just misses strict statistical proof ($p=0.092$) due to the low number of total events.
+```
+
+### visualizing the spline
+
+```{r}
+# Extract the raw mathematical predictions from the model.
+# type = "terms" isolates the exact shape of the curve, independent of other variables.
+# se.fit = TRUE grabs the standard errors needed to build the confidence interval.
+predictions <- predict(spline_fit, type = "terms", se.fit = TRUE)
+
+# The column name inside the prediction matrix exactly matches the formula text
+spline_col <- "pspline(avg_sugar_density_per_1000kcal, df = 2)"
+
+# Build a fresh, clean dataframe just for plotting. 
+plot_data <- tibble(
+  sugar = working_data$avg_sugar_density_per_1000kcal,
+  log_hazard = predictions$fit[, spline_col],
+  std_error = predictions$se.fit[, spline_col]
+) |> 
+  mutate(
+    # The Cox model naturally calculates risk as a "log-hazard". 
+    # Exponentiating it (exp) flips it into a Hazard Ratio (HR), which is much easier to read.
+    hr = exp(log_hazard),
+    
+    # Calculate the 95% bounds on the log scale first, then exponentiate them into HRs.
+    lower_ci = exp(log_hazard - 1.96 * std_error),
+    upper_ci = exp(log_hazard + 1.96 * std_error)
+  ) |> 
+  # Sort the data from lowest sugar to highest so the line draws smoothly left to right.
+  arrange(sugar)
+
+# Paint the final visual using the calculated Hazard Ratios.
+ggplot(plot_data, aes(x = sugar, y = hr)) +
+  # The ribbon draws the 95% confidence interval cloud behind the line.
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), fill = "#2c3e50", alpha = 0.2) +
+  geom_line(color = "#e74c3c", linewidth = 1.2) +
+  
+  # A dashed line right at HR = 1 acts as the baseline "no risk change" anchor.
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black", linewidth = 0.8) +
+  
+  # Using a log10 scale for the y-axis keeps Hazard Ratios visually symmetrical 
+  # (e.g., doubling risk looks the same size as halving risk).
+  scale_y_continuous(trans = "log10", breaks = c(0.25, 0.5, 1, 2, 4, 8)) +
+  labs(
+    title = "Non-Linear Impact of Sugar Density on Mortality Risk",
+    x = "Average Sugar Density (per 1000kcal)",
+    y = "Hazard Ratio"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+
+```{r}
+# Visualizing the spline is the most important part.
+# termplot extracts the bent curve from the model and draws it.
+# If the line dips in the middle and goes up at the ends, that is the "Goldilocks" zone.
+termplot(
+  spline_fit, 
+  term = 1, # Plots the first variable in the formula (the sugar spline)
+  se = TRUE, # Draws the confidence intervals around the curve
+  col.term = "blue", 
+  col.se = "gray"
+)
+```
+
+ 
+## add caloric intake to the above model 
+
+```{r}
+# caloric intake is moderate to highly correlated with the sugar denstiy, and now there are way too many vars for way too few events , so overfit is very likely
+fit_cal <- coxph(Surv(OStime_30,OSevent)~ SugarCal_cat_high * day_exposed + 
+                   avg_total_caloric_intake +
+                   source_and_gvhdppx + intensity ,
+             data=patient_summary |> filter(OStime_30 > 0))
+# good the p for day_exposed is still significant! the results basically is the same!!!!
+```
+
+### forest 
+
+```{r}
+#  pull the per-group log HR for antibiotic exposure
+# directly from the coefficient vector and variance-covariance matrix.
+# Above-median sugar is the reference, so its effect is `day_exposed` alone.
+# Below-median sugar's effect is `day_exposed` + the interaction term.
+vc <- vcov(fit_cal)  
+b  <- coef(fit_cal)
+
+above_est <- b["day_exposed"]
+above_se  <- sqrt(vc["day_exposed", "day_exposed"])
+
+below_est <- b["day_exposed"] + b["SugarCal_cat_highBelow-median:day_exposed"]
+below_se  <- sqrt(
+  vc["day_exposed", "day_exposed"] +
+  vc["SugarCal_cat_highBelow-median:day_exposed",
+     "SugarCal_cat_highBelow-median:day_exposed"] +
+  2 * vc["day_exposed", "SugarCal_cat_highBelow-median:day_exposed"]
+)
+
+forest_df <- tibble(
+  group    = c("above-median\nsugar intake\ng/1000 kcal",
+               "below-median\nsugar intake\ngrams/1000Kcal"),
+  estimate = c(above_est, below_est),
+  se       = c(above_se,  below_se)
+) |>
+  mutate(
+    conf.low  = estimate - 1.96 * se,
+    conf.high = estimate + 1.96 * se,
+    # Keep above-median on top to match the published Fig. 3a layout.
+    group     = fct_inorder(group) |> fct_rev()
+  )
+
+# Forest plot on the log-HR scale, matching Fig. 3a styling.
+ggplot(forest_df, aes(x = estimate, y = group)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey60") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high),
+                 height = 0, linewidth = 0.5) +
+  geom_point(shape = 22, fill = "black", color = "black", size = 2) +
+  labs(x = "Log HR per day\nof antibiotic exposure", y = NULL) +
+  theme_classic(base_size = 12) 
+
+ggsave('../data/R09_forest_fit_cal_sugar_density.png', width = 3, height = 2)
+```
+
+
+### sugar density as continuous  
+
+```{r}
+# In survival analysis, the golden rule of thumb is that you need at least 10 events for every variable you put into the model. You have 9 degrees of freedom (variables) but only 27 events. The model is critically "overfit."
+# Using the continuous sugar density variable directly in the formula
+fit_continuous <- coxph(
+  Surv(OStime_30, OSevent) ~ avg_sugar_density_per_1000kcal * day_exposed + 
+                             source_and_gvhdppx + intensity, 
+  data = patient_summary |> filter(OStime_30 > 0)
+)
+
+summary(fit_continuous)
+
+```
+
 
 ## KM survival curve
 
@@ -916,6 +1171,7 @@ layout <- c(
 # final plot arrangement
 coeff_plot <- p_left + p_mid + p_right + plot_layout(design = layout)
 ```
+
 ## patient characteristics
 
 ```{r}
@@ -1072,3 +1328,103 @@ ggsave('../data/R09_sugar_density_OS.pdf',
 # Discharge is Subjective: Unlike death or engraftment, "discharge" is somewhat subjective. A cautious attending physician might keep a patient who eats poorly (Cluster 1) in the hospital longer purely for nutritional monitoring, regardless of their actual immune recovery or infection status.
 ```
 
+# Teng 
+
+This code gives you a 2D contour of log-HR on a grid of sugar intake per 1000kcal and abx exposure. Note that I used TCD + non-ablative as the reference group, which you can easily change. Changing the reference group will shift the scale of the contours, while the shape of the contours should be the same. 
+
+In the plot below, the red dashed curve represents 0 log-HR - this means with combinations of abx and sugar intake on the red line, the risk was the same as taking no sugar at all + no abx at all. This is more like a reference line defined by numerical values rather than the reality, because we know nobody took 0 sugar during the treatment. 
+
+What we can say is, the combinations corresponding to the yellow-ish contours reflected a higher risk of death, while the blue-ish contours reflected a lower risk of death. The most intense yellow zone happened to be high abx exposure + reasonably high sugar intake per 1000kcal. I believe this shows a reasonable interaction in a continuous manner which is consistent with what we claimed previously.
+
+You can also find some meshed areas, which represent areas where the 95% confidence intervals didn't cover the reference log-HR level of zero. You can use that to claim statistical significance for the high sugar + high abx region and the low sugar + low abx region. 
+
+What you may add in addition is that the median value of sugar intake per 1000kcal happened to be the grey horizontal line. This probably helped us to identify the abx effect for the high sugar group in our previous analyses because the most contrastive contours happened to be above the grey line. (You may choose not to say this to avoid further complexity in explaining this because it also depends on sampling distribution)
+
+Let me know if you want to have a call to discuss this. 
+
+@Dai, Angel One thing you may try is to adjust the range of sugar intake per 1000kcal for this contour plot. We have very few patients who took more than 150 grams per 1000 kcal, so I set a range between 23 to 150. This may be further tuned to hide some dark blue areas in the top which are likely to be driven by the outliers.
+
+```{r}
+library(splines)
+
+# Read the dataset. 
+df_use <- patient_summary
+
+# Fit the Cox Proportional Hazards model.
+# Using a natural spline (ns) allows the relationship between sugar and mortality to be non-linear.
+# Multiplying by day_exposed tests if the sugar effect changes based on antibiotic duration.
+# Filtering out patients who died on day 0 to avoid immortal time bias.
+fit <- coxph(
+  Surv(OStime_30, OSevent) ~ 
+    ns(avg_sugar_density_per_1000kcal, knots = quantile(df_use$avg_sugar_density_per_1000kcal, probs = c(0.1, 0.9))) * day_exposed + 
+    source_and_gvhdppx + 
+    intensity,
+  data = df_use |> filter(OStime_30 > 0)
+)
+
+# Output a clean summary table of the model's hazard ratios
+fit |> 
+  tbl_regression(exponentiate = FALSE) |> 
+  bold_p() |> 
+  as_gt() %>%
+  gt::gtsave(filename = "../data/R09_contour_model_res.png") 
+
+# Create a grid of hypothetical scenarios to map out the risk landscape.
+# This holds the clinical variables constant while varying sugar and antibiotics.
+grid_df <- expand.grid(
+  day_exposed = seq(0, 20, length.out = 100),
+  avg_sugar_density_per_1000kcal = seq(23, 150, length.out = 100),
+  source_and_gvhdppx = "TCD+TCD",
+  intensity = "nonablative"
+)
+
+# Generate risk predictions (log-hazard) for every scenario in the grid
+pred <- predict(fit, newdata = grid_df, type = "lp", se.fit = TRUE)
+
+# Convert the log-hazards into real-world Hazard Ratios using exp()
+# On the log scale, 0 is neutral. On the HR scale, 1 is neutral.
+grid_df <- grid_df |> 
+  mutate(
+    lp = pred$fit,
+    se = pred$se.fit,
+    hr = exp(lp), # This is the crucial transformation
+    
+    # Calculate confidence bounds on the log scale first, then exponentiate them.
+    # Doing it in this order ensures mathematical accuracy.
+    lower_hr = exp(lp - 1.96 * se),
+    upper_hr = exp(lp + 1.96 * se),
+    
+    # Check significance against 1 (the new neutral line)
+    significant = case_when(
+      lower_hr > 1 ~ "Significantly > 1 (Harmful)",
+      upper_hr < 1 ~ "Significantly < 1 (Protective)",
+      TRUE         ~ "Not significant"
+    )
+  )
+
+# Draw the contour map using the transformed HR values
+ggplot(grid_df, aes(x = day_exposed, y = avg_sugar_density_per_1000kcal)) +
+  # Custom breaks prevent the color palette from being stretched by massive HR values.
+  # Anything above 5 gets grouped into a single color.
+  geom_contour_filled(
+    aes(z = hr),
+    breaks = c(0, 0.5, 0.8, 1, 1.5, 2, 3, 5, Inf)
+  ) +
+  geom_contour(aes(z = hr), breaks = 1, color = "red", linewidth = 1, linetype = 2) +
+  geom_tile(aes(color = significant), fill = NA, alpha = 0.25) +
+  geom_segment(
+    y = median(df_use$avg_sugar_density_per_1000kcal, na.rm = TRUE),
+    x = 0, xend = 20, color = "grey"
+  ) + 
+  # Using a cleaner viridis color palette for the background hazard ratios
+  scale_fill_viridis_d(option = "mako", direction = -1, name = "Contours of\nHazard Ratio") +
+  scale_color_manual(
+    name = "Significance based on\n95% confidence interval",
+    values = c("Not significant" = NA, "Significantly > 1 (Harmful)" = "maroon", "Significantly < 1 (Protective)" = "forestgreen")
+  ) +
+  theme_classic() + 
+  xlab("Days of broad-spectrum antibiotics exposure") + 
+  ylab("Average grams of sugar intake per 1000Kcal\nbetween day -7 and day 12") 
+```
+
+pspline(df=2) uses an algorithm to automatically find the best smooth curve by penalizing wild wiggles. ns() requires you to drop physical anchor points (knots) for the curve to bend around, and mathematically forces the extreme ends of the graph to be straight lines to prevent erratic predictions at the boundaries. Using ns() turns your data into standard, predictable math equations, allowing R's predict() function to easily map out risks and confidence intervals for hypothetical scenarios. pspline() creates a highly customized curve tied to the original data, making it notoriously difficult for R to calculate standard errors when generating a new 2D map.
