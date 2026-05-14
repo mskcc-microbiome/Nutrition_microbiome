@@ -57,18 +57,124 @@ df_main <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>%
   mutate(day_exposed_cat = str_replace(day_exposed_cat, ' \\(.+\\)','')) %>% 
   mutate(abx_diet_cat = str_glue('{modal_diet}, {day_exposed_cat}'))
 df_main %>% count(abx_diet_cat)
- 
 ```
  
-```{r}
-colnames(df_main)
-df_main %>% count(type_gvhd_simple)
-df_main %>% count(abx_diet_cat)
-```
- 
-# OS model
+# cluster model
 
-## survival 
+## model 
+
+```{r OS_model}
+fit_cluster <- coxph(Surv(OStime_30,OSevent)~ modal_diet * day_exposed  + intensity + source_and_gvhdppx,
+             data= df_main |> filter(OStime_30 > 0) )
+```
+## forest for the original model and a variate where the cal is added 
+
+```{r}
+make_diet_forest <- function(fit, ref_label, alt_label, plot_title = NULL) {
+  vc <- vcov(fit)
+  b  <- coef(fit)
+
+  # Find the interaction term regardless of which side `day_exposed` appears on
+  int_term <- grep("modal_diet.*:day_exposed|day_exposed:.*modal_diet",
+                   names(b), value = TRUE)
+  if (length(int_term) != 1) {
+    stop("Couldn't uniquely identify the interaction term. Found: ",
+         paste(int_term, collapse = ", "))
+  }
+
+  ref_est <- b["day_exposed"]
+  ref_se  <- sqrt(vc["day_exposed", "day_exposed"])
+
+  alt_est <- b["day_exposed"] + b[int_term]
+  alt_se  <- sqrt(
+    vc["day_exposed", "day_exposed"] +
+    vc[int_term, int_term] +
+    2 * vc["day_exposed", int_term]
+  )
+
+  forest_df <- tibble(
+    group    = c(ref_label, alt_label),
+    estimate = c(ref_est, alt_est),
+    se       = c(ref_se,  alt_se)
+  ) |>
+    mutate(
+      conf.low  = estimate - 1.96 * se,
+      conf.high = estimate + 1.96 * se,
+      HR        = exp(estimate),
+      HR.low    = exp(conf.low),
+      HR.high   = exp(conf.high),
+      group     = fct_inorder(group) |> fct_rev()
+    )
+
+  ggplot(forest_df, aes(x = HR, y = group)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey60") +
+    geom_errorbarh(aes(xmin = HR.low, xmax = HR.high),
+                   height = 0, linewidth = 0.5) +
+    geom_point(shape = 22, fill = "black", color = "black", size = 2) +
+    scale_x_log10() +
+    labs(x = "HR per day\nof antibiotic exposure",
+         y = NULL, title = plot_title) +
+    theme_classic(base_size = 12)
+}
+```
+
+## the plot
+
+```{r}
+# Original model
+cluster_HR <- make_diet_forest(
+  fit_cluster,
+  ref_label  = "Cluster 1",
+  alt_label  = "Cluster 2"
+)
+```
+
+
+```{r}
+# Variant adjusting for average total caloric intake
+df_main <- read_rds('../data/R09_df_main_for_nutrition_clinical_outcome.RDS') |> 
+  inner_join(read_rds('../data/R02_cleaned_clinical_outcome.rds') |> select(pid, modal_diet))
+
+fit_cluster_cal <- coxph(
+  Surv(OStime_30, OSevent) ~ modal_diet * day_exposed +
+    avg_total_caloric_intake + intensity + source_and_gvhdppx,
+  data = df_main |> filter(OStime_30 > 0)
+)
+
+forest_fit_cal_cluster_model_HR <- make_diet_forest(
+  fit_cluster_cal,
+  ref_label  = "Cluster 1",
+  alt_label  = "Cluster 2",
+  plot_title = "Adjusted for avg total caloric intake"
+)
+
+ggsave('../data/R09_forest_fit_cal_cluster_model_HR.pdf', width = 3, height = 2, plot = forest_fit_cal_cluster_model_HR)
+```
+
+
+```{r}
+# make the above table publication ready with newer code
+publication_table_OS_output_model_cluster <- tbl_regression(
+  fit,
+  include = c(modal_diet, day_exposed, "modal_diet:day_exposed"),
+  exponentiate = T, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
+  label = list(
+    modal_diet ~ "Diet-pattern cluster",
+    day_exposed ~ "Abx exposure(days)"
+  )
+  ) %>%
+  bold_p(t = 0.05) %>% # Make p-values < 0.05 bold
+  bold_labels() %>%
+  as_gt() %>% 
+  gt::tab_header(
+    title = "Multivariable Cox Model for Overall Survival"
+  ) 
+
+```
+
+
+
+## univariate model 
 
 ```{r survival}
 # survival between two clusters
@@ -88,8 +194,9 @@ survival_plot <- list(
   ggsurvfit::ggsurvfit_build(OS_clusers)
 ) |> 
   wrap_plots()
-
 ```
+
+## KM survival curves
 
 ```{r}
 # Kaplan-Meier survival curves for 4 groups
@@ -122,395 +229,6 @@ survival_plot <- list(
 # Understanding Censoring: Drops in the "at risk" numbers that don't correspond to steps down in the curve can indicate censoring (patients lost to follow-up, or the study ended before they had an event).
 # "Events" : For each group, this table typically shows the cumulative number of events (e.g., deaths) that have occurred up to the specific time points on the X-axis.
 # "landmarked at day 12": This means the analysis effectively starts at HCT day 12. Only patients who were alive at day 12 are included, and their follow-up time begins from this point. This is often done to avoid "immortal time bias," where patients who survive longer have more opportunity to, for example, receive a longer duration of treatment, which could skew results if not accounted for.
-```
-
-## Table S3 model fit
-
-```{r OS_model}
-# rename the columns so that they look nice in the output table!
-input_df <- df_main |> 
-  filter(OStime_30 > 0) %>% 
-  rename(`Diet-pattern cluster` = modal_diet,
-         `Abx exposure(days)` =day_exposed,
-         `Conditioning intensity` = intensity,
-         Graft_type_and_GvHD_prophylaxis = source_and_gvhdppx) %>% 
-  mutate(Graft_type_and_GvHD_prophylaxis = case_when(
-    Graft_type_and_GvHD_prophylaxis == 'TCD+TCD' ~ 'T-cell depleted PBSC',
-    Graft_type_and_GvHD_prophylaxis == 'Cord+CNI-based' ~ 'Cord blood + CNI-based',
-    Graft_type_and_GvHD_prophylaxis == 'Unmodified+CNI-based' ~ 'Unmodified graft + CNI-based',
-    Graft_type_and_GvHD_prophylaxis == 'Unmodified+PTCy-based' ~ 'Unmodified graft + PTCy-based'
-  )) %>% 
-  mutate(Graft_type_and_GvHD_prophylaxis = factor(Graft_type_and_GvHD_prophylaxis, levels = c('T-cell depleted PBSC','Cord blood + CNI-based','Unmodified graft + CNI-based','Unmodified graft + PTCy-based'))) %>% 
-    rename(`Graft source and GvHD prophylaxis` = Graft_type_and_GvHD_prophylaxis) %>% 
-   mutate(`Diet-pattern cluster` = case_when(
-    `Diet-pattern cluster` == 'Lower-intake/sugar-enriched' ~ 'Cluster 1 (Lower-intake/sugar-enriched)',
-    `Diet-pattern cluster` == 'Higher-intake' ~ 'Cluster 2 (Higher-intake)' 
-  )) |> 
-  mutate(exposure_in_week = `Abx exposure(days)`/7)
-
-
-
-fit <- coxph(Surv(OStime_30,OSevent)~modal_diet*day_exposed  + intensity + source_and_gvhdppx,
-             data= df_main |> filter(OStime_30 > 0) |>  mutate(modal_diet = case_when(
-    modal_diet == 'Lower-intake/sugar-enriched' ~ 'Cluster 1 (Lower-intake/sugar-enriched)',
-    modal_diet == 'Higher-intake' ~ 'Cluster 2 (Higher-intake)' 
-  )))
-
-
-
-
-# just print the multivar table to the correct size
-
-title <- ggdraw() + 
-  draw_label(
-    "Table S3",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 5)
-  )
-
-
-table_OS <- ggdraw() + draw_image("../data/09_OS_model_multi.png", scale = .8)
-    
-combined <- plot_grid(
-  title, table_OS,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.05, 1)
-)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
-
-ggsave('../results//Table_S3_OS_multivariate_R09.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
-```
-```{r}
-# make the above table publication ready with newer code
-publication_table_OS_output_model_cluster <- tbl_regression(
-  fit,
-  # Just list the main variables you want to see.
-  # gtsummary is smart enough to keep the interaction term 
-  # associated with these variables automatically.
-  include = c(modal_diet, day_exposed, "modal_diet:day_exposed"),
-  exponentiate = T, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
-  # The 'label' argument maps variable names to publication-ready labels.
-  # The formula structure is list(variable_name ~ "Desired Label")
-  label = list(
-    modal_diet ~ "Diet-pattern cluster",
-    day_exposed ~ "Abx exposure(days)"
-    # source_and_gvhdppx ~ "Graft source and GvHD prophylaxis",
-    # intensity ~ "Conditioning intensity"
-    # Note: The interaction term label is automatically created from the main variable labels.
-  )
-  ) %>%
-  # Improve the table's appearance and clarity
-  bold_p(t = 0.05) %>% # Make p-values < 0.05 bold
-  bold_labels() %>%
-  # Add a clear title and a source note for context
-  as_gt() %>% # Convert to a gt object for better customization
-  gt::tab_header(
-    title = "Multivariable Cox Model for Overall Survival"
-  ) 
-
-
-# --- Step 3: Display the Table ---
-# In RStudio or a Quarto/RMarkdown document, this will render a beautiful HTML table.
-publication_table_OS_output_model_cluster %>% 
-  gt::gtsave(filename = "../data/R09_cluster_model_multivariate_output.png") 
-
-# to produce the pdf version of the table in a pdf 
-table_S5 <- ggdraw() + draw_image("../data/R09_cluster_model_multivariate_output.png", scale = 0.7)
-
- title <- ggdraw() + 
-  draw_label(
-    "Extended Table E5",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 5)
-  )
-
-combined <- plot_grid(
-  title, table_S5,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-)+theme(plot.margin = unit(c(1,1,10,1), "cm"))
-
-ggsave('../data/Table_S5_cluster_model_multivariate_output_R09.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
-
-```
- 
- 
-```{r}
-# what if I change the exposure to be in weeks
-fit_wk <- coxph(Surv(OStime_30,OSevent)~`Diet-pattern cluster`*exposure_in_week  + `Conditioning intensity` + `Graft source and GvHD prophylaxis`,
-             data= input_df)
-
-fit_wk |> 
-  tbl_regression(exponentiate = T) |> 
-  bold_p() |> 
-  as_gt() |> 
-  gtsave(filename="../data/09_OS_model_multi_wk.png")
-```
- 
-## F3C  
-
-```{r}
-## The following lines construct a Wald test on the association between abx exposure and OS for high intake patients.
-diff <- sum(coef(fit)[c(2,9)])
-p <- aod::wald.test(Sigma=vcov(fit)[c(2,9),c(2,9)],
-                    b=coef(fit)[c(2,9)],
-                    L=t(c(1,1)))
-
-## Visualizing associations between abx and OS for low and high intake patient groups:
-loghr <- data.frame(exposure = 0:20,
-                    hr = exp(c(coef(fit)[2]*0:20,
-                               diff*0:20)),
-                    group = c(rep("Lower intake",21),
-                              rep("Higher intake",21)),
-                    ub = exp(c((coef(fit)[2]+sqrt(vcov(fit)[2,2])*1.96)*0:20,
-                               (diff+1.96*sqrt(sum(vcov(fit)[c(2,9),c(2,9)])))*0:20)),
-                    lb = exp(c((coef(fit)[2]-sqrt(vcov(fit)[2,2])*1.96)*0:20,
-                               (diff-1.96*sqrt(sum(vcov(fit)[c(2,9),c(2,9)])))*0:20))
-)
-```
-
-
-```{r abx_VS_diet_logHR}
-abx_diet_logHR <- loghr |> 
-  ggplot(aes(x=exposure,y=hr)) + 
-  geom_line(aes(color=group), size = 1.5)+
-  geom_ribbon(aes(ymin=lb,ymax=ub),alpha=0.2) +
-  geom_hline(yintercept = 1,color="black",linetype=2)+
-  scale_y_continuous(transform = "log",labels=function(x) sprintf("%.0f", x))+
-  #facet_grid(.~group, labeller = labeller(facet_var = c("Higher intake" = "Lower intake", "Lower intake" = "Higher intake"))) +
-  facet_grid(.~group) +
-  ylab("log(Hazard ratio) compared to\nnon-exposure patients") + 
-  xlab("Number of days exposed to broad-spectrum\nantibiotics between day -7 to 12\nrelative to transplant") + theme_light()+
-  scale_color_manual(values = c( "darkgoldenrod2", "darkslateblue"), name = '') +
-  theme(aspect.ratio = 1,  legend.position = 'none') 
-
-abx_diet_logHR
-```
-
-# me  
- 
-```{r}
-fit_original <- coxph(Surv(OStime_30,OSevent)~modal_diet*day_exposed  +intensity + source_and_gvhdppx,
-             data= df_main)
-colnames(df_main)
-```
-
-
-```{r}
-# --- 1. Extract Coefficients and Variance-Covariance Matrix ---
-model_coefs <- coef(fit_original)
-model_vcov <- vcov(fit_original)
-
-# --- 2. Identify the EXACT Coefficient Names ---
-# Run this line to see the names R assigned:
-names(model_coefs)
-```
-
-
-```{r}
-abx_coef_name <- "day_exposed" 
-interaction_coef_name <- "modal_dietHigher-intake:day_exposed" 
-
-# Check if the names exist in the model output
-if (!abx_coef_name %in% names(model_coefs)) {
-  stop("The specified name for the antibiotic exposure coefficient was not found in the model. Check names(coef(fit)).")
-}
-if (!interaction_coef_name %in% names(model_coefs)) {
-  stop("The specified name for the interaction coefficient was not found in the model. Check names(coef(fit)).")
-}
-```
-
-
-```{r}
-# --- 3. Calculate Log(HR) and SE for Cluster 1 (Reference) ---
-
-# Log(HR) is just the coefficient for the main effect
-loghr_c1 <- model_coefs[abx_coef_name]
-
-# Standard Error (SE) is the square root of the variance (diagonal element of vcov matrix)
-se_c1 <- sqrt(model_vcov[abx_coef_name, abx_coef_name])
-
-# --- 4. Calculate Log(HR) and SE for Cluster 2 ---
-
-# Log(HR) is the sum of the main effect and the interaction term
-loghr_c2 <- model_coefs[abx_coef_name] + model_coefs[interaction_coef_name]
-
-# Standard Error (SE) for the sum requires variances and covariance:
-# SE_sum = sqrt(Var(A) + Var(B) + 2*Cov(A, B))
-var_abx <- model_vcov[abx_coef_name, abx_coef_name]
-var_int <- model_vcov[interaction_coef_name, interaction_coef_name]
-cov_abx_int <- model_vcov[abx_coef_name, interaction_coef_name]
-
-se_c2 <- sqrt(var_abx + var_int + 2 * cov_abx_int)
-
-# --- 5. Calculate 95% Confidence Intervals ---
-# CI = Estimate +/- Z * SE (where Z is approx 1.96 for 95% CI)
-z_crit <- qnorm(0.975) # More precise Z-value for 95%
-
-ci_c1_low <- loghr_c1 - z_crit * se_c1
-ci_c1_high <- loghr_c1 + z_crit * se_c1
-
-ci_c2_low <- loghr_c2 - z_crit * se_c2
-ci_c2_high <- loghr_c2 + z_crit * se_c2
-
-# --- 6. Display Results ---
-results <- data.frame(
-  Cluster = c("Cluster 1:Lower-intake/sugar-enriched", "Cluster 2:Higher-intake"),
-  LogHR = c(loghr_c1, loghr_c2),
-  SE = c(se_c1, se_c2),
-  CI_Lower = c(ci_c1_low, ci_c2_low),
-  CI_Upper = c(ci_c1_high, ci_c2_high)
-) %>% 
-  mutate(Cluster = factor(Cluster, levels = c('Cluster 2:Higher-intake','Cluster 1:Lower-intake/sugar-enriched')))
-
-```
-
-
-```{r}
-ggplot(results, aes(x = LogHR, y = Cluster, color = Cluster)) +
-  # Add horizontal error bars using the calculated CIs
-  geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.1, linewidth = 0.8) +
-  # Add points for the log HR estimates
-  geom_point(shape = 15, size = 4) + # Shape 15 is a solid square
-  # Add vertical line at log HR = 0 (no effect)
-  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
-  # Apply the custom colors
-  scale_color_manual(values = c( "darkgoldenrod2", "darkslateblue")) +
-  # Set axis labels
-  labs(
-    x = "Log HR per day\nof antibiotic exposure",
-    y = NULL # Remove y-axis title
-  ) +
-  # Customize the theme
-  theme_classic() + # A clean theme
-  theme(
-    #axis.line.y = element_blank(), # Remove y-axis line
-    axis.ticks.y = element_blank(), # Remove y-axis ticks
-    axis.text.y = element_text(hjust = 1, size = 10), # Align y-axis labels, adjust size
-    axis.title.x = element_text(size = 11), # Adjust x-axis title size
-    legend.position = "none" # Hide the legend
-  ) +
-  # Set x-axis limits - adjust these based on your actual CI ranges for a good view
-  coord_cartesian(xlim = c(-0.15, 0.25))  
-```
-## cluster model + ave caloric intake 
-
-```{r}
-df_main <- read_rds('../data/R09_df_main_for_nutrition_clinical_outcome.RDS') |> 
-  inner_join(read_rds('../data/R02_cleaned_clinical_outcome.rds') |> select(pid, modal_diet))
-
-fit_cal_cluster <- coxph(Surv(OStime_30,OSevent)~ modal_diet*day_exposed  + intensity + source_and_gvhdppx + avg_total_caloric_intake,
-             data= df_main |> filter(OStime_30 > 0)) 
-```
-### plotting 
-
-```{r}
-# Pull tidy coefficients from the fitted coxph object and keep just the two
-# antibiotic-exposure effects we want to display (one per cluster).
-plot_df <- fit_cal_cluster |>
-  tidy(conf.int = TRUE) |>
-  filter(term %in% c("day_exposed", "modal_dietHigh intake:day_exposed")) |>
-  # Cluster 1 effect is day_exposed alone; Cluster 2 is day_exposed + interaction.
-  # Easier path: refit and use emmeans, but here we just reconstruct manually.
-  mutate(
-    cluster = if_else(term == "day_exposed", "Cluster 1", "Cluster 2"),
-    # For Cluster 2, the displayed effect should be the sum of main + interaction.
-    # Pull both rows, then combine below.
-  )
-
-# Cleaner: grab the main effect and the sum (main + interaction) with their SEs
-# from the variance-covariance matrix so the CIs are correct.
-vc <- vcov(fit_cal_cluster)
-b  <- coef(fit_cal_cluster)
-
-main_est  <- b["day_exposed"]
-main_se   <- sqrt(vc["day_exposed", "day_exposed"])
-
-sum_est <- b["day_exposed"] + b["modal_dietHigh intake:day_exposed"]
-sum_se  <- sqrt(
-  vc["day_exposed", "day_exposed"] +
-  vc["modal_dietHigh intake:day_exposed", "modal_dietHigh intake:day_exposed"] +
-  2 * vc["day_exposed", "modal_dietHigh intake:day_exposed"]
-)
-
-forest_df <- tibble(
-  cluster  = c("Cluster 1", "Cluster 2"),
-  estimate = c(main_est, sum_est),
-  se       = c(main_se,  sum_se)
-) |>
-  mutate(
-    conf.low  = estimate - 1.96 * se,
-    conf.high = estimate + 1.96 * se,
-    # Reverse the factor so Cluster 1 appears on top, matching the published figure.
-    cluster   = fct_rev(factor(cluster))
-  )
-
-# Plot on the log-HR scale to match Figure 3b exactly.
-ggplot(forest_df, aes(x = estimate, y = cluster)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey60") +
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0, linewidth = 0.5) +
-  geom_point(shape = 22, fill = "black", color = "black", size = 2) +
-  scale_x_continuous(limits = c(-0.1, 0.2), breaks = seq(-0.1, 0.2, 0.1)) +
-  labs(x = "Log HR per day\nof antibiotic exposure", y = NULL) +
-  theme_classic(base_size = 12) 
-
-ggsave('../data/R09_forest_fit_cal_cluster.png', width = 3, height = 2)
-```
-
-
-#  now F3
-
-```{r}
-# the legend for the stacked bar graph
-bar_leg <-  plot_grid(ggpubr::get_legend(Average_intake))
-ggsave('../data/09_bar_leg.pdf')
-```
-
-```{r}
-title <- ggdraw() + 
-  draw_label(
-    "Fig. 3",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 5)
-  )
-
-top <- plot_grid(pdiet2, pdiet2_comp, Average_intake_plot, Average_composition,
-                 label_size = 12, ncol = 2,labels = c('A','B','C','D'),
-                align = 'vh', axis = 'lrtb')
-
-
-
-
-bottom <- plot_grid(survival_plot, abx_diet_logHR,
-                 label_size = 12, ncol = 2,labels = c('E','F'),rel_widths  = c(1,1),
-                align = 'vh', axis = 'lrtb')
-
-all <- plot_grid(top, bottom, align = 'vh', axis = 'lrtb', nrow = 2, rel_heights = c(2,1.5))
- 
-combined <- plot_grid(
-  title, all,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.05, 1)
-)+theme(plot.margin = unit(c(1,1,1,1), "cm"))
-
-ggsave('../data/09_clinical_outcome.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
 ```
 
 # Sugar density and OS
@@ -568,9 +286,7 @@ patient_summary |> write_rds('../data/R09_df_main_for_nutrition_clinical_outcome
 
 ```{r}
 # --- Plot 1: Raw Sugar Intake vs. Total Calories ---
-# This plot shows the relationship between the total amount of food eaten
-# and the absolute amount of sugar consumed. We expect a strong positive correlation,
-# as people who eat more food in general will also eat more sugar.
+
 plot_raw_sugar <- ggplot(patient_summary, aes(x = avg_total_caloric_intake / 1000, y = avg_sugar_daily_intake_gram)) +
   geom_point(alpha = 0.6, color = "black") +
   geom_smooth(method = "lm", se = FALSE, color = "darkred") +
@@ -584,10 +300,7 @@ plot_raw_sugar <- ggplot(patient_summary, aes(x = avg_total_caloric_intake / 100
   theme_minimal()
 
 # --- Plot 2: Calorie-Adjusted Sugar vs. Total Calories ---
-# This plot checks if our calorie-adjustment worked. After normalizing sugar
-# intake to a standard energy unit (grams per 1000 kcal), there should be
-# little to no correlation with total calories. This confirms we have
-# successfully removed total intake as a confounder.
+
 plot_adjusted_sugar <- ggplot(patient_summary, aes(x = avg_total_caloric_intake / 1000, y = avg_sugar_density_per_1000kcal)) +
   geom_point(alpha = 0.6, color = "black") +
   geom_smooth(method = "lm", se = FALSE, color = "darkred") +
@@ -1001,8 +714,25 @@ ggsave('../data/R09_forest_fit_cal_sugar_density_HR.pdf', width = 3, height = 2)
 # ggsave('../data/R09_KM_curve.png', width = 7, height = 5)
 ```
 
+# F3 combine
+  
+```{r}
+# Build both plots, then save them as objects instead of printing
+p_sugar <- forest_sugar_density_binarized
+p_diet  <- cluster_HR
 
+shared_limits <- c(0.92, 1.25)  # tweak to cover both panels' widest CI
 
+# Stack: sugar on top (a), diet on bottom (b)
+(p_sugar / p_diet) +
+  plot_annotation(tag_levels = "a") &
+  scale_x_log10(limits = shared_limits) &
+  theme(plot.tag = element_text(face = "bold", size = 14))
+
+ggsave('../data/F3_combined_HR.pdf', width = 3, height = 3)
+```
+  
+ 
 ```{r}
 # problems with the length of stay clinical outcome 
 # Reverse Causality (The "Sick Behavior" Confounder): The strongest counter-argument is that patients who are clinically doing worse (more nausea, pain, slower recovery) naturally default to a "comfort food" diet (high sugar, low intake) because they feel terrible. In this scenario, the diet isn't causing the longer stay; the underlying severity of their condition is causing both the poor diet and the longer stay. While you adjusted for conditioning intensity, unmeasured factors (like mucositis severity beyond opioid use) could drive this.
@@ -1113,3 +843,4 @@ ggplot(grid_df, aes(x = day_exposed, y = avg_sugar_density_per_1000kcal)) +
 ```
 
 pspline(df=2) uses an algorithm to automatically find the best smooth curve by penalizing wild wiggles. ns() requires you to drop physical anchor points (knots) for the curve to bend around, and mathematically forces the extreme ends of the graph to be straight lines to prevent erratic predictions at the boundaries. Using ns() turns your data into standard, predictable math equations, allowing R's predict() function to easily map out risks and confidence intervals for hypothetical scenarios. pspline() creates a highly customized curve tied to the original data, making it notoriously difficult for R to calculate standard errors when generating a new 2D map.
+
