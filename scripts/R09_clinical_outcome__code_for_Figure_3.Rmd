@@ -607,338 +607,173 @@ ggarrange(plot_raw_sugar, plot_adjusted_sugar, ncol = 2)
 
 ```
 
-## multivariate model 
-
-Model 2: With Interaction (the non-significant one)
-Surv ~ SugarCal_cat_high * day_exposed + ...
-
-This model asks much more complex, conditional questions:
-
-"What is the survival difference between high-sugar and low-sugar groups specifically when antibiotic exposure is zero?" (This is the new meaning of the SugarCal_cat_highHigh term).
-
-"What is the effect of antibiotics specifically for the low-sugar group?" (This is the new meaning of the day_exposed term).
-
-"Is the effect of antibiotics different in the high-sugar group compared to the low-sugar group?" (This is the SugarCal_cat_highHigh:day_exposed interaction term).
-
-The Drastic Difference Explained
-Your results changed so dramatically because the interaction term re-defines the main effects.
-
-In the second model, the coefficient for SugarCal_cat_highHigh (p=0.64) is no longer measuring the overall effect of being in the high-sugar group. It's now measuring the effect only for a hypothetical patient who had zero days of antibiotic exposure. In your cohort, it's very likely that almost no one had zero exposure, so this coefficient is trying to estimate an effect in a situation with very little data, which is why it's not significant.
-
-Likewise, the effect of day_exposed (p=0.28) is now the effect only for the low-sugar group.
-
-The crucial term, SugarCal_cat_highHigh:day_exposed, is asking if the two "slopes" (the risk from antibiotics) are different between the sugar groups. With a p-value of 0.33, the model is telling you that it cannot confidently say the effect of antibiotics is statistically different between the two groups.
-
+## model 
 
 ```{r}
-fit <- coxph(Surv(OStime_30,OSevent)~ SugarCal_cat_high * day_exposed + source_and_gvhdppx + intensity ,
+fit_sugar_density_binarized <- coxph(Surv(OStime_30,OSevent)~ SugarCal_cat_high * day_exposed + source_and_gvhdppx + intensity ,
              data=patient_summary |> filter(OStime_30 > 0))
+```
+## forest plot
 
-diff <- sum(coef(fit)[c(2,8)])  ### This is the hazard ratio
+```{r}
+# Pull per-group log HR for antibiotic exposure from the coef vector and vcov.
+# Above-median sugar is the reference → its effect is `day_exposed` alone.
+# Below-median sugar's effect is `day_exposed` + the interaction term.
+vc <- vcov(fit_sugar_density_binarized)
+b  <- coef(fit_sugar_density_binarized)
 
-p <- aod::wald.test(Sigma=vcov(fit)[c(2,8),c(2,8)],
-                    b=coef(fit)[c(2,8)],
-                    L=t(c(1,1)))
+above_est <- b["day_exposed"]
+above_se  <- sqrt(vc["day_exposed", "day_exposed"])
 
-se <- sqrt((vcov(fit)[2,2] + vcov(fit)[8,8] + 2*vcov(fit)[2,8]))
+below_est <- b["day_exposed"] + b["SugarCal_cat_highBelow-median:day_exposed"]
+below_se  <- sqrt(
+  vc["day_exposed", "day_exposed"] +
+  vc["SugarCal_cat_highBelow-median:day_exposed",
+     "SugarCal_cat_highBelow-median:day_exposed"] +
+  2 * vc["day_exposed", "SugarCal_cat_highBelow-median:day_exposed"]
+)
 
+forest_df <- tibble(
+  group    = c("above-median\nsugar intake\ng/1000 kcal",
+               "below-median\nsugar intake\ng/1000 kcal"),
+  estimate = c(above_est, below_est),
+  se       = c(above_se,  below_se)
+) |>
+  mutate(
+    # Build CIs on the log-HR scale, then exponentiate everything to HR scale
+    conf.low  = estimate - 1.96 * se,
+    conf.high = estimate + 1.96 * se,
+    HR        = exp(estimate),
+    HR.low    = exp(conf.low),
+    HR.high   = exp(conf.high),
+    # Keep above-median on top to match the published Fig. 3a layout
+    group     = fct_inorder(group) |> fct_rev()
+  )
+
+# Forest plot on the HR scale with a log-scaled x-axis so CIs look symmetric
+forest_sugar_density_binarized <- ggplot(forest_df, aes(x = HR, y = group)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey60") +
+  geom_errorbarh(aes(xmin = HR.low, xmax = HR.high),
+                 height = 0, linewidth = 0.5) +
+  geom_point(shape = 22, fill = "black", color = "black", size = 2) +
+  scale_x_log10() +
+  labs(x = "HR per day\nof antibiotic exposure", y = NULL) +
+  theme_classic(base_size = 12)
 ```
 
  
-
-
-
-
-
 ## model table output
 
 ```{r}
 publication_table <- tbl_regression(
-  fit,
-  # Just list the main variables you want to see.
-  # gtsummary is smart enough to keep the interaction term 
-  # associated with these variables automatically.
+  fit_sugar_density_binarized,
   include = c(SugarCal_cat_high, day_exposed, "SugarCal_cat_high:day_exposed"),
-  exponentiate = T, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
-  # The 'label' argument maps variable names to publication-ready labels.
-  # The formula structure is list(variable_name ~ "Desired Label")
+  exponentiate = TRUE,
   label = list(
     SugarCal_cat_high ~ "Averaged Sugar Intake",
-    day_exposed ~ "Abx exposure(days)"
-    # source_and_gvhdppx ~ "Graft source and GvHD prophylaxis",
-    # intensity ~ "Conditioning intensity"
-    # Note: The interaction term label is automatically created from the main variable labels.
+    day_exposed ~ "Abx exposure (days)"
   )
-  ) %>%
-  # Improve the table's appearance and clarity
-  bold_p(t = 0.05) %>% # Make p-values < 0.05 bold
-  bold_labels() %>%
-  # Add a clear title and a source note for context
-  as_gt() %>% # Convert to a gt object for better customization
-  gt::tab_header(
-    title = "Multivariable Cox Model for Overall Survival"
-  ) 
-# --- Step 3: Display the Table ---
-# In RStudio or a Quarto/RMarkdown document, this will render a beautiful HTML table.
-publication_table %>% 
-  gt::gtsave(filename = "../data/R09_sugar_density_model_multivariate_output.png") 
+) |>
+  bold_p(t = 0.05) |>
+  bold_labels()
 
-# to produce the pdf version of the table in a pdf 
-table_S3 <- ggdraw() + draw_image("../data/R09_sugar_density_model_multivariate_output.png", scale = 0.7)
+body <- publication_table$table_body
+label_rows <- which(body$row_type == "label")
+level_rows <- which(body$row_type == "level")
+sig_rows   <- which(!is.na(body$p.value) & body$p.value < 0.05)
 
- title <- ggdraw() + 
-  draw_label(
-    "Extended Table E3",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 5)
+reg_df <- publication_table |> as_tibble()
+
+# Strip markdown markers from EVERY cell, not just headers and column 1
+# mutate(across(...)) walks every column; the regex catches ** and __
+reg_df <- reg_df |>
+  mutate(across(everything(),
+                ~ str_remove_all(as.character(.x), "\\*\\*|__")))
+
+names(reg_df) <- names(reg_df) |> str_remove_all("\\*\\*|__")
+
+# Convert text that looks like a number into actual numbers, leaving
+# things like "0.15, 2.32" (the CI) and "—" (the reference dash) alone
+to_numeric_if_possible <- function(x) {
+  num <- suppressWarnings(as.numeric(x))
+  # Only swap in the number where conversion succeeded
+  ifelse(is.na(num), x, num)
+}
+
+# The CI column has commas, so keep it as text; convert HR and p-value
+# Column positions: 1 = Characteristic, 2 = HR, 3 = 95% CI, 4 = p-value
+reg_df <- reg_df |>
+  mutate(
+    across(c(2, 4), ~ suppressWarnings(as.numeric(.x)))
   )
 
-combined <- plot_grid(
-  title, table_S3,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-)+theme(plot.margin = unit(c(1,1,10,1), "cm"))
+wb <- createWorkbook()
+addWorksheet(wb, "Cox Model")
 
-ggsave('../data/Table_S3_sugar_density_model_multivariate_output_R09.pdf',
-      width = 210, height = 297, units = "mm", device = 'pdf', plot = combined, dpi = 300)  
-```
+writeData(wb, "Cox Model",
+          "Multivariable Cox Model for Overall Survival",
+          startRow = 1)
+addStyle(wb, "Cox Model",
+         createStyle(textDecoration = "bold", fontSize = 14),
+         rows = 1, cols = 1)
 
-```{r}
-fit_teng <- coxph(Surv(OStime_30,OSevent)~ SugarCal_cat_high * day_exposed + source_and_gvhdppx + intensity ,
-             data=patient_summary |> filter(OStime_30 > 0) )
+writeData(wb, "Cox Model", reg_df, startRow = 3)
 
-res_teng <- data.frame(Variable=c("Days of abx exposure | low sugar grams/1000Kcal",
-                             "Days of abx exposure | high sugar grams/1000Kcal"),
-                  log.estimate = c(coef(fit_teng)[2],diff),
-                  log.conf.low = c(coef(fit_teng)[2] - 1.96*sqrt(vcov(fit_teng)[2,2]),
-                                   diff - 1.96*se),
-                  log.conf.high = c(coef(fit_teng)[2] + 1.96*sqrt(vcov(fit_teng)[2,2]),
-                                    diff + 1.96*se),
-                  estimate = exp(c(coef(fit_teng)[2],diff)),
-                  conf.low = exp(c(coef(fit_teng)[2] - 1.96*sqrt(vcov(fit_teng)[2,2]),
-                                   diff - 1.96*se)),
-                  conf.high = exp(c(coef(fit_teng)[2] + 1.96*sqrt(vcov(fit_teng)[2,2]),
-                                    diff + 1.96*se)),
-                  p.value = c(0.3,
-                              p$result$chi2[3]))
-```
-```{r}
-# --- 1. Define Log(Hazard Ratios) ---
-# Get the coefficients from the model
-# coef(fit)[2] is 'day_exposed'
-# coef(fit)[8] is 'SugarCal_cat_highLow:day_exposed'
+# Header styling
+addStyle(wb, "Cox Model",
+         createStyle(textDecoration = "bold",
+                     fgFill = "#D9D9D9",
+                     border = "bottom",
+                     halign = "left"),
+         rows = 3, cols = 1:ncol(reg_df), gridExpand = TRUE)
 
-# The effect of 'day_exposed' for the High Sugar group (reference category)
-# is just the main effect of 'day_exposed'.
-log_hr_high_sugar <- coef(fit)[2]
+# Bold variable labels, indent levels
+addStyle(wb, "Cox Model",
+         createStyle(textDecoration = "bold"),
+         rows = label_rows + 3, cols = 1, gridExpand = TRUE)
+addStyle(wb, "Cox Model",
+         createStyle(indent = 1),
+         rows = level_rows + 3, cols = 1, gridExpand = TRUE)
 
-# The effect of 'day_exposed' for the Low Sugar group is the main effect
-# plus the interaction term's effect.
-log_hr_low_sugar <- coef(fit)[2] + coef(fit)[8]
+# Bold rows with significant p-values
+if (length(sig_rows) > 0) {
+  addStyle(wb, "Cox Model",
+           createStyle(textDecoration = "bold"),
+           rows = sig_rows + 3, cols = 1:ncol(reg_df),
+           gridExpand = TRUE, stack = TRUE)
+}
 
+# Number formatting — two decimals for HR, three for p-value
+addStyle(wb, "Cox Model",
+         createStyle(numFmt = "0.00", halign = "center"),
+         rows = 4:(nrow(reg_df) + 3), cols = 2,
+         gridExpand = TRUE, stack = TRUE)
+addStyle(wb, "Cox Model",
+         createStyle(numFmt = "0.000", halign = "center"),
+         rows = 4:(nrow(reg_df) + 3), cols = 4,
+         gridExpand = TRUE, stack = TRUE)
+addStyle(wb, "Cox Model",
+         createStyle(halign = "center"),
+         rows = 4:(nrow(reg_df) + 3), cols = 3,
+         gridExpand = TRUE, stack = TRUE)
 
-# --- 2. Define Standard Errors (SE) ---
-# Get the variance-covariance matrix
-v_cov <- vcov(fit)
+# Footnote
+footnote_row <- nrow(reg_df) + 4
+writeData(wb, "Cox Model",
+          "Abbreviations: CI = Confidence Interval, HR = Hazard Ratio",
+          startRow = footnote_row)
+addStyle(wb, "Cox Model",
+         createStyle(fontSize = 10, textDecoration = "italic"),
+         rows = footnote_row, cols = 1)
 
-# SE for High Sugar group is just the sqrt of the variance for coef[2]
-se_high_sugar <- sqrt(v_cov[2, 2])
+setColWidths(wb, "Cox Model", cols = 1:ncol(reg_df), widths = "auto")
+freezePane(wb, "Cox Model", firstActiveRow = 4)
 
-# SE for Low Sugar group (for the sum of coef[2] + coef[8])
-# Uses the formula: SE(A+B) = sqrt(Var(A) + Var(B) + 2*Cov(A,B))
-se_low_sugar <- sqrt(v_cov[2, 2] + v_cov[8, 8] + 2 * v_cov[2, 8])
-
-
-# --- 3. Calculate Z-scores and P-values ---
-# For High Sugar group
-# We can pull this p-value directly from the summary
-p_high_sugar <- summary(fit)$coefficients[2, "Pr(>|z|)"]
-# Or calculate it:
-# z_high_sugar <- log_hr_high_sugar / se_high_sugar
-# p_high_sugar <- 2 * pnorm(-abs(z_high_sugar))
-
-# For Low Sugar group
-z_low_sugar <- log_hr_low_sugar / se_low_sugar
-p_low_sugar <- 2 * pnorm(-abs(z_low_sugar))
-
-
-# --- 4. Create the Final Results Data.frame ---
-# This builds the data.frame with the correct estimates in the correct rows.
-res <- data.frame(
-  Variable = c(
-    "Days of abx exposure | high sugar grams/1000Kcal",
-    "Days of abx exposure | low sugar grams/1000Kcal"
-  ),
-  
-  # Log-estimates
-  log.estimate = c(
-    log_hr_high_sugar,
-    log_hr_low_sugar
-  ),
-  
-  # Log-Confidence Intervals
-  log.conf.low = c(
-    log_hr_high_sugar - 1.96 * se_high_sugar,
-    log_hr_low_sugar - 1.96 * se_low_sugar
-  ),
-  log.conf.high = c(
-    log_hr_high_sugar + 1.96 * se_high_sugar,
-    log_hr_low_sugar + 1.96 * se_low_sugar
-  ),
-  
-  # Hazard Ratios (exponentiated estimates)
-  estimate = c(
-    exp(log_hr_high_sugar),
-    exp(log_hr_low_sugar)
-  ),
-  
-  # Hazard Ratio Confidence Intervals
-  conf.low = c(
-    exp(log_hr_high_sugar - 1.96 * se_high_sugar),
-    exp(log_hr_low_sugar - 1.96 * se_low_sugar)
-  ),
-  conf.high = c(
-    exp(log_hr_high_sugar + 1.96 * se_high_sugar),
-    exp(log_hr_low_sugar + 1.96 * se_low_sugar)
-  ),
-  
-  # P-values
-  p.value = c(
-    p_high_sugar,
-    p_low_sugar
-  )
-)
-
-# You can then print or view the final table
-print(res)
+saveWorkbook(wb, "../data/tableE4_R09_cox_model_binarized_sugar_density.xlsx",
+             overwrite = TRUE)
 
 ```
 
-
-```{r}
-# wrangle results into pre-plotting table form
-res_plot <- res |>
-  # round estimates and 95% CIs to 2 decimal places for journal specifications
-  mutate(across(
-    c(estimate, conf.low, conf.high),
-    ~ str_pad(
-      round(.x, 2),
-      width = 4,
-      pad = "0",
-      side = "right"
-    )
-  ),
-  # add an "-" between HR estimate confidence intervals
-  estimate_lab = paste0(estimate, " (", conf.low, "-", conf.high, ")")) |>
-  # round p-values to two decimal places, except in cases where p < .001
-  mutate(p.value = case_when(
-    p.value < .001 ~ "<0.001",
-    round(p.value, 2) == .05 ~ as.character(round(p.value,3)),
-    p.value < .01 ~ str_pad( # if less than .01, go one more decimal place
-      as.character(round(p.value, 3)),
-      width = 4,
-      pad = "0",
-      side = "right"
-    ),
-    TRUE ~ str_pad( # otherwise just round to 2 decimal places and pad string so that .2 reads as 0.20
-      as.character(round(p.value, 2)),
-      width = 4,
-      pad = "0",
-      side = "right"
-    )
-  )) |>
-  # add a row of data that are actually column names which will be shown on the plot in the next step
-  bind_rows(
-    data.frame(
-      Variable = "Variable",
-      estimate_lab = "Hazard Ratio (95% CI)",
-      conf.low = "",
-      conf.high = "",
-      p.value = "p-value"
-    )
-  ) |>
-  mutate(Variable = fct_rev(fct_relevel(Variable, "Variable")))
-
-glimpse(res_plot)
-
-# p_mid <- 
-#   res |>
-#   ggplot(aes(y = fct_rev(Variable))) + 
-#   theme_classic()+
-#   geom_point(aes(x=log.estimate), shape=15, size=3) +
-#   geom_linerange(aes(xmin=log.conf.low, xmax=log.conf.high)) +
-#   geom_vline(xintercept = 0, linetype="dashed") +
-#   labs(x="Log Hazard Ratio", y="") +
-#   coord_cartesian(ylim=c(1,3), xlim=c(-.1, .2)) +
-#   annotate("text", x = -.1, y = 3, label = "Lower risk",hjust=0) +
-#   annotate("text", x = .1, y = 3, label = "Higher risk") + 
-#   theme(axis.line.y = element_blank(),
-#         axis.ticks.y= element_blank(),
-#         axis.text.y= element_blank(),
-#         axis.title.y= element_blank())
-
-# plot the HR not the logged version
-p_mid <- 
-  res |>
-  ggplot(aes(y = fct_rev(Variable))) + 
-  theme_classic()+
-  geom_point(aes(x=estimate), shape=15, size=3) +
-  geom_linerange(aes(xmin=conf.low, xmax=conf.high)) +
-  geom_vline(xintercept = 1, linetype="dashed") +
-  labs(x="Hazard Ratio", y="") +
-  coord_cartesian(ylim=c(1,3), xlim=c(.9, 1.3)) +
-  annotate("text", x = .9, y = 3, label = "Lower risk",hjust=0) +
-  annotate("text", x = 1.1, y = 3, label = "Higher risk") +
-  theme(axis.line.y = element_blank(),
-        axis.ticks.y= element_blank(),
-        axis.text.y= element_blank(),
-        axis.title.y= element_blank())
-
-
-p_mid
-
-
-p_left <-
-  res_plot  |>
-  ggplot(aes(y = Variable)) +
-  geom_text(aes(x = 0, label = Variable), hjust = 0, fontface = "bold") +
-  geom_text(
-    aes(x = 2, label = estimate_lab),
-    hjust = 0,
-    fontface = ifelse(res_plot$estimate_lab == "Hazard Ratio (95% CI)", "bold", "plain")
-  )+
-  theme_void() +
-  coord_cartesian(xlim = c(0, 4))
-
-p_left
-
-# right side of plot - pvalues
-p_right <-
-  res_plot  |>
-  ggplot() +
-  geom_text(
-    aes(x = 0, y = Variable, label = p.value),
-    hjust = 0,
-    fontface = ifelse(res_plot$p.value == "p-value", "bold", "plain")
-  ) +
-  theme_void() 
-
-p_right
-
-library(patchwork)
-layout <- c(
-  area(t = 0, l = 0, b = 30, r = 9), # left plot, starts at the top of the page (0) and goes 30 units down and 3 units to the right
-  area(t = 1, l = 8, b = 30, r = 11), # middle plot starts a little lower (t=1) because there's no title. starts 1 unit right of the left plot (l=4, whereas left plot is r=3), goes to the bottom of the page (30 units), and 6 units further over from the left plot (r=9 whereas left plot is r=3)
-  area(t = 0, l = 11, b = 30, r = 15) # right most plot starts at top of page, begins where middle plot ends (l=9, and middle plot is r=9), goes to bottom of page (b=30), and extends two units wide (r=11)
-)
-# final plot arrangement
-coeff_plot <- p_left + p_mid + p_right + plot_layout(design = layout)
-```
 
 ## pt characteristics
 
@@ -1054,8 +889,6 @@ freezePane(wb, "Patient Summary", firstActiveRow = 4)
 saveWorkbook(wb, "../data/tableE3_R09_sugar_density_patient_summary_binarized.xlsx",
              overwrite = TRUE)
 ```
-
-
 
 
 
