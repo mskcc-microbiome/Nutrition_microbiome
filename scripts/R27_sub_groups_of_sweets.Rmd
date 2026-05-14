@@ -1632,7 +1632,7 @@ par(mfrow = c(1, 1))
 all_food_vars <- final_model_data %>% select(starts_with('avg')) %>% colnames()
 
 # Create the interaction terms for all food variables in this iteration
-interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+interaction_terms <- paste(all_food_vars, "empirical", sep = "*")
 
 # Build the full formula string dynamically
 formula_string <- paste(
