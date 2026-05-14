@@ -14,6 +14,7 @@ library(brms)
 library(tidybayes)
 library(ggtext)
 library(broom.mixed) 
+library(cowplot)
 ```
 
 ```{r}
@@ -66,7 +67,7 @@ meta_updated <- meta %>%
 all_food_vars <- meta_updated %>% select(starts_with('fg')) %>% colnames()
 
 # Create the interaction terms for all food variables in this iteration
-interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+interaction_terms <- paste(all_food_vars, "empirical", sep = "*")
 
 # Build the full formula string dynamically
 formula_string <- paste(
@@ -165,11 +166,11 @@ plot_forest <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
     inherit.aes = FALSE
    ) +
    # Add a vertical line at zero, which represents "no effect"
-  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.5) +
    # Use geom_pointrange to show the estimate (point) and confidence interval (line)
    geom_pointrange(
    aes(xmin = conf.low, xmax = conf.high, color = is_significant),
-     size = 0.25,linewidth = 1,
+     size = 0.1,linewidth = .7,
   ) +
   scale_color_manual(
     values = c(
@@ -184,10 +185,10 @@ plot_forest <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
     subtitle = "excluding patients\nexposed to EN/TPN",
     y = ''
   ) +
-  theme_classic(base_size = 11) +
-  theme(legend.position = "none", axis.text.y = element_markdown())
+  theme_classic(base_size = 10) +
+  theme(legend.position = "none", axis.text.y = element_markdown(), aspect.ratio = 2.5)
 
-plot_forest
+plot_forest 
 ```
 
 # add disease
@@ -201,7 +202,7 @@ meta_disease <- meta %>%
 all_food_vars <- meta_disease %>% select(starts_with('fg')) %>% colnames()
 
 # Create the interaction terms for all food variables in this iteration
-interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+interaction_terms <- paste(all_food_vars, "empirical", sep = "*")
 
 # Build the full formula string dynamically
 formula_string <- paste(
@@ -303,11 +304,11 @@ plot_disease <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
     inherit.aes = FALSE
    ) +
    # Add a vertical line at zero, which represents "no effect"
-  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.5) +
    # Use geom_pointrange to show the estimate (point) and confidence interval (line)
    geom_pointrange(
    aes(xmin = conf.low, xmax = conf.high, color = is_significant),
-     size = 0.25,linewidth = 1,
+     size = 0.1,linewidth = .7,
   ) +
   scale_color_manual(
     values = c(
@@ -322,8 +323,8 @@ plot_disease <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
     subtitle = "model including\na term for underlying\nmalignant disease",
     y = ''
   ) +
-  theme_classic(base_size = 11) +
-  theme(legend.position = "none", axis.text.y = element_markdown())
+  theme_classic(base_size = 10) +
+  theme(legend.position = "none", axis.text.y = element_markdown(), aspect.ratio = 5.5)
 
 plot_disease
 ```
@@ -339,7 +340,7 @@ meta_CI <- meta %>%
 all_food_vars <- meta_CI %>% select(starts_with('fg')) %>% colnames()
 
 # Create the interaction terms for all food variables in this iteration
-interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+interaction_terms <- paste(all_food_vars, "empirical", sep = "*")
 
 # Build the full formula string dynamically
 formula_string <- paste(
@@ -441,11 +442,11 @@ plot_CI <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
     inherit.aes = FALSE
    ) +
    # Add a vertical line at zero, which represents "no effect"
-  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
+  geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.5) +
    # Use geom_pointrange to show the estimate (point) and confidence interval (line)
    geom_pointrange(
    aes(xmin = conf.low, xmax = conf.high, color = is_significant),
-     size = 0.25,linewidth = 1,
+     size = 0.1,linewidth = .7,
   ) +
   scale_color_manual(
     values = c(
@@ -460,10 +461,10 @@ plot_CI <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
     subtitle = "model including\na term for\ncomorbidities",
     y = ''
   ) +
-  theme_classic(base_size = 11) +
-  theme(legend.position = "none", axis.text.y = element_markdown())
+  theme_classic(base_size = 10) +
+  theme(legend.position = "none", axis.text.y = element_markdown(), aspect.ratio = 5.5)
 
-plot_CI
+plot_CI 
 ```
 
 # add the PCA
@@ -769,6 +770,8 @@ results_df_pre <- tidy(model_fit_pre, conf.int = TRUE) |>
 results_df_pre |> write_csv('../data/R60_results_df_pre_transplant.csv')  
 ```
 
+## forest pre-transplant
+
 ```{r}
 level_order <- rev(c(
     "abx",  "EN", "TPN", 
@@ -830,5 +833,61 @@ plot_pre <- ggplot(cleaned_effects, aes(x = estimate, y = clean_term)) +
 
 plot_pre
  
+```
+# assemble 
+
+```{r}
+final_plot <- plot_grid( 
+ plot_forest, 
+ plot_disease ,
+ plot_CI,
+ plot_pca,
+ plot_stratify,
+ plot_pre,
+ ncol = 3)
+
+title <- ggdraw() + 
+  draw_label("Extended Fig. E5",fontface = 'bold',x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+
+combined <- plot_grid(
+  title, final_plot,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+) +theme(plot.margin = unit(c(0,0,0,0), "cm")) 
+
+ggsave('../data/E05_R60_sensitivity_diversity_1.pdf',
+      width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
+      dpi = 300)  
+```
+
+```{r}
+ggsave(
+  '../data/E05f_middle_R60.pdf', 
+  plot = plot_CI, 
+  width = 100, 
+  height = 100, 
+  units = "mm", 
+  device = 'pdf'
+)
+
+ggsave(
+  '../data/E05f_left_R60.pdf', 
+  plot = plot_disease, 
+  width = 100, 
+  height = 100, 
+  units = "mm", 
+  device = 'pdf'
+)
+
+ggsave(
+  '../data/E05e_R60.pdf', 
+  plot = plot_forest, 
+  width = 100, 
+  height = 100, 
+  units = "mm", 
+  device = 'pdf'
+)
 ```
 
