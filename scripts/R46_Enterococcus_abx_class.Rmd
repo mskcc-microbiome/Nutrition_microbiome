@@ -22,6 +22,7 @@ library(janitor)
 library(ggtext)
 rstan::rstan_options(auto_write = TRUE)
 theme_set(theme_tidybayes() + panel_border())
+key <- read_csv('../data/food_group_color_key_final.csv', col_types = 'ccccc')
 ```
 
 Was the increased Enterococcus abundance also stratified by antibiotic class?
@@ -191,13 +192,13 @@ meta_ASV1 <- read_csv('../data/153_combined_META.csv') %>%
   inner_join(clr_wide)
 ```
 
-## model 
+## model   
 
 ```{r}
 all_food_vars <- meta_ASV1 %>% select(starts_with('fg')) %>% colnames()
 
 # Create the interaction terms for all food variables in this iteration
-interaction_terms <- paste(all_food_vars, "exposure_class_category", sep = ":")
+interaction_terms <- paste(all_food_vars, "exposure_class_category", sep = "*")
 
 # Build the full formula string dynamically
 formula_string <- paste(
@@ -240,83 +241,54 @@ results_df <- tidy(model_fit, conf.int = TRUE) %>%
 ## forest plot
 
 ```{r}
-# --- Data Wrangling ---
-# Clean up the term names to make them usable for plotting.
-# This involves separating the food group from the antibiotic category.
-plot_data <- results_df %>%
-  # Filter out the main antibiotic effects for now, we're focusing on diet.
-  filter(str_detect(term, "fg_")) %>%
-  # Separate the 'term' column into two new columns: 'antibiotic_group' and 'food_group'.
-  separate(term, into = c("antibiotic_group", "food_group"), sep = ":fg_") %>%
-  # Clean up the names to be more readable for the plot labels.
-  mutate(
-    antibiotic_group = str_remove(antibiotic_group, "exposure_class_category") %>%
-                       str_replace("non_broad_spectrum", "Non-broad-spectrum") %>%
-                       str_replace("anaerobic_targeting", "Anaerobic-targeting") %>%
-                       str_replace("anaerobic_sparing", "Anaerobic-sparing"),
-    
-    # Standardize the food group names to match the desired labels exactly.
-    food_group_clean = case_when(
-        food_group == "sweets" ~ "Sweets",
-        food_group == "grain"  ~ "Grains",
-        food_group == "milk"   ~ "Milk",
-        food_group == "egg"    ~ "Eggs",
-        food_group == "legume" ~ "Legumes",
-        food_group == "meat"   ~ "Meats",
-        food_group == "fruit"  ~ "Fruits",
-        food_group == "oils"   ~ "Oils",
-        food_group == "veggie" ~ "Vegetables",
-        TRUE ~ str_to_title(food_group) # A fallback for any other groups
-    )
-  ) %>%
-  # Set the order of the facets so "No Antibiotics" comes first.
-  mutate(food_group_ordered = factor(food_group_clean, levels = rev(c(
-        "Sweets", "Grains", "Milk", "Eggs", "Legumes", 
-        "Meats", "Fruits", "Oils", "Vegetables"
-    ))),
-    antibiotic_group = factor(antibiotic_group, 
-                                   levels = c("Non-broad-spectrum", "Anaerobic-sparing", "Anaerobic-targeting"))) %>%
-  # Create a new column to identify significant results
-  # The condition is TRUE if conf.low and conf.high have the same sign (i.e., don't cross zero)
-  mutate(is_significant = (conf.low * conf.high) > 0) 
+replacement_dictionary <- setNames(key$shortname, key$fg1_name)
 
-# --- Plotting ---
-# Create the faceted dot-and-whisker plot.
-plot_stratify_abx_class <- ggplot(plot_data, aes(x = estimate, y = food_group_ordered)) +
-  # Add the horizontal line for the confidence interval.
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "gray50") +
-   # Use geom_pointrange to show the estimate (point) and confidence interval (line)
-   geom_pointrange(
-   aes(xmin = conf.low, xmax = conf.high, color = is_significant),
-     size = 0.25,linewidth = 1,
-  ) +
-  # Add a vertical line at zero, which is the "no effect" line.
-   geom_vline(xintercept = 0, linetype = "solid", color = "blue",size = 0.8) +
-  # This is the key part: create the three separate panels.
-  facet_wrap(~antibiotic_group, ncol = 3) +
-  # Add labels and a title.
-  labs(
-    title = "Diet Predictor effects on ASV 1 (E. faecium),\nstratifying samples by exposure to different antibiotcs class",
-    x = "CLR(ASV 1) Change per 100g Food Intake",
-    y = "Food Group"
-  ) +
-  scale_color_manual(
-    values = c(
-      "TRUE" = "red",
-      "FALSE" = "black"
-    ), name = "Effect Status" # Legend title
-  ) +
-  # Use a clean, publication-ready theme.
+# Pulling out just the food-group rows we care about, then tagging each
+# with which exposure panel it belongs to and which food it represents
+plot_df <- results_df |>
+  filter(effect == "fixed", str_detect(term, "fg_")) |>
+  mutate(
+    exposure = case_when(
+      str_detect(term, "anaerobic_targeting") ~ "anaerobe-targeting\nbroad-spectrum",
+      str_detect(term, "anaerobic_sparing")   ~ "anaerobe-sparing\nbroad-spectrum",
+      TRUE                                     ~ "broad-spectrum\nnon-exposed"
+    ),
+    # Grabbing the food name out of the term string regardless of interaction prefix
+   food = str_extract(term, "fg_[a-z]+") |> str_replace_all( replacement_dictionary) ,
+    # Flagging intervals that don't cross zero so we can color them red
+    significant = (conf.low > 0) | (conf.high < 0)
+  ) |>
+  # Locking in panel order left-to-right and food order top-to-bottom
+  mutate(
+    exposure = factor(exposure, levels = c(
+      "broad-spectrum\nnon-exposed",
+      "anaerobe-sparing\nbroad-spectrum",
+      "anaerobe-targeting\nbroad-spectrum"
+    )),
+    food = factor(food, levels = rev(c(
+      "Sweets","Grains","Milk","Eggs","Legumes",
+      "Meats","Fruits","Oils","Vegetables"
+    )))
+  )
+
+plot_stratify_abx_class <- ggplot(plot_df, aes(x = estimate, y = food, color = significant)) +
+  geom_vline(xintercept = 0, color = "steelblue", linewidth = 0.7) +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high), size = 0.3) +
+  facet_wrap(~ exposure, nrow = 1) +
+  scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"), guide = "none") +
+  labs(x = "CLR(ASV 1) Change per 100g Food Intake", y = NULL) +
   theme_bw() +
   theme(
-    plot.title = element_text(size = 14, face = "bold"),
-    legend.position = 'none',
-    strip.text = element_text(size = 12, face = "bold"),
-    axis.text.y = element_text(size = 11)
+    panel.grid = element_blank(),       # kills both major and minor gridlines
+    panel.spacing = unit(1, "lines"),
+    strip.background = element_blank()  # cleaner facet labels to match the look
   )
 
 plot_stratify_abx_class
 ```
+
+
+
 
 # assemble 
 
@@ -342,6 +314,8 @@ combined <- plot_grid(
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
 ggsave('../data/E07f_R46_abx_three_levels_class_stratification.pdf',
-      width = 5, height = 7, units = "in", device = 'pdf', 
+      width = 120, 
+      height = 80, 
+      units = "mm",  device = 'pdf', plot = plot_stratify_abx_class, 
       dpi = 300)        
 ```
