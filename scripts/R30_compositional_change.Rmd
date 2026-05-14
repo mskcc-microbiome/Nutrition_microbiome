@@ -866,7 +866,7 @@ all_food_vars <- meta_Axis %>%
   colnames()
 
 # Create the interaction terms automatically
-interaction_terms <- paste(all_food_vars, "empirical", sep = ":")
+interaction_terms <- paste(all_food_vars, "empirical", sep = "*")
 
 # Define your priors. These are global and will be used in every model.
 priors <-
