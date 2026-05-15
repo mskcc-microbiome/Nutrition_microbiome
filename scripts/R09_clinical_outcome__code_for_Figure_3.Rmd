@@ -34,7 +34,6 @@ library(openxlsx)
 #   mutate(gvhdppx_CNI = as.numeric(gvhd_ppx == "CNI-based"),
 #          gvhdppx_PTCy = as.numeric(gvhd_ppx == "PTCy-based"))
 # 
-# 
 # colnames(df_main)
 # df_main <- df_main %>%
 #   select(source:gvhdppx_PTCy) %>%
@@ -47,16 +46,17 @@ library(openxlsx)
 
 # the below table has the pid
 df_main <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>%
-  mutate(modal_diet = as.character(modal_diet),
-         modal_diet = if_else(modal_diet == 'High intake', 'Higher-intake', 'Lower-intake/sugar-enriched'),
-         modal_diet = factor(modal_diet, levels = c( 'Lower-intake/sugar-enriched', 'Higher-intake'))) %>% 
+  mutate(modal_diet = fct_recode(modal_diet,
+                            "Cluster 1"  = "Low intake",
+                            "Cluster 2" = "High intake")) %>% 
   mutate(intensity = factor(intensity, levels = c('nonablative','reduced','ablative'))) %>% 
   mutate(source_and_gvhdppx = str_glue('{source}+{gvhd_ppx}'),
          source_and_gvhdppx = factor(source_and_gvhdppx, levels = c('TCD+TCD','Cord+CNI-based','Unmodified+CNI-based','Unmodified+PTCy-based')),
          day_exposed_cat = factor(day_exposed_cat, levels = c('Short exposure (< 8 days)','Long exposure (>= 8 days)'))) %>% 
   mutate(day_exposed_cat = str_replace(day_exposed_cat, ' \\(.+\\)','')) %>% 
   mutate(abx_diet_cat = str_glue('{modal_diet}, {day_exposed_cat}'))
-df_main %>% count(abx_diet_cat)
+
+levels(df_main$modal_diet)
 ```
  
 # cluster model
@@ -151,27 +151,119 @@ forest_fit_cal_cluster_model_HR <- make_diet_forest(
 ggsave('../data/R09_forest_fit_cal_cluster_model_HR.pdf', width = 3, height = 2, plot = forest_fit_cal_cluster_model_HR)
 ```
 
+## model table output
 
 ```{r}
-# make the above table publication ready with newer code
-publication_table_OS_output_model_cluster <- tbl_regression(
-  fit,
-  include = c(modal_diet, day_exposed, "modal_diet:day_exposed"),
-  exponentiate = T, # This converts log(HR) to Hazard Ratios (HR), which are more interpretable
+# Publication-ready table for the Cox model with diet × abx interaction
+OS_output_model_cluster <- tbl_regression(
+  fit_cluster,
+  include = c(modal_diet, day_exposed, `modal_diet:day_exposed`),
+  exponentiate = TRUE,
   label = list(
-    modal_diet ~ "Diet-pattern cluster",
-    day_exposed ~ "Abx exposure(days)"
-  )
-  ) %>%
-  bold_p(t = 0.05) %>% # Make p-values < 0.05 bold
-  bold_labels() %>%
-  as_gt() %>% 
-  gt::tab_header(
-    title = "Multivariable Cox Model for Overall Survival"
-  ) 
-
+   modal_diet ~ "Diet-pattern cluster",
+    day_exposed ~ "Abx exposure (days)"
+  )) |>
+  bold_p(t = 0.05) |>
+  bold_labels()
 ```
 
+
+```{r}
+body <- OS_output_model_cluster$table_body
+label_rows <- which(body$row_type == "label")
+level_rows <- which(body$row_type == "level")
+sig_rows   <- which(!is.na(body$p.value) & body$p.value < 0.05)
+
+reg_df <- OS_output_model_cluster |> as_tibble()
+
+# Strip markdown markers from EVERY cell, not just headers and column 1
+# mutate(across(...)) walks every column; the regex catches ** and __
+reg_df <- reg_df |>
+  mutate(across(everything(),
+                ~ str_remove_all(as.character(.x), "\\*\\*|__")))
+
+names(reg_df) <- names(reg_df) |> str_remove_all("\\*\\*|__")
+
+# Convert text that looks like a number into actual numbers, leaving
+# things like "0.15, 2.32" (the CI) and "—" (the reference dash) alone
+to_numeric_if_possible <- function(x) {
+  num <- suppressWarnings(as.numeric(x))
+  # Only swap in the number where conversion succeeded
+  ifelse(is.na(num), x, num)
+}
+
+# The CI column has commas, so keep it as text; convert HR and p-value
+# Column positions: 1 = Characteristic, 2 = HR, 3 = 95% CI, 4 = p-value
+reg_df <- reg_df |>
+  mutate(
+    across(c(2, 4), ~ suppressWarnings(as.numeric(.x)))
+  )
+
+wb <- createWorkbook()
+addWorksheet(wb, "Cox Model")
+
+writeData(wb, "Cox Model",
+          "Multivariable Cox Model for Overall Survival",
+          startRow = 1)
+addStyle(wb, "Cox Model",
+         createStyle(textDecoration = "bold", fontSize = 14),
+         rows = 1, cols = 1)
+
+writeData(wb, "Cox Model", reg_df, startRow = 3)
+
+# Header styling
+addStyle(wb, "Cox Model",
+         createStyle(textDecoration = "bold",
+                     fgFill = "#D9D9D9",
+                     border = "bottom",
+                     halign = "left"),
+         rows = 3, cols = 1:ncol(reg_df), gridExpand = TRUE)
+
+# Bold variable labels, indent levels
+addStyle(wb, "Cox Model",
+         createStyle(textDecoration = "bold"),
+         rows = label_rows + 3, cols = 1, gridExpand = TRUE)
+addStyle(wb, "Cox Model",
+         createStyle(indent = 1),
+         rows = level_rows + 3, cols = 1, gridExpand = TRUE)
+
+# Bold rows with significant p-values
+if (length(sig_rows) > 0) {
+  addStyle(wb, "Cox Model",
+           createStyle(textDecoration = "bold"),
+           rows = sig_rows + 3, cols = 1:ncol(reg_df),
+           gridExpand = TRUE, stack = TRUE)
+}
+
+# Number formatting — two decimals for HR, three for p-value
+addStyle(wb, "Cox Model",
+         createStyle(numFmt = "0.00", halign = "center"),
+         rows = 4:(nrow(reg_df) + 3), cols = 2,
+         gridExpand = TRUE, stack = TRUE)
+addStyle(wb, "Cox Model",
+         createStyle(numFmt = "0.000", halign = "center"),
+         rows = 4:(nrow(reg_df) + 3), cols = 4,
+         gridExpand = TRUE, stack = TRUE)
+addStyle(wb, "Cox Model",
+         createStyle(halign = "center"),
+         rows = 4:(nrow(reg_df) + 3), cols = 3,
+         gridExpand = TRUE, stack = TRUE)
+
+# Footnote
+footnote_row <- nrow(reg_df) + 4
+writeData(wb, "Cox Model",
+          "Abbreviations: CI = Confidence Interval, HR = Hazard Ratio",
+          startRow = footnote_row)
+addStyle(wb, "Cox Model",
+         createStyle(fontSize = 10, textDecoration = "italic"),
+         rows = footnote_row, cols = 1)
+
+setColWidths(wb, "Cox Model", cols = 1:ncol(reg_df), widths = "auto")
+freezePane(wb, "Cox Model", firstActiveRow = 4)
+
+saveWorkbook(wb, "../data/tableE6_R09_cox_model_model_cluster.xlsx",
+             overwrite = TRUE)
+```
 
 
 ## univariate model 
