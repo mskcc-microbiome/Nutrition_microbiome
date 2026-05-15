@@ -54,7 +54,8 @@ df_main <- read_rds('../data/R02_cleaned_clinical_outcome.rds') %>%
          source_and_gvhdppx = factor(source_and_gvhdppx, levels = c('TCD+TCD','Cord+CNI-based','Unmodified+CNI-based','Unmodified+PTCy-based')),
          day_exposed_cat = factor(day_exposed_cat, levels = c('Short exposure (< 8 days)','Long exposure (>= 8 days)'))) %>% 
   mutate(day_exposed_cat = str_replace(day_exposed_cat, ' \\(.+\\)','')) %>% 
-  mutate(abx_diet_cat = str_glue('{modal_diet}, {day_exposed_cat}'))
+  mutate(abx_diet_cat = str_glue('{modal_diet}, {day_exposed_cat}')) |> 
+  inner_join(read_rds('../data/R09_df_main_for_nutrition_clinical_outcome.RDS') |> select(pid:avg_total_caloric_intake))
 
 levels(df_main$modal_diet)
 ```
@@ -67,6 +68,7 @@ levels(df_main$modal_diet)
 fit_cluster <- coxph(Surv(OStime_30,OSevent)~ modal_diet * day_exposed  + intensity + source_and_gvhdppx,
              data= df_main |> filter(OStime_30 > 0) )
 ```
+
 ## forest for the original model and a variate where the cal is added 
 
 ```{r}
@@ -132,8 +134,6 @@ cluster_HR <- make_diet_forest(
 
 ```{r}
 # Variant adjusting for average total caloric intake
-df_main <- read_rds('../data/R09_df_main_for_nutrition_clinical_outcome.RDS') |> 
-  inner_join(read_rds('../data/R02_cleaned_clinical_outcome.rds') |> select(pid, modal_diet))
 
 fit_cluster_cal <- coxph(
   Surv(OStime_30, OSevent) ~ modal_diet * day_exposed +
@@ -262,6 +262,121 @@ setColWidths(wb, "Cox Model", cols = 1:ncol(reg_df), widths = "auto")
 freezePane(wb, "Cox Model", firstActiveRow = 4)
 
 saveWorkbook(wb, "../data/tableE6_R09_cox_model_model_cluster.xlsx",
+             overwrite = TRUE)
+```
+
+## pt characteristics
+
+```{r}
+final_cluster_char <- df_main %>% 
+  select(age, sex, Disease = disease.simple, source,  intensity, gvhd_ppx, modal_diet, day_exposed) %>% 
+  mutate(Disease = case_when(
+    Disease == 'NHL' ~ "Non-Hodgkin's lymphoma",
+    # Myelodysplastic/myeloproliferative neoplasms
+    Disease == 'MDS/MPN' ~ 'MDS/MPN',
+    Disease == 'AML' ~ 'Acute myeloid leukemia',
+    Disease == 'ALL' ~ 'Acute lymphoid leukemia',
+    Disease == 'CLL' ~ 'Chronic lymphocytic leukemia',
+    Disease == 'CML' ~ 'Other',
+    Disease == 'Hodgkins' ~ "Other",
+    Disease == 'Myeloma' ~ 'Myeloma', 
+    Disease == 'AA' ~ 'Other',
+    Disease == 'other' ~ 'Other'
+  )) %>% 
+  mutate(source = case_when(
+    source == 'Unmodified' ~ "Unmodified bone marrow or PBSC",
+    source == 'Cord' ~ "Cord blood",
+    source == 'TCD' ~ "T-cell depleted PBSC"
+  )) %>% 
+  mutate(sex = case_when(
+    sex == 'F' ~ "Female",
+    sex == 'M' ~ "Male"
+  )) %>% 
+  mutate(intensity = case_when(
+    intensity == 'nonablative' ~ "Nonmyeloablative",
+    intensity == 'ablative' ~ "Ablative",
+    intensity == 'reduced' ~ "Reduced intensity"
+  )) %>% 
+  mutate(gvhd_ppx = case_when(
+    gvhd_ppx == 'CNI-based' ~ "CNI-based",
+    gvhd_ppx == 'PTCy-based' ~ "PTCy-based",
+    gvhd_ppx == 'TCD' ~ "T-cell depleted PBSC"
+  ))  %>% 
+  mutate(intensity = fct_reorder(intensity, intensity, .fun=length, .desc = T),
+         source = fct_reorder(source, source, .fun=length, .desc = T),
+         Disease = fct_reorder(Disease, Disease, .fun=length, .desc = T),
+         sex = fct_reorder(sex, sex, .fun=length, .desc = T)) %>% 
+  rename(`Graft type` = source, 
+         `Intensity of conditioning regimen` = intensity ) %>% 
+  rename(Sex = sex, Age = age, `GvHD prophylaxis` = gvhd_ppx,
+         `Days exposed to broad-spectrum antibiotics` = day_exposed)
+
+```
+
+```{r}
+# Build the summary as before
+summary_tbl <- final_cluster_char |>
+  tbl_summary(
+    statistic = list(all_continuous() ~ "{median} ({IQR})",
+                     all_categorical() ~ "{n} ({p}%)"),
+    by = modal_diet
+  ) |>
+  bold_labels()
+
+# Pull out the data and figure out which rows are variable labels vs levels
+# gtsummary marks label rows in the row_type column when you peek at $table_body
+body <- summary_tbl$table_body
+label_rows <- which(body$row_type == "label")  # these get bolded, no indent
+level_rows <- which(body$row_type == "level")  # these get indented
+
+# Convert to a tibble and strip the markdown asterisks/underscores from headers
+summary_df <- summary_tbl |> as_tibble()
+names(summary_df) <- names(summary_df) |>
+  str_remove_all("\\*\\*") |>           # drop the ** bold markers
+  str_replace_all("__", "")             # drop the __ italic markers
+
+# Clean the label cells too — gtsummary wraps them in __ for italics
+summary_df[[1]] <- summary_df[[1]] |> str_remove_all("__")
+
+# Now build the workbook with real formatting
+wb <- createWorkbook()
+addWorksheet(wb, "Patient Summary")
+
+# Title row
+writeData(wb, "Patient Summary",
+          "Patient Characteristics by Diet-pattern cluster",
+          startRow = 1)
+addStyle(wb, "Patient Summary",
+         createStyle(textDecoration = "bold", fontSize = 14),
+         rows = 1, cols = 1)
+
+# Write the table starting at row 3
+writeData(wb, "Patient Summary", summary_df, startRow = 3)
+
+# Header row styling — bold, light gray fill, bottom border
+header_style <- createStyle(textDecoration = "bold",
+                            fgFill = "#D9D9D9",
+                            border = "bottom",
+                            halign = "left")
+addStyle(wb, "Patient Summary", header_style,
+         rows = 3, cols = 1:ncol(summary_df), gridExpand = TRUE)
+
+# Bold the variable label rows (offset by 3: title + header + 1-indexed)
+bold_style <- createStyle(textDecoration = "bold")
+addStyle(wb, "Patient Summary", bold_style,
+         rows = label_rows + 3, cols = 1, gridExpand = TRUE)
+
+# Indent the level rows so categories visually nest under their variable
+indent_style <- createStyle(indent = 1)
+addStyle(wb, "Patient Summary", indent_style,
+         rows = level_rows + 3, cols = 1, gridExpand = TRUE)
+
+# Auto-fit columns and freeze the header
+setColWidths(wb, "Patient Summary",
+             cols = 1:ncol(summary_df), widths = "auto")
+freezePane(wb, "Patient Summary", firstActiveRow = 4)
+
+saveWorkbook(wb, "../data/tableE5_R09_cluster_patient_summary.xlsx",
              overwrite = TRUE)
 ```
 
