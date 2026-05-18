@@ -170,6 +170,25 @@ ggsave('../data/F4b_R63_forest_entero_asv1.pdf',
   device = 'pdf', plot = plot_asv1, dpi = 300)  
 ```
 
+## effect size of the abx * sweets
+
+```{r}
+results <- read_csv('../data/R63_results_df_asv1.csv')
+
+asv1_sweets <- results |>
+  filter(term == "empiricalTRUE:fg_sweets") |>
+  mutate(across(c(estimate, conf.low, conf.high),
+                list(fold = ~ exp(.x)),
+                .names = "{.col}_fold")) |>
+  mutate(across(ends_with("_fold"), ~ round(.x, 2))) |>
+  select(term, estimate, conf.low, conf.high,
+         estimate_fold, conf.low_fold, conf.high_fold)
+
+asv1_sweets
+```
+
+
+
 ## marginal effects asv1
 
 ```{r}

@@ -22,6 +22,8 @@ library(patchwork)
 library(geepack)
 library(broom)
 library(openxlsx)
+library(splines)
+library(multcomp)
 ```
 
 # load the cleaned data
@@ -68,6 +70,37 @@ levels(df_main$modal_diet)
 fit_cluster <- coxph(Surv(OStime_30,OSevent)~ modal_diet * day_exposed  + intensity + source_and_gvhdppx,
              data= df_main |> filter(OStime_30 > 0) )
 ```
+
+```{r}
+# dfbeta gives one row per patient, one column per coefficient: each value is
+# roughly how much that coefficient shifts when the patient is removed.
+infl <- residuals(fit_cluster, type = "dfbeta")
+colnames(infl) <- names(coef(fit_cluster))
+
+# Pull out the interaction column. The name depends on how modal_diet is coded;
+# this grabs whichever coefficient is the diet-by-exposure term.
+int_name <- grep(":day_exposed", names(coef(fit_cluster)), value = TRUE)
+
+influence_tbl <- df_main |>
+  filter(OStime_30 > 0) |>
+  mutate(dfbeta_interaction = infl[, int_name]) |>
+  arrange(desc(abs(dfbeta_interaction)))
+
+# A quick look at the biggest movers, compared against the coefficient itself.
+coef(fit_cluster)[int_name]
+influence_tbl |> select(dfbeta_interaction) |> head(10)
+
+# An index plot — any single point standing far from the pack is a patient
+# the interaction leans on heavily.
+influence_tbl |>
+  mutate(idx = row_number()) |>
+  ggplot(aes(idx, dfbeta_interaction)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(x = "Patient (ranked by influence)", y = "dfbeta for interaction term") +
+  theme_classic()
+```
+
 
 ## forest for the original model and a variate where the cal is added 
 
@@ -533,6 +566,46 @@ ggarrange(plot_raw_sugar, plot_adjusted_sugar, ncol = 2)
 fit_sugar_density_binarized <- coxph(Surv(OStime_30,OSevent)~ SugarCal_cat_high * day_exposed + source_and_gvhdppx + intensity ,
              data=patient_summary |> filter(OStime_30 > 0))
 ```
+
+```{r}
+# dfbeta gives one row per patient, one column per coefficient: each value is
+# roughly how much that coefficient shifts when the patient is removed.
+infl <- residuals(fit_sugar_density_binarized, type = "dfbeta")
+colnames(infl) <- names(coef(fit_sugar_density_binarized))
+
+# Pull out the interaction column. The name depends on how modal_diet is coded;
+# this grabs whichever coefficient is the diet-by-exposure term.
+int_name <- grep(":day_exposed", names(coef(fit_sugar_density_binarized)), value = TRUE)
+
+influence_tbl <- df_main |>
+  filter(OStime_30 > 0) |>
+  mutate(dfbeta_interaction = infl[, int_name]) |>
+  arrange(desc(abs(dfbeta_interaction)))
+
+# A quick look at the biggest movers, compared against the coefficient itself.
+coef(fit_sugar_density_binarized)[int_name]
+influence_tbl |> select(dfbeta_interaction) |> head(10)
+
+# An index plot — any single point standing far from the pack is a patient
+# the interaction leans on heavily.
+influence_tbl |>
+  mutate(idx = row_number()) |>
+  ggplot(aes(idx, dfbeta_interaction)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(x = "Patient (ranked by influence)", y = "dfbeta for interaction term", title = 'binarized model') +
+  theme_classic()
+
+coef(fit_sugar_density_binarized)[grep(":day_exposed", names(coef(fit_sugar_density_binarized)), value = TRUE)]
+
+# leave one out
+df_loo <- patient_summary |> filter(OStime_30 > 0) |> slice(-which.max(abs(infl[, int_name])))
+
+coxph(Surv(OStime_30, OSevent) ~ SugarCal_cat_high * day_exposed +
+        source_and_gvhdppx + intensity, data = df_loo) |> summary()
+```
+
+
 ## forest plot
 
 ```{r}
@@ -573,12 +646,59 @@ forest_df <- tibble(
 # Forest plot on the HR scale with a log-scaled x-axis so CIs look symmetric
 forest_sugar_density_binarized <- ggplot(forest_df, aes(x = HR, y = group)) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey60") +
-  geom_errorbarh(aes(xmin = HR.low, xmax = HR.high),
-                 height = 0, linewidth = 0.5) +
+  # geom_errorbar now draws horizontal bars when told the orientation is "y"
+  geom_errorbar(aes(xmin = HR.low, xmax = HR.high),
+                orientation = "y", linewidth = 0.5, width = 0) +
   geom_point(shape = 22, fill = "black", color = "black", size = 2) +
   scale_x_log10() +
   labs(x = "HR per day\nof antibiotic exposure", y = NULL) +
   theme_classic(base_size = 12)
+
+forest_sugar_density_binarized
+```
+```{r}
+# the median and the CI of the HR
+# HR columns are already exp() of the log-hazard estimates; just tidy the digits
+results_rounded <- forest_df |>
+  mutate(across(c(HR, HR.low, HR.high), ~ round(.x, 2)))
+
+results_rounded
+```
+```{r}
+# calculating the p value
+# the day_exposed row already gives the above-median slope (reference group);
+# the below-median slope is day_exposed + the interaction term, so it needs
+# a linear-combination test that accounts for covariance between the two
+
+# contrast vector: 1 on day_exposed, 1 on the interaction, 0 elsewhere
+contrast <- matrix(0, nrow = 1, ncol = length(coef(fit_sugar_density_binarized)))
+colnames(contrast) <- names(coef(fit_sugar_density_binarized))
+contrast[1, "day_exposed"] <- 1
+contrast[1, "SugarCal_cat_highBelow-median:day_exposed"] <- 1
+
+below_median <- glht(fit_sugar_density_binarized, linfct = contrast) |>
+  summary()
+
+# pull slope, CI and p onto the hazard-ratio scale
+tibble(
+  group    = "below-median",
+  estimate = below_median$test$coefficients,
+  se       = below_median$test$sigma,
+  p_value  = below_median$test$pvalues
+) |>
+  mutate(
+    HR      = exp(estimate),
+    HR_low  = exp(estimate - 1.96 * se),
+    HR_high = exp(estimate + 1.96 * se)
+  ) |>
+  mutate(across(c(HR, HR_low, HR_high), ~ round(.x, 2)),
+         p_value = round(p_value, 2))
+
+
+# for the above median group
+broom::tidy(fit_sugar_density_binarized, exponentiate = TRUE, conf.int = TRUE) |>
+  filter(term == "day_exposed") |>
+  mutate(across(c(p.value, estimate, conf.low, conf.high), ~ round(.x, 2)))
 ```
 
  
@@ -967,8 +1087,6 @@ Let me know if you want to have a call to discuss this.
 @Dai, Angel One thing you may try is to adjust the range of sugar intake per 1000kcal for this contour plot. We have very few patients who took more than 150 grams per 1000 kcal, so I set a range between 23 to 150. This may be further tuned to hide some dark blue areas in the top which are likely to be driven by the outliers.
 
 ```{r}
-library(splines)
-
 # Read the dataset. 
 df_use <- patient_summary
 
@@ -984,12 +1102,12 @@ fit <- coxph(
   data = df_use |> filter(OStime_30 > 0)
 )
 
-# Output a clean summary table of the model's hazard ratios
-fit |> 
-  tbl_regression(exponentiate = FALSE) |> 
-  bold_p() |> 
-  as_gt() %>%
-  gt::gtsave(filename = "../data/R09_contour_model_res.png") 
+# # Output a clean summary table of the model's hazard ratios
+# fit |> 
+#   tbl_regression(exponentiate = FALSE) |> 
+#   bold_p() |> 
+#   as_gt() %>%
+#   gt::gtsave(filename = "../data/R09_contour_model_res.png") 
 
 # Create a grid of hypothetical scenarios to map out the risk landscape.
 # This holds the clinical variables constant while varying sugar and antibiotics.
@@ -1051,3 +1169,42 @@ ggplot(grid_df, aes(x = day_exposed, y = avg_sugar_density_per_1000kcal)) +
 
 pspline(df=2) uses an algorithm to automatically find the best smooth curve by penalizing wild wiggles. ns() requires you to drop physical anchor points (knots) for the curve to bend around, and mathematically forces the extreme ends of the graph to be straight lines to prevent erratic predictions at the boundaries. Using ns() turns your data into standard, predictable math equations, allowing R's predict() function to easily map out risks and confidence intervals for hypothetical scenarios. pspline() creates a highly customized curve tied to the original data, making it notoriously difficult for R to calculate standard errors when generating a new 2D map.
 
+```{r}
+df_use <- read_rds('../data/R09_df_main_for_nutrition_clinical_outcome.RDS')
+
+knot_specs <- list(
+  "Primary (10/90)"      = c(0.10, 0.90),
+  "Conservative (20/80)" = c(0.20, 0.80),
+  "Aggressive (5/95)"    = c(0.05, 0.95),
+  "Three knots"          = c(0.25, 0.50, 0.75)
+)
+
+# Refits the model for one set of knot quantiles and pulls out the
+# interaction LRT against a model with no sugar-by-abx interaction.
+fit_one <- function(probs) {
+  k <- quantile(df_use$avg_sugar_density_per_1000kcal, probs = probs)
+  full <- coxph(
+    Surv(OStime_30, OSevent) ~
+      ns(avg_sugar_density_per_1000kcal, knots = k) * day_exposed +
+      source_and_gvhdppx + intensity,
+    data = df_use |> filter(OStime_30 > 0)
+  )
+  reduced <- coxph(
+    Surv(OStime_30, OSevent) ~
+      ns(avg_sugar_density_per_1000kcal, knots = k) + day_exposed +
+      source_and_gvhdppx + intensity,
+    data = df_use |> filter(OStime_30 > 0)
+  )
+  # The interaction is several coefficients, so a likelihood-ratio test
+  # is the honest summary rather than any single p-value.
+  lrt <- anova(reduced, full)
+  tibble(interaction_p = lrt$`Pr(>|Chi|)`[2], aic = AIC(full))
+}
+
+sensitivity <- knot_specs |>
+  imap(\(probs, label) fit_one(probs) |> mutate(spec = label)) |>
+  list_rbind() |>
+  relocate(spec)
+
+patient_summary |> count(source_and_gvhdppx, intensity)
+```
