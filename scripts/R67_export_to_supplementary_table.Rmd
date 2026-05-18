@@ -10,8 +10,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
-library(flextable)
+library(gtsummary)
+library(openxlsx)
 ```
+
 # Table 1 and Table S1
 
 ```{r}
@@ -23,8 +25,6 @@ library(flextable)
 PTB <- read_csv('../data/003_combined_PTB_pid_updated.csv')
 
 meta <- read_csv('../data/153_combined_META.csv')
-
-
 ```
 
 ```{r}
@@ -72,27 +72,102 @@ clean_patient_data <- function(df) {
 
 ```
 
-## Generate Tables
+
+## exporting S1 and S2
+
+```{r}
+# Turns a gtsummary object into a formatted worksheet inside an existing workbook.
+# Works whether or not the table was built with a `by =` grouping.
+write_gtsummary_sheet <- function(wb, sheet_name, gts, title, legend = NULL) {
+
+  addWorksheet(wb, sheet_name)
+
+  # gtsummary tags each row in table_body as a variable "label" or a "level".
+  # Labels get bolded and sit flush left; levels get indented underneath.
+  body <- gts$table_body
+  label_rows <- which(body$row_type == "label")
+  level_rows <- which(body$row_type == "level")
+
+  # as_tibble keeps markdown markers in the header and label cells, so strip them.
+  df <- gts |> as_tibble()
+  names(df) <- names(df) |>
+    str_remove_all("\\*\\*") |>
+    str_replace_all("__", "")
+  df[[1]] <- df[[1]] |> str_remove_all("__")
+
+  # Row 1 holds the title, the table starts at row 3, header lands on row 3.
+  writeData(wb, sheet_name, title, startRow = 1)
+  addStyle(wb, sheet_name,
+           createStyle(textDecoration = "bold", fontSize = 14),
+           rows = 1, cols = 1)
+
+  writeData(wb, sheet_name, df, startRow = 3)
+
+  header_style <- createStyle(textDecoration = "bold", fgFill = "#D9D9D9",
+                              border = "bottom", halign = "left")
+  addStyle(wb, sheet_name, header_style,
+           rows = 3, cols = 1:ncol(df), gridExpand = TRUE)
+
+  # The +3 offset accounts for the title row, the header row, and 1-indexing.
+  addStyle(wb, sheet_name, createStyle(textDecoration = "bold"),
+           rows = label_rows + 3, cols = 1, gridExpand = TRUE)
+  addStyle(wb, sheet_name, createStyle(indent = 1),
+           rows = level_rows + 3, cols = 1, gridExpand = TRUE)
+
+  # The legend goes a couple of rows below the last data row, wrapped in one cell.
+  if (!is.null(legend)) {
+    legend_row <- nrow(df) + 5
+    writeData(wb, sheet_name, legend, startRow = legend_row)
+    addStyle(wb, sheet_name,
+             createStyle(wrapText = TRUE, valign = "top"),
+             rows = legend_row, cols = 1)
+    mergeCells(wb, sheet_name,
+               cols = 1:ncol(df), rows = legend_row)
+  }
+
+  setColWidths(wb, sheet_name, cols = 1:ncol(df), widths = "auto")
+  freezePane(wb, sheet_name, firstActiveRow = 4)
+}
+```
 
 ```{r}
 # Create Table 1
-table1 <- clean_patient_data(PTB) |> 
-  tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})")) |>
-  bold_labels() |> 
-  # Converting to flextable preserves all visual hierarchy, indents, and bolding
-  as_flex_table() 
+table_S1 <- clean_patient_data(PTB) |> 
+  tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})",
+                               all_categorical() ~ "{n} ({p}%)")) |>
+  bold_labels() 
 
 # Create Table S1
 
-table_s1 <- PTB |> 
+table_S2 <- PTB |> 
   filter(pid %in% meta$pid) |> 
   clean_patient_data() |> 
-  tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})")) |>
-  bold_labels() |> 
-  as_flex_table()
+  tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})",
+                               all_categorical() ~ "{n} ({p}%)")) |>
+  bold_labels()
 ```
 
-# Table S6: the two mouse diets in the no fiber  
+
+```{r}
+wb <- createWorkbook()
+
+write_gtsummary_sheet(
+  wb, "Supplementary Table 1", table_S1,
+  title  = "Supplementary Table 1. Patient characteristics of the full nutrition cohort.",
+  legend = "Supplementary Table 1. Patient characteristics of the full nutrition cohort. Data are presented as mean (standard deviation) for continuous variables and as count (percentage) for categorical variables. PBSC, peripheral blood stem cells. MDS/MPN, myelodysplastic syndromes/myeloproliferative neoplasms. GVHD, graft-versus-host disease. CNI, calcineurin inhibitor. PTCy, post-transplant cyclophosphamide."
+)
+
+write_gtsummary_sheet(
+  wb, "Supplementary Table 2", table_S2,
+  title  = "Supplementary Table 2. PPatient characteristics of the microbiome-nutrition sub-cohort.",
+  legend = "Supplementary Table 2. Patient characteristics of the microbiome-nutrition sub-cohort. Data are presented as mean (standard deviation) for continuous variables and as count (percentage) for categorical variables. PBSC, peripheral blood stem cells. MDS/MPN, myelodysplastic syndromes/myeloproliferative neoplasms. GVHD, graft-versus-host disease. CNI, calcineurin inhibitor. PTCy, post-transplant cyclophosphamide. "
+)
+
+saveWorkbook(wb, "../data/R67_Supplementary_Tables_S1_S2.xlsx", overwrite = TRUE)
+```
+
+
+# Table S7: the two mouse diets in the no fiber  
 
 ```{r}
 control_d <- tibble(
@@ -117,23 +192,63 @@ nofiber_d <- tibble(
 
 # Joining the two diets on their shared characteristics glues them side-by-side. 
 # Because this is a standard tibble (not a gtsummary object), we use flextable() instead of as_flex_table()
-table_s6 <- control_d |> 
-  full_join(nofiber_d, by = "Characteristic") |> 
-  flextable() |> 
-  autofit()
+table_s7 <- control_d |> 
+  full_join(nofiber_d, by = "Characteristic") 
 ```
-
-# Export
 
 ```{r}
-# Exporting directly to a Word document keeps the rich formatting intact. 
-# Multiple tables can be written to the same document.
-save_as_docx(
-  "Table 1: Patient Summary" = table1,
-  "Supplementary Table 1: Patient Summary for Subset 158" = table_s1,
-  "Supplementary Table 6" = table_s6,
-  path = "../data/Supp_tables_R67_.docx"
-)
+# Writes a plain tibble to its own worksheet with a title and a legend below.
+# No row_type logic here since a plain data frame has no label/level distinction.
+write_plain_sheet <- function(wb, sheet_name, df, title, legend = NULL) {
+
+  addWorksheet(wb, sheet_name)
+
+  writeData(wb, sheet_name, title, startRow = 1)
+  addStyle(wb, sheet_name,
+           createStyle(textDecoration = "bold", fontSize = 14),
+           rows = 1, cols = 1)
+
+  # Table starts at row 3, so the header lands on row 3.
+  writeData(wb, sheet_name, df, startRow = 3)
+  addStyle(wb, sheet_name,
+           createStyle(textDecoration = "bold", fgFill = "#D9D9D9",
+                       border = "bottom", halign = "left"),
+           rows = 3, cols = 1:ncol(df), gridExpand = TRUE)
+
+  # Legend sits a couple of rows under the last data row, merged into one wrapped cell.
+  if (!is.null(legend)) {
+    legend_row <- nrow(df) + 5
+    writeData(wb, sheet_name, legend, startRow = legend_row)
+    addStyle(wb, sheet_name,
+             createStyle(wrapText = TRUE, valign = "top"),
+             rows = legend_row, cols = 1)
+    mergeCells(wb, sheet_name, cols = 1:ncol(df), rows = legend_row)
+  }
+
+  setColWidths(wb, sheet_name, cols = 1:ncol(df), widths = "auto")
+  freezePane(wb, sheet_name, firstActiveRow = 4)
+}
 ```
 
+
+```{r}
+diet_legend <- paste(
+  "Supplementary Table 7. Nutritional information of standard chow and",
+  "no-fiber diet used in mouse experiments. The table displays the",
+  "nutritional composition of the two chow diets used in the mouse",
+  "experiments. The standard mouse diet in the vivarium is a grain-based",
+  "chow with 4.4% fiber content (LabDiet PicoLab Rodent Diet 20 catalog",
+  "#5053). The no-fiber diet is a purified diet with 0% fiber content",
+  "(W.F. Fisher and Son; catalog #AIN-93G)."
+)
+
+write_plain_sheet(
+  wb, "Supplementary Table 72", table_s7,
+  title  = "Supplementary Table 7. Nutritional information of standard chow and no-fiber diet used in mouse experiments.",
+  legend = diet_legend
+)
+
+saveWorkbook(wb, "../data/R67_Supplementary_Table_7.xlsx", overwrite = TRUE)
+```
+ 
  
