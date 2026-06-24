@@ -16,6 +16,7 @@ library(scales)
 library(patchwork)
 library(ggpubr)
 library(cowplot)
+source("../functions/save_ggplot_data_to_excel.R")
 ```
 # design
 
@@ -351,7 +352,10 @@ CFU <- ggplot() +
   # This is the key part to remove the fill legend but keep the shape legend.
   guides(color = "none", shape = 'none')
 CFU
-
+save_ggplot_data_to_excel(CFU, plot_data, "../mouse_data.xlsx", "Sup_Figure_9d_time_course_monocolonization", col_names = c(
+  "mouse_identifier" = "Mouse Identifier",
+  "CFUs_per_GramStool" = "CFUs per gram stool",
+  "Time_h" = "Time post innoculation (hours)"))
 ggsave('../data/R33_gf_full_course_with_median_combined2.jpg', width = 10, height = 7)
 ```
 
@@ -546,6 +550,8 @@ auc_plot <- ggplot(auc_results, aes(x = Treatment, y = auc_value, fill = Treatme
   expand_limits(y = 0)
 
 auc_plot 
+save_ggplot_data_to_excel(auc_plot , auc_results, "../mouse_data.xlsx", "Sup_Figure_9d_auc_boxplot", col_names = c(
+  "auc_value" = "Enterococcus load (AUC)"))
 
 ggsave('../data/R33_GF_AUC_starts_at_0.pdf', width = 4, height = 4)
 ```

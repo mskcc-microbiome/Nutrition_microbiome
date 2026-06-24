@@ -14,6 +14,7 @@ library(tidyverse)
 library(ggpubr)
 library(readxl)
 library(janitor)
+source("../functions/save_ggplot_data_to_excel.R")
 ```
 
 This table has the chow consumption. Chow typically contains a mix of grains, protein sources (like soybean meal), vitamins, and minerals. The exact composition can vary depending on the manufacturer and specific formula.
@@ -49,6 +50,10 @@ chow_days <- chow %>%
   stat_compare_means(comparisons = list( 
                         c("biapenem\n+\nvehicle", "biapenem\n+\nsucrose")),label= "p.signif", method= 'wilcox.test',tip.length = 0.04,exact=T,correct=T)
 chow_days
+
+save_ggplot_data_to_excel(chow_days, chow, "../mouse_data.xlsx", "Sup_Figure_8g_chow_consumed_days_3_6_9", col_names = c(
+  "chow_per_day" = "Chow consumed (g/mouse/day)",
+  "treatment" = "Treatment Group"))
 chow_days %>% write_rds('../data/08_chow_days.RDS')
 ```
 
@@ -87,6 +92,9 @@ chow_AUC_plot <- ggboxplot(chow_AUC_wide,
   theme_light() +
   theme(axis.title=element_text(size=10), axis.text =  element_text(size = 10),legend.position = 'none',aspect.ratio=1/2, axis.ticks.x = element_blank())
 chow_AUC_plot
+save_ggplot_data_to_excel(chow_AUC_plot, chow_AUC_wide, "../mouse_data.xlsx", "Sup_Figure_8h_chow_consumed_auc", col_names = c(
+  "trap" = "Trapezoidal AUC (grams of Chow Consumed)",
+  "groups" = "Treatment Group"))
 chow_AUC_plot %>% write_rds('../data/08_chow_auc.RDS') 
 ```
 

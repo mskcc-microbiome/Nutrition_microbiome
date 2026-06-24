@@ -16,14 +16,16 @@ library(janitor)
 library(Maaslin2)
 library(vegan)
 library(vdbR)
+source("../functions/save_ggplot_data_to_excel.R")
+#connect_database()
 connect_database('~/dbConfig.txt')
 ```
 ```{r}
 gvhdall <- read_csv('../data/204_mice_diet_gvhd_all.csv') %>% 
-  rename(day_relative_to_transplant = day)
+  dplyr::rename(day_relative_to_transplant = day)
 
 meta <- gvhdall %>%
-  select(-Taxon, -relab) %>% 
+  dplyr::select(-Taxon, -relab) %>% 
   distinct() 
 ```
 
@@ -43,7 +45,7 @@ gvhd_counts <- readxl::read_excel('../data/BMT2_Metadata_ForCSVImport copy.xlsx'
   mutate(diet_treatment = if_else(diet_treatment == 'PH','vehicle','sucrose'),
          abx_treatment = if_else(str_detect(abx_treatment, '^B'),'biapenem',abx_treatment),
          gvhd_grp = if_else(str_detect(gvhd_grp, '^BMT'),'BM+Tcells','BMonly')) %>% 
-  rename(tube_no = tube_id) %>% 
+  dplyr::rename(tube_no = tube_id) %>% 
   left_join(gvhdall %>% distinct(tube_no, sampleid))
 ```
  
@@ -53,7 +55,7 @@ gvhd_counts <- readxl::read_excel('../data/BMT2_Metadata_ForCSVImport copy.xlsx'
 # only include the CFU of the BM only and BMT results, since the day 4 of the abx + vehicle looks weird
 # also include the day 9 of the CFU data
 transplant_CFU <- gvhd_counts %>% 
-    select( day_relative_to_transplant, cf_us_per_gram_stool,abx_treatment:gvhd_grp) %>% 
+    dplyr::select( day_relative_to_transplant, cf_us_per_gram_stool,abx_treatment:gvhd_grp) %>% 
   filter(!is.na(cf_us_per_gram_stool)) %>% 
   arrange(gvhd_grp, abx_treatment,desc(diet_treatment),  day_relative_to_transplant) %>% 
   mutate(xvar = str_glue('{gvhd_grp}__{abx_treatment}__{diet_treatment}__{day_relative_to_transplant}')) %>% 
@@ -80,6 +82,10 @@ transplant_CFU_plot <- transplant_CFU %>%
   theme(axis.text.x =  element_text(size = 10),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/2.8)
 transplant_CFU_plot
 transplant_CFU_plot %>% write_rds('../data/02_transplant_CFU_plot.RDS')
+save_ggplot_data_to_excel(transplant_CFU_plot, transplant_CFU, "../mouse_data.xlsx", "Sup_Figure_9h_bmt_cfu", col_names = c(
+  "xvar" = "Treatment + Day",
+  "cf_us_per_gram_stool" = "CFUs per gram stool",
+  "grp" = "Treatment Group"))
 
 transplant_CFU %>% 
   count(abx_treatment, diet_treatment, day_relative_to_transplant, gvhd_grp) %>% 

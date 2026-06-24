@@ -17,6 +17,7 @@ library(scales)
 library(readxl)
 library(cowplot)
 library(patchwork)
+source("../functions/save_ggplot_data_to_excel.R")
 ```
 
 ```{r}
@@ -27,7 +28,7 @@ meta <- healthyall %>%
   distinct() 
 
 meta %>% 
-  count(experiment_no, abx_treatment, diet_treatment, day) %>% 
+  dplyr::count(experiment_no, abx_treatment, diet_treatment, day) %>% 
   summarise(min_ = min(n), max_ = max(n))
 ```
 
@@ -37,12 +38,13 @@ meta %>%
 
 ```{r}
 # what I really care is the change from day 0 to day 3 
-alpha_change <-  meta %>% 
+alpha_div_df <- meta %>% 
   mutate(day = factor(day), experiment_no = factor(experiment_no)) %>% 
   arrange(abx_treatment,desc(diet_treatment),  day) %>% 
   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
-  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>%    
+  mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose')))
+alpha_change <-  alpha_div_df %>%    
   ggboxplot(x = 'xvar', y = 'simpson_reciprocal',add = 'jitter', 
              xlab = '', ylab = 'alpha diversity(simpson reciprocal)', add.params = list(shape ='experiment_no',alpha = 0.8), width = 0.6,color  = 'grp')+
    scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2')) +
@@ -57,7 +59,12 @@ alpha_change <-  meta %>%
   scale_y_sqrt() +
   theme_light() +
   theme(axis.text =  element_text(size = 10, angle = 0, hjust = 1),axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1/1.3)
-alpha_change      
+alpha_change  
+save_ggplot_data_to_excel(alpha_change, alpha_div_df, "../mouse_data.xlsx", "Sup_Figure_8a_alpha_diversity_mouse_stool", col_names = c(
+  "simpson_reciprocal" = "Stool Alpha Diversity (Simpson reciprocal)",
+  "grp" = "Treatment Group",
+  "experiment_no" = "Experiment Number",
+  "xvar" = "Treatment + Day"))
 ```
 
 ```{r}
@@ -195,15 +202,17 @@ relab_df_2
 ## PCoA plot
 
 ```{r}
-# color by abx        
-beta_4 <- beta_all %>% 
+# color by abx    
+pcoa_df <- beta_all %>% 
+  mutate(day = ifelse(day == 0, 1, day)) %>% #corrects earlier misabeling
   mutate(day = factor(day), experiment_no = factor(experiment_no)) %>% 
   arrange(abx_treatment,desc(diet_treatment),  day) %>% 
   mutate(xvar = str_glue('{abx_treatment}__{diet_treatment}__{day}')) %>% 
   mutate(grp = str_glue('{abx_treatment}__{diet_treatment}')) %>% 
   mutate(grp = factor(grp, levels = c('PBS__vehicle','PBS__sucrose','biapenem__vehicle','biapenem__sucrose'))) %>%
   mutate(experiment_no = str_glue('Expe. {experiment_no}'),
-         day  = str_glue('D{day}')) %>% 
+         day  = str_glue('D{day}'))
+beta_4 <- pcoa_df %>% 
   ggscatter(x = 'V1', y = 'V2', color = 'grp', shape = 'experiment_no', alpha = 0.8, ) +
   scale_color_manual(values = c('gray76','#ffbcdc','gray32','deeppink2'))  +
   facet_grid( .~  day) +
@@ -214,6 +223,13 @@ beta_4 <- beta_all %>%
   theme(aspect.ratio=1, legend.position = 'bottom',
         panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
 beta_4  
+save_full_dataframe_to_excel(pcoa_df %>% select(c(V1, V2, grp, day, experiment_no)), "../mouse_data.xlsx", "Sup_Figure_8b_mouse_PCOA", col_names = c(
+  "V1" = "PCOA Axis 1",
+  "V2" = "PCOA Axis 2",
+  "experiment_no" = "Experiment Number",
+  "day" = "Day",
+  "grp" = "Treatment Group"))
+
 beta_4_plot <- beta_4 +theme(legend.position = 'none')
 ```
 
@@ -239,8 +255,8 @@ asv_target_sample_n <- asv_target %>% distinct(sampleid) %>% nrow
 
 kept_asv <- asv_target %>%
   group_by(Taxon) %>%
-  count(relab > 0.0001) %>%
-  rename(criteria = names(.)[2]) %>%
+  dplyr::count(relab > 0.0001) %>%
+  dplyr::rename(criteria = names(.)[2]) %>%
   filter(criteria == 'TRUE') %>%
   mutate(perc = round(n/asv_target_sample_n*100, 0)) %>%
   filter(perc > 10) %>%
@@ -306,11 +322,11 @@ all_res_abx <- read_tsv('../data/R01_maaslin2_output_ALL_grp4_pbs_reference_abx_
   mutate(feature_formattted = str_replace(feature, '\\.','\n')) %>% 
   relocate(feature_formattted, .after = feature)
 
-
-abx_vol_d3 <- all_res_abx %>%
+pbs_sig_maaslin_plt <- all_res_abx %>%
   filter(metadata == 'treatmentbiapenem_vehicle:day3') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
-  mutate(neglog10_q = -log10(qval)) %>%
+  mutate(neglog10_q = -log10(qval))
+abx_vol_d3 <-  pbs_sig_maaslin_plt %>%
   ggscatter(x = 'coef', y = 'neglog10_q', color = 'sig_', alpha = 0.5, shape = 16, 
             xlab = 'Maaslin2 model coefficient', ylab = '- log10(q value)',
             title = 'Between day 0 and day 3') +
@@ -321,16 +337,26 @@ abx_vol_d3 <- all_res_abx %>%
   geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
   geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
   theme(aspect.ratio = 1/2, legend.position = 'none')
+
+abx_vol_d3
+save_ggplot_data_to_excel(abx_vol_d3, pbs_sig_maaslin_plt, "../mouse_data.xlsx", "Sup_Figure_8c_day1_vs_day3", col_names = c(
+  "coef" = "Maaslin Model Coefficient",
+  "neglog10_q" = "- log 10 Q value",
+  "sig_" = "Significant at qval <0.05 and coef > 1",
+  "seq_id" = "ASV seq id number",
+  "qval" = "Q Value"))
 ```
 
 
 ### volcano d6  
 
 ```{r}
-abx_vol_d6 <- all_res_abx %>% 
+
+pbs_sig_maaslin_plt_d6 <- all_res_abx %>% 
   filter(metadata == 'treatmentbiapenem_vehicle:day6') %>% 
   mutate(sig_ = if_else(qval < 0.05 & coef > 1, 'pos', if_else(qval < 0.05 & coef < -1, 'neg', 'not'))) %>% 
-  mutate(neglog10_q = -log10(qval)) %>%
+  mutate(neglog10_q = -log10(qval))
+abx_vol_d6 <- pbs_sig_maaslin_plt_d6 %>%
   ggscatter(x = 'coef', y = 'neglog10_q', 
             color = 'sig_', 
             alpha = 0.5, shape = 16, 
@@ -343,6 +369,13 @@ abx_vol_d6 <- all_res_abx %>%
   geom_text_repel(aes(label = ifelse(qval < 0.05 & coef > coeff_upper, seq_id, "")), color = 'red') +
   geom_text_repel(aes(label = ifelse(qval < 0.05 & coef < coeff_lower, seq_id, "")), color = 'blue') +
   theme(aspect.ratio = 1/2, legend.position = 'none')
+
+save_ggplot_data_to_excel(abx_vol_d6, pbs_sig_maaslin_plt_d6, "../mouse_data.xlsx", "Sup_Figure_8c_day1_vs_day6", col_names = c(
+  "coef" = "Maaslin Model Coefficient",
+  "neglog10_q" = "- log 10 Q value",
+  "sig_" = "Significant at qval <0.05 and coef > 1",
+  "seq_id" = "ASV seq id number",
+  "qval" = "Q Value"))
 ```
 
 ### a table for all q < 0.05 results
@@ -389,7 +422,20 @@ abx_asvs_relab_plots <- abx_asvs_relab %>%
       facet_grid(. ~ abx_treatment) +
   theme(axis.text =  element_text(size = 10, hjust = 1),plot.title = element_text(size = 10), axis.title=element_text(size=10),legend.position = 'none',aspect.ratio=1.5)
   })
-abx_asvs_relab_plots
+
+save_ggplot_data_to_excel(abx_asvs_relab_plots[[1]], abx_asvs_relab_plots[[1]]$data, "../mouse_data.xlsx", "Sup_Figure_8d_seq_30", col_names = c(
+  "day" = "Day",
+  "relab" = "Relative Abundance",
+  "u_mouse_id" = "Mouse Identifier"))
+save_ggplot_data_to_excel(abx_asvs_relab_plots[[2]], abx_asvs_relab_plots[[2]]$data, "../mouse_data.xlsx", "Sup_Figure_8d_seq_38", col_names = c(
+  "day" = "Day",
+  "relab" = "Relative Abundance",
+  "u_mouse_id" = "Mouse Identifier"))
+save_ggplot_data_to_excel(abx_asvs_relab_plots[[3]], abx_asvs_relab_plots[[3]]$data, "../mouse_data.xlsx", "Sup_Figure_8d_seq_48", col_names = c(
+  "day" = "Day",
+  "relab" = "Relative Abundance",
+  "u_mouse_id" = "Mouse Identifier"))
+
 ```
 
 ##  @sugar effect on top of abx effect
