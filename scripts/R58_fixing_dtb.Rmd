@@ -1,0 +1,377 @@
+---
+title: "Correcting dtb by fixing the carb values"
+output: html_document
+date: "2026-04-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
+```
+
+# the milk and shake etc
+
+```{r}
+df <- read_csv('../data/152_combined_DTB_old.csv')
+
+# Isolate unique food entries by selecting the specified column range
+# and removing any duplicate rows
+anomalies <- df |>
+  #filter(Meal != 'Enteral nutrition') |> 
+  select(Food_code:dehydrated_weight) |>
+  distinct() |>
+  # Calculate the combined physical mass of the macros
+  # and find how much it exceeds the dehydrated weight
+  mutate(
+    macro_sum = Protein_g + Fat_g + Carbohydrates_g,
+    macro_diff = round(macro_sum - dehydrated_weight, 1)
+  ) |>
+  # Keep only the rows that break the laws of physics
+  filter(macro_sum > dehydrated_weight) |>
+  # Sort the worst offenders to the top
+  arrange(desc(macro_diff))
+```
+
+```{r}
+## proportional check 
+# To see if portion sizes scale perfectly, it helps to shrink everything down to a single gram.
+# Dividing the nutrients by the total weight creates a uniform baseline fingerprint for every single row.
+# Grouping identical foods together allows checking if the highest and lowest fingerprint values match.
+# If the total difference across all per-gram max and min values is practically zero, the scaling is strictly proportional.
+
+# proportionality_check <- anomalies |>
+#   mutate(across(
+#     c(Calories_kcal, Protein_g, Fat_g, Carbohydrates_g, Fibers_g, Sugars_g),
+#     ~ .x / total_weight,
+#     .names = "{.col}_per_g"
+#   )) |>
+#   group_by(Food_code, description) |>
+#   summarize(across(
+#     ends_with("_per_g"),
+#     ~ max(.x, na.rm = TRUE) - min(.x, na.rm = TRUE),
+#     .names = "diff_{.col}"
+#   ), .groups = "drop") |>
+#   mutate(
+#     is_perfectly_scaled = rowSums(across(starts_with("diff_"))) < 1e-3
+#   )
+# the difference is small enough, even not perfectly scaled, it is acceptable
+```
+
+## might as well just check the whole dtb except the EN ones
+
+```{r}
+# Instead of summarizing to a median, grabbing every distinct entry directly from the source dataframe.
+# Normalizing each unique row to a 1-gram baseline exposes outliers that would otherwise hide in an average.
+unique_user_entries <- df |>
+  filter(Meal != 'Enteral nutrition') |>
+  select(Food_code:dehydrated_weight) |>
+  distinct() |>
+  mutate(across(
+    c(Calories_kcal, Protein_g, Fat_g, Carbohydrates_g, Fibers_g, Sugars_g),
+    ~ .x / total_weight,
+    .names = "user_{.col}"
+  ))
+
+# to find the nutrients per gram weight from the FNDDS db
+# The FNDDS file has a title row before the actual headers, so skipping the first row aligns the columns correctly.
+# have to uniform the column names of the macronutrients for now ....
+fndds_data <- readxl::read_excel("../data/2015-2016 FNDDS At A Glance - FNDDS Nutrient Values.xlsx", skip = 1)
+```
+
+```{r}
+# add the db value for the two dressings that were missing in the older db of 2015-2016
+fndds_new_2 <- readxl::read_excel("../data/2019-2020 FNDDS At A Glance - FNDDS Nutrient Values.xlsx", skip = 1) |> 
+  filter(`Food code` %in% c(83113500,83112400)) |> 
+  # the older database uses standard spaces, but the newer one pulled in hidden line breaks 
+  # from excel's text-wrapping feature. explicitly renaming these columns removes those 
+  # invisible characters so datasets align perfectly later on.
+  rename(
+    `Sugars, total (g)` = `Sugars, total\r\n(g)`,
+    `Water (g)` = `Water\r\n(g)`
+  )
+ 
+fndds_updated <- bind_rows(fndds_data,fndds_new_2 )
+```
+
+```{r}
+# FNDDS values are universally reported per 100 grams.
+# Dividing all numeric nutrient columns by 100 shrinks the official reference data down to the same 1-gram scale.
+fndds_per_g <- fndds_updated |>
+  filter(`Food code` %in% unique_user_entries$Food_code) |>
+  select(
+    Food_code = `Food code`,
+    fndds_Calories_kcal = `Energy (kcal)`,
+    fndds_Protein_g = `Protein (g)`,
+    fndds_Fat_g = `Total Fat (g)`,
+    fndds_Carbohydrates_g = `Carbohydrate (g)`,
+    fndds_Fibers_g = `Fiber, total dietary (g)`,
+    fndds_Sugars_g = `Sugars, total (g)`,
+    fndds_Water_g = `Water (g)`
+  ) |>
+  mutate(across(-Food_code, ~ .x / 100))
+```
+
+```{r}
+# Merging every distinct entry with the official USDA dataset to reveal absolute variance per row.
+# Filtering for any macro difference greater than 0.05 isolates specific instances that deviate heavily.
+# Explicitly avoiding any select() calls here ensures the vital fndds_ reference columns survive for the next step.
+comparison <- unique_user_entries |>
+  inner_join(fndds_per_g, by = "Food_code")  |>
+  mutate(
+    diff_Calories = user_Calories_kcal - fndds_Calories_kcal,
+    diff_Protein = user_Protein_g - fndds_Protein_g,
+    diff_Fat = user_Fat_g - fndds_Fat_g,
+    diff_Carbohydrates = user_Carbohydrates_g - fndds_Carbohydrates_g,
+    diff_Fibers = user_Fibers_g - fndds_Fibers_g,
+    diff_Sugars = user_Sugars_g - fndds_Sugars_g
+  )
+```
+
+```{r}
+# what is with the 95103010 and 95103000
+two <- comparison |> 
+  filter(Food_code %in% c(95103010,95103000)) |> 
+  select(starts_with('user') | starts_with('fndds') | starts_with('diff')  ) |> 
+  distinct( )
+
+# Reshaping data from wide format to long format makes it easier for ggplot 
+# to map specific columns to plot aesthetics like facets and colors.
+df_long <- two |>
+  pivot_longer(
+    cols = starts_with("diff_"),
+    names_to = "vars",
+    values_to = "Difference_Per_Gram"
+  )
+
+# Density plots provide a smoothed out version of a histogram, making it 
+# easier to see where the bulk of the differences lie for each nutrient.
+ggplot(data = df_long, mapping = aes(x = Difference_Per_Gram, fill = vars)) +
+  geom_density(alpha = 0.6, show.legend = FALSE) +
+  facet_wrap(~ vars, scales = "free") +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Differences per 1 Gram of Food Weight",
+    x = "Difference Amount",
+    y = "Density"
+  )
+
+tt <-df |> filter(Food_code %in% c(95103010,95103000)) |> distinct(Food_NSC)
+```
+
+```{r}
+# Repairing the corrupted rows by taking the total physical weight and multiplying it by the USDA 1-gram baseline.
+# This overwrites the impossible values with mathematically sound macros based on the official database.
+corrected_all <- comparison |>
+  mutate(
+    Calories_kcal_fixed = fndds_Calories_kcal * total_weight,
+    Protein_g_fixed = fndds_Protein_g * total_weight,
+    Fat_g_fixed = fndds_Fat_g * total_weight,
+    Carbohydrates_g_fixed = fndds_Carbohydrates_g * total_weight,
+    Fibers_g_fixed = fndds_Fibers_g * total_weight,
+    Sugars_g_fixed = fndds_Sugars_g * total_weight
+  ) |>
+  select(Food_code, description, total_weight, ends_with("_fixed")) |> 
+  distinct()
+
+# Replacing the bad rows in the main dataset with the repaired ones creates a clean, final table.
+# Using coalesce() prefers the newly fixed value if it exists, otherwise it falls back to the original untouched data.
+df_clean <- df |>
+  left_join(corrected_all, by = c("Food_code", "description", "total_weight")) |>
+  mutate(
+    Calories_kcal = coalesce(Calories_kcal_fixed, Calories_kcal),
+    Protein_g = coalesce(Protein_g_fixed, Protein_g),
+    Fat_g = coalesce(Fat_g_fixed, Fat_g),
+    Carbohydrates_g = coalesce(Carbohydrates_g_fixed, Carbohydrates_g),
+    Fibers_g = coalesce(Fibers_g_fixed, Fibers_g),
+    Sugars_g = coalesce(Sugars_g_fixed, Sugars_g)
+  ) |>
+  select(-ends_with("_fixed")) |>
+  # Bringing the FNDDS water blueprint into the main dataframe.
+  left_join(fndds_per_g |> select(Food_code, fndds_Water_g), by = "Food_code") |>
+  # Subtracting the actual water mass out of the total physical weight yields the pure dehydrated structure.
+  mutate(dehydrated_weight = total_weight - (total_weight * fndds_Water_g)) |>
+  # Dropping the temporary FNDDS water reference to keep the final dataframe clean.
+  select(-fndds_Water_g)
+```
+
+# fixing the EN where is this discrepancy coming from
+
+```{r}
+ptb <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/156_combined_PTB.csv')
+```
+
+```{r}
+enteral <- readxl::read_excel('../data/NutritionSupport_DietPatients.xlsx') |> janitor::clean_names() |> 
+  select(-starts_with('tpn')) |> 
+  mutate(
+    date_nutrition_support = as.numeric(date_nutrition_support),
+    date_nutrition_support = as.Date(date_nutrition_support, origin = "1899-12-30")
+  ) |> 
+  left_join(link) |> 
+  relocate(food_code, .after = 'nutrition_support') |> 
+  filter(food_code != 'NA') |> 
+  mutate(
+    across(c(en_volume:en_volume_weight_g), as.numeric),
+    en_sodium = en_sodium/1000,
+    # to just sum the weight of the three main macronutrients, protein , fat and carbs
+    macro_sum = en_pro + en_fat + en_cho 
+  ) |> 
+  left_join(ptb |> select(mrn, hct)) |> 
+  mutate(fdrt = as.numeric(date_nutrition_support - hct)) |> 
+  relocate(fdrt, .after = 'nutrition_support') |> 
+  mutate(
+    Meal = 'Enteral nutrition',
+    #  Since 1 milliliter of pure water weighs exactly 1 gram
+    total_weight = en_free_water_volume + en_pro + en_fat + en_cho,
+    Unit = 'ml', batch = 'batch1'
+  ) |> 
+  select(
+    Meal, Food_NSC = en_formula, Unit, fdrt, 
+    Por_eaten = en_volume, Food_code = food_code, description = fndds_main_food_description, Calories_kcal = en_calories, Protein_g = en_pro, Fat_g = en_fat, Carbohydrates_g = en_cho, 
+    Fibers_g = en_fiber, Sugars_g = en_sugar, dehydrated_weight = macro_sum, pid = pid, batch = batch, total_weight
+  ) |> 
+  select(all_of(names(df_clean)))
+
+# The column en_volume_weight_g (35.7g) is a confusingly named measurement of space, not mass. It represents the weight of the water that was displaced by the solids. The actual solid mass is your macro_sum (43.8g).The physical substrate that reaches the lower gut to feed the microbes is the 43.8 grams of actual solid mass.. The true total weight of the drink is the water weight plus the macro weight (~140g).
+
+enteral
+```
+
+```{r}
+# enteral_checked <- enteral |> 
+#   mutate(
+#     fiber_sugar_sum = en_fiber + en_sugar,
+#     is_cho_bigger = en_cho >= fiber_sugar_sum,
+#     hidden_starches = en_cho - fiber_sugar_sum
+#   ) |> 
+#   select(en_formula, en_cho, fiber_sugar_sum, is_cho_bigger, hidden_starches)
+# 
+# # Filtering out any impossible rows where fiber + sugar somehow 
+# # exceeds the total carbohydrate umbrella.
+# impossible_formulas <- enteral_checked |> 
+#   filter(is_cho_bigger == FALSE)
+# # ok good to know, most of the carb is starch, few are sugar and fiber 
+```
+
+# put the corrected EN entries in
+
+```{r}
+corrected_enteral <- enteral |> filter(fdrt < 50) |> mutate(Food_code = as.numeric(Food_code))
+
+dtb_final <- df_clean |>
+  # Dropping the old enteral nutrition rows entirely to make room for the manually corrected ones.
+  filter(Meal != 'Enteral nutrition') |>
+  # Appending the separately corrected enteral dataframe directly to the bottom.
+  bind_rows(corrected_enteral) |> 
+  select(-batch)
+
+# checking every column to see if it contains at least one NA
+# returning a simple TRUE or FALSE for each column
+dtb_final |>
+  summarise(across(everything(), ~ any(is.na(.x))))
+
+# finally there is no more NA!!!!!
+```
+
+```{r}
+dtb_final |> write_csv('../data/152_combined_DTB.csv')
+```
+
+# now also update the meta table
+
+```{r}
+meta <- read_csv('../data/153_combined_META_old.csv')
+dtb <- dtb_final
+```
+
+```{r}
+# Pull in dietary intake and stool metadata
+stool_samples_df <- meta |>
+  select(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN)
+
+# Aggregate daily macronutrient totals 
+# This gathers the total nutritional fuel consumed per patient per day
+daily_macros <- dtb |>
+  group_by(pid, fdrt) |>
+  summarise(
+    across(
+      c(Calories_kcal, Protein_g, Fat_g, Carbohydrates_g, Fibers_g, Sugars_g, dehydrated_weight), 
+      \(x) sum(x, na.rm = TRUE)
+    ),
+    .groups = 'drop'
+  )
+
+# Group food by category and transpose into a wide format
+# Mapping specific food codes onto broad categorical buckets simplifies complex menus
+daily_food_cat <- dtb |>
+  mutate(
+    food_category = case_when(
+      str_starts(Food_code, "1") ~ "fg_milk",
+      str_starts(Food_code, "2") ~ "fg_meat",
+      str_starts(Food_code, "3") ~ "fg_egg",
+      str_starts(Food_code, "4") ~ "fg_legume",
+      str_starts(Food_code, "5") ~ "fg_grain",
+      str_starts(Food_code, "6") ~ "fg_fruit",
+      str_starts(Food_code, "7") ~ "fg_veggie",
+      str_starts(Food_code, "8") ~ "fg_oils",
+      str_starts(Food_code, "9") ~ "fg_sweets",
+      TRUE ~ NA_character_
+    )
+  ) |>
+  filter(!is.na(food_category)) |>
+  group_by(pid, fdrt, food_category) |>
+  summarise(cat_weight = sum(dehydrated_weight, na.rm = TRUE), .groups = 'drop') |>
+  pivot_wider(
+    names_from = food_category,
+    values_from = cat_weight,
+    values_fill = 0
+  )
+```
+
+```{r}
+# Merge macronutrients and food categories into one comprehensive daily log
+daily_intake_wide <- daily_macros |>
+  left_join(daily_food_cat, by = join_by(pid, fdrt)) |>
+  # Ensure any days missing specific food categories are filled with zero rather than NA
+  mutate(across(starts_with("fg_"), \(x) replace_na(x, 0)))
+
+# Map dietary windows to stool samples
+# The gut microbiome responds to past food intake, so aligning prior day intervals is essential
+final_model_data <- stool_samples_df |>
+  mutate(
+    window_start = sdrt - 2,
+    window_end = sdrt - 1
+  ) |>
+  left_join(
+    daily_intake_wide,
+    by = join_by(
+      pid,
+      window_start <= fdrt,
+      window_end >= fdrt
+    )
+  ) |>
+  # Grouping by all the stool metadata columns keeps them intact during the summarise step
+  group_by(pid, sdrt, sampleid, simpson_reciprocal, empirical, intensity, EN, TPN) |>
+  # Average the intake over the defined 2-day period 
+  summarise(
+    across(
+      c(starts_with("fg_"), Calories_kcal:Sugars_g ),
+      \(x) sum(x, na.rm = TRUE) / 2 
+    ),
+    .groups = "drop"
+  ) |>
+  # Prepend 'ave_' only to the macronutrients and total weight to clarify they are rolling averages.
+  # Food groups keep their original names to play nicely with existing model formulas.
+  rename_with(\(x) paste0("ave_", x), c(Calories_kcal:Sugars_g)) |>
+  mutate(
+    timebin = cut_width(sdrt, 7, boundary = 0, closed = 'left'),
+    intensity = factor(intensity, levels = c('nonablative', 'reduced', 'ablative')),
+    pid = factor(pid)
+  )
+
+final_model_data |> write_csv('../data/153_combined_META.csv')
+```
