@@ -1,0 +1,185 @@
+---
+title: "Diet (UniFrac) & Stool (Bray–Curtis) PCoA via QIIME2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+## 1. Load inputs
+
+```{r load}
+dtb  <- read_csv("../data/152_combined_DTB.csv",  show_col_types = FALSE)
+meta <- read_csv("../data/153_combined_META.csv", show_col_types = FALSE)
+asv  <- read_csv("../data/171_quality_asv_relab_pident97_genus.csv", show_col_types = FALSE)
+```
+
+## 2. Keep samples with food records on ALL 5 prior days
+
+```{r filter-samples}
+# Daily per-patient food intake aggregated to (pid, fdrt, Food_code)
+diet_day <- dtb %>%
+  group_by(pid, fdrt, Food_code) %>%
+  summarise(dehydrated_weight = sum(dehydrated_weight), .groups = "drop")
+
+# Days that have any food record
+diet_days <- diet_day %>% distinct(pid, fdrt) %>% mutate(has = TRUE)
+
+# A sample passes if (pid, sdrt-k) exists for k = 1..5
+prior_ok <- meta %>%
+  select(pid, sdrt, sampleid) %>%
+  tidyr::crossing(k = 1:5) %>%
+  mutate(fdrt = sdrt - k) %>%
+  left_join(diet_days, by = c("pid", "fdrt")) %>%
+  group_by(sampleid) %>%
+  summarise(n_ok = sum(!is.na(has)), .groups = "drop") %>%
+  filter(n_ok == 5)
+
+meta_keep <- meta %>% semi_join(prior_ok, by = "sampleid")
+cat("Samples kept:", nrow(meta_keep), "/", nrow(meta), "\n")
+```
+
+## 3. Build the five diet tables and the five matching genus tables
+
+```{r build-tables}
+# Long table: for each kept sample, food records on each of the 5 prior days
+long_diet <- meta_keep %>%
+  select(pid, sdrt, sampleid) %>%
+  tidyr::crossing(offset = 1:5) %>%
+  mutate(fdrt = sdrt - offset) %>%
+  inner_join(diet_day, by = c("pid", "fdrt"))
+
+# Genus relab per (sampleid, genus) — multiple ASVs collapsed by sum
+genus_long <- asv %>%
+  filter(!is.na(genus)) %>%
+  group_by(sampleid, genus) %>%
+  summarise(count_relative = sum(count_relative), .groups = "drop")
+
+sids_ordered <- sort(unique(meta_keep$sampleid))
+
+build_pair <- function(W) {
+  # Diet: rows = Food_code, cols = sampleid, value = daily avg over W days
+  food_tbl <- long_diet %>%
+    filter(offset <= W) %>%
+    group_by(sampleid, Food_code) %>%
+    summarise(daily_avg = sum(dehydrated_weight) / W, .groups = "drop") %>%
+    pivot_wider(names_from = sampleid, values_from = daily_avg, values_fill = 0)
+
+  # Ensure every kept sampleid is a column, in order
+  for (s in setdiff(sids_ordered, names(food_tbl)[-1])) food_tbl[[s]] <- 0
+  food_tbl <- food_tbl[, c("Food_code", sids_ordered)]
+  food_tbl <- food_tbl[rowSums(as.matrix(food_tbl[, -1])) > 0, ]
+
+  # Genus table: same sampleid columns
+  g_tbl <- genus_long %>%
+    filter(sampleid %in% sids_ordered) %>%
+    pivot_wider(names_from = sampleid, values_from = count_relative, values_fill = 0)
+
+  for (s in setdiff(sids_ordered, names(g_tbl)[-1])) g_tbl[[s]] <- 0
+  g_tbl <- g_tbl[, c("genus", sids_ordered)]
+  g_tbl <- g_tbl[rowSums(as.matrix(g_tbl[, -1])) > 0, ]
+
+  list(food = food_tbl, genus = g_tbl)
+}
+
+# Write all 10 TSVs with the '#OTU ID' header that biom convert expects
+for (W in 1:5) {
+  out_dir <- file.path("../data/finalized/paired", paste0("p", W, "day"))
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+  pair <- build_pair(W)
+
+  food <- pair$food; names(food)[1] <- "#OTU ID"
+  write_tsv(food, file.path(out_dir, paste0("d", W, "_diet_foodID_dehydrated_weight_per_pt.tsv")))
+
+  g <- pair$genus; names(g)[1] <- "#OTU ID"
+  write_tsv(g, file.path(out_dir, paste0("d", W, "_stool_relab_species.tsv")))
+
+  cat(sprintf("W=%d  food=%d x %d   genus=%d x %d\n",
+              W, nrow(food), ncol(food) - 1, nrow(g), ncol(g) - 1))
+}
+```
+
+## 4. Configure Docker / QIIME2
+
+```{r docker-config}
+DATA_ABS     <- normalizePath("../data")
+QIIME2_IMAGE <- "quay.io/qiime2/core:2024.5"   # adjust to your tag
+TREE_QZA     <- "cleaned_tree/output_food_tree_datatree.qza"  # path inside container, relative to /data
+
+DOCKER_RUN <- sprintf("docker run --rm -v %s:/data -w /data %s", DATA_ABS, QIIME2_IMAGE)
+
+Sys.setenv(DOCKER_RUN = DOCKER_RUN, TREE_QZA = TREE_QZA)
+cat(DOCKER_RUN, "\n")
+```
+
+> The food UniFrac step needs `../data/cleaned_tree/output_food_tree_datatree.qza`
+> (i.e. `/data/cleaned_tree/output_food_tree_datatree.qza` inside the container).
+> Adjust `TREE_QZA` if your tree lives elsewhere.
+
+## 5. Run QIIME2 for all five windows in one bash loop
+
+```{bash run-qiime, eval=FALSE}
+set -euo pipefail
+
+for W in 1 2 3 4 5; do
+  T=d${W}
+  P=finalized/paired/p${W}day        # path inside the container (under /data)
+
+  echo "===== W=${W} ====="
+
+  # ---------- FOOD: tsv -> biom -> qza -> unweighted UniFrac -> PCoA -> export ----------
+  $DOCKER_RUN biom convert \
+      -i $P/${T}_diet_foodID_dehydrated_weight_per_pt.tsv \
+      -o $P/${T}_diet_foodID_dehydrated_weight_per_pt.biom \
+      --to-hdf5 --table-type="Table"
+
+  $DOCKER_RUN qiime tools import \
+      --input-path  $P/${T}_diet_foodID_dehydrated_weight_per_pt.biom \
+      --output-path $P/${T}_diet_foodID_dehydrated_weight_per_pt.qza \
+      --type "FeatureTable[Frequency]"
+
+  $DOCKER_RUN qiime diversity beta-phylogenetic \
+      --i-table     $P/${T}_diet_foodID_dehydrated_weight_per_pt.qza \
+      --i-phylogeny $TREE_QZA \
+      --p-metric    unweighted_unifrac \
+      --o-distance-matrix $P/${T}_diet_foodID_dehydrated_weight_per_pt_unweighted_unifrac_distance_matrix.qza
+
+  $DOCKER_RUN qiime diversity pcoa \
+      --i-distance-matrix $P/${T}_diet_foodID_dehydrated_weight_per_pt_unweighted_unifrac_distance_matrix.qza \
+      --o-pcoa            $P/${T}_diet_foodID_dehydrated_weight_per_pt_unweighted_unifrac_pcoa.qza
+
+  $DOCKER_RUN qiime tools export \
+      --input-path  $P/${T}_diet_foodID_dehydrated_weight_per_pt_unweighted_unifrac_pcoa.qza \
+      --output-path $P/${T}_diet_foodID_dehydrated_weight_per_pt_unweighted_unifrac_pcoa
+
+  # ---------- STOOL: tsv -> biom -> qza -> Bray–Curtis -> PCoA -> export ----------
+  $DOCKER_RUN biom convert \
+      -i $P/${T}_stool_relab_species.tsv \
+      -o $P/${T}_stool_relab_species.biom \
+      --to-hdf5 --table-type="Table"
+
+  $DOCKER_RUN qiime tools import \
+      --input-path  $P/${T}_stool_relab_species.biom \
+      --output-path $P/${T}_stool_relab_species.qza \
+      --type "FeatureTable[Frequency]"
+
+  $DOCKER_RUN qiime diversity beta \
+      --i-table  $P/${T}_stool_relab_species.qza \
+      --p-metric braycurtis \
+      --o-distance-matrix $P/${T}_stool_relab_species_braycurtis_distance_matrix.qza
+
+  $DOCKER_RUN qiime diversity pcoa \
+      --i-distance-matrix $P/${T}_stool_relab_species_braycurtis_distance_matrix.qza \
+      --o-pcoa            $P/${T}_stool_relab_species_braycurtis_pcoa.qza
+
+  $DOCKER_RUN qiime tools export \
+      --input-path  $P/${T}_stool_relab_species_braycurtis_pcoa.qza \
+      --output-path $P/${T}_stool_relab_species_braycurtis_pcoa
+done
+```
