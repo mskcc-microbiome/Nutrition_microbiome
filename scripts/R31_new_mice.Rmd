@@ -1016,6 +1016,11 @@ longitudinal_plot <- ggplot(prepared_data, aes(x = factor(day), y = cf_us_per_gr
     strip.text = element_text( size = 7) # Make facet titles bold
   )
 
+# write out the data that produced this figure
+prepared_data |> 
+  select(experiment_no, mouse_identifier, day, treatment,cf_us_per_gram_stool  ) |> 
+  write_csv('../data/R31_E8k.csv')
+
 ggsave('../data/R31_sugar_delay.png', width = 12, height = 6, plot = longitudinal_plot)
 ```
 
@@ -2818,6 +2823,10 @@ summary_data <- df_plot_ready %>%
     .groups = 'drop' # Good practice to drop the grouping
   )
 
+# output this table for reproducibility
+df_plot_ready |> select(treatment_group, day, percent_change, mice_weights, experiment_no, mouse_identifier) |> 
+  write_csv('../data/R31_mouse_weights_all.csv')
+
 # Define the custom color palette as a named vector
 color_palette <- c(
   "PBS + Water" = "lightgray",
@@ -2896,10 +2905,7 @@ wide_data <- df_plot_ready %>%
     values_from = percent_change,
     names_prefix = "Day_" # Add prefix to keep column names clean
   )
-```
 
-
-```{r}
 # ---
 # Step 2: Prepare inputs for the function
 # ---
