@@ -19,6 +19,10 @@ library(tidyverse)
 # Cleaned clinical table, with the R09 recodes: cluster relabel, intensity order,
 # the graft-source x gvhd-prophylaxis factor, and the diet x abx-exposure label.
 clinical <- read_rds("../data/R02_cleaned_clinical_outcome.rds") |>
+  # drop columns unused downstream: sequencing batch; the redundant PTCy dummy
+  # (encoded in source_and_gvhdppx); and the raw discharge_day (superseded by
+  # tdischarge, which is built from the nutrition-curated discharge_date_for_nutrition)
+  select(-any_of(c("batch", "gvhdppx_PTCy", "discharge_day"))) |>
   mutate(modal_diet = fct_recode(modal_diet,
                                  "Cluster 1" = "Low intake",
                                  "Cluster 2" = "High intake")) |>
