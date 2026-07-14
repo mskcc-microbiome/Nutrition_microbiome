@@ -413,7 +413,7 @@ genus_colors_all <- asv_annotation_blast_color_ag |> distinct(genus, color)
 meta <- read_csv('../data/153_combined_META.csv') 
 
 asv_relab_97 <- read_csv('../data/171_quality_asv_relab_pident97_genus.csv') |> 
-  inner_join(asv_annotation_blast_color_ag |> distinct(asv_key, color, color_label_group_distinct)) |> 
+  #inner_join(asv_annotation_blast_color_ag |> distinct(asv_key, color, color_label_group_distinct)) |> 
   inner_join(meta |> select(sampleid, simpson_reciprocal))
 
 # --- 1. Aggregate ASVs to Custom Genus/ASV Level ---
