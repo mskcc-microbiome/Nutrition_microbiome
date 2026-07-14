@@ -15,7 +15,6 @@ library(broom.mixed)
 library(brms)   
 library(ggpubr)
 library(tidybayes)
-library(brmstools)
 library(bayesplot)
 library(gt)
 library(ggtext)
@@ -155,8 +154,9 @@ stratified_tally_detailed <- stratified_exposure %>%
     .groups = "drop"
   )
 
-stratified_tally_detailed
+stratified_exposure |> select(sampleid, exposure_type) |> write_csv('../data/R41_stool_sample_abx_exposure_type_4.csv') 
 ```
+
 ## tally two abx categories
 
 ```{r}
