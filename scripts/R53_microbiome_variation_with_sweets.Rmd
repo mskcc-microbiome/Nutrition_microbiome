@@ -20,8 +20,11 @@ library(viridis)
 Extended Fig. E5 shows patient-specific deviations (random intercepts, $(1 | pid)$). These are meant to capture the "baseline" diversity of a patient after your model has already mathematically subtracted the effects of antibiotics, diet (including sweets), and conditioning intensity. If I color-code E5 by average sweet intake and see a clear gradient (e.g., all the "low deviation" patients are high-sweet eaters), it means your model didn't fully capture the sweets effect in the fixed terms. There is "leftover" sweet-related variance "leaking" into the random effects.
 
 ```{r}
-dtb <- read_csv('../data/152_combined_DTB.csv')
+dtb <- read_csv('../data/152_combined_DTB.csv')     
+
+posterior_draws_df <- read_csv('../data/172_div_fg_posterior_draws.csv')
 ```
+
 ```{r}
 df <- dtb %>%
   mutate(Food_code = as.character(Food_code))
@@ -50,7 +53,7 @@ print(patient_avg_sweets)
 
 ```{r}
 # --- 3. Process Patient-Specific Intercepts ---
-posterior_draws_df <- read_csv('../data/171_div_model_fg_post_interaction.csv')
+
 
 # This code takes your wide-format posterior draws and calculates the median for each patient
 intercept_medians <- posterior_draws_df %>%
@@ -215,7 +218,7 @@ final_plot <- plot_grid( correlation_plot ,
                 align = 'vh', axis = 'lr')
 
 title <- ggdraw() + 
-  draw_label("Rebuttal Fig X",fontface = 'bold', x = 0,hjust = 0) +
+  draw_label("",fontface = 'bold', x = 0,hjust = 0) +
   theme(plot.margin = margin(0, 0, 0, 0))
 
 
@@ -226,8 +229,55 @@ combined <- plot_grid(
   rel_heights = c(0.1, 1)
 ) +theme(plot.margin = unit(c(1,1,1,1), "cm"))
 
-ggsave('../data/R53_randomintercept_and_sweets.pdf',
+ggsave('../data/E01de_R53_randomintercept_and_sweets.pdf',
       width = 8.5, height = 19, units = "in", device = 'pdf', 
+      dpi = 300)  
+```
+
+```{r}
+# nor colored by the sweets intake
+forest_plot_no_color <- ggplot(combined_data, 
+       # Aesthetics:
+       aes(
+         # x-axis is the intercept value
+         x = median_intercept, 
+         
+         # y-axis is the patient ID, reordered by their median intercept
+         y = reorder(pid, median_intercept), 
+         
+         # Define the CI bounds
+         xmin = lower_ci, 
+         xmax = upper_ci
+       )) +
+  
+  # Add the horizontal lines for the 95% CI
+  geom_errorbarh(height = 0.5, size = 0.8) + 
+  
+  # Add the point for the median
+  geom_point(size = 1) +
+  
+  # Add the vertical line at 0.0
+  geom_vline(xintercept = 0, linetype = "dashed", color = "blue", alpha = 0.7) +
+  
+  
+  labs(
+    title = "Patient-Specific Diversity Deviations (Ranked)",
+    x = "Patient-Specific Deviation from Average log(Diversity)",
+    y = "Patient (Sorted by Median Deviation)"
+  ) +
+  
+  # A minimal theme to look clean
+  theme_minimal() +
+  
+  # Hide the patient labels on the y-axis (too many to read)
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+forest_plot_no_color
+
+ggsave('../data/E01c_R53_patients_randomintercept.pdf',
+      width = 8.5, height = 9, units = "in", device = 'pdf', 
       dpi = 300)  
 ```
 
