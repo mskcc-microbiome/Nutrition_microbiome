@@ -15,7 +15,7 @@ Now this is the script for making the updated Figure 1 with the combined cohort 
 library(tidyverse)
 library(ggpubr)
 library(cowplot)
-library(ggimage)
+#library(ggimage)
 library(ggrastr)
 library(lemon)
 library(viridis)
@@ -506,7 +506,6 @@ umap_drt_high_to_low_bin <- umap_time_df %>%
         aspect.ratio=1)
 ```
 
-
 ```{r}
 # the days that we know the patient didn't eat anythinng
 
@@ -953,5 +952,61 @@ combined <- plot_grid(
 ggsave('../data/072_F1_parelle_collapse.pdf',
       width = 8.5, height = 11, units = "in", device = 'pdf', plot = combined,
       dpi = 300)  
+```
+
+# test
+
+```{r}
+library(tidyverse)
+
+# Food code's leading digit maps onto a USDA food group, so we pull it out
+# and keep only the rows where that digit is a real group (1 through 9).
+fg_labels <- c(
+  "1" = "Dairy",        "2" = "Meat & Protein", "3" = "Eggs",
+  "4" = "Legumes & Nuts","5" = "Grains",         "6" = "Fruits",
+  "7" = "Vegetables",   "8" = "Fats & Oils",    "9" = "Sugars & Beverages"
+)
+
+dtb <- read_csv("../data/152_combined_DTB.csv") |>
+  mutate(fg = str_sub(as.character(Food_code), 1, 1)) |>
+  filter(fg %in% names(fg_labels))
+
+# Total dehydrated weight per patient, per day, per food group. This is the
+# real "eating" signal that the figure is built on.
+eaten <- dtb |>
+  group_by(pid, fdrt, fg) |>
+  summarise(dehydrated_weight = sum(dehydrated_weight, na.rm = TRUE),
+            .groups = "drop")
+
+# The 072 table flags patient-days with zero food intake. A zero day should
+# show up as a genuine 0 in every food group, otherwise the curve would just
+# skip those days and overstate intake. We expand each zero day across all 9
+# groups and stitch them in, letting the real records win on any overlap.
+zero_days <- read_csv("../data/072_total_patients_zero_eating_days_pid.csv") |>
+  distinct(pid, fdrt) |>
+  crossing(fg = names(fg_labels)) |>
+  mutate(dehydrated_weight = 0)
+
+plot_data <- zero_days |>
+  anti_join(eaten, by = c("pid", "fdrt", "fg")) |>
+  bind_rows(eaten) |>
+  mutate(food_group = factor(fg_labels[fg]))
+
+# One panel per food group, points for every patient-day, and a loess line
+# to show the overall trend over the course of treatment.
+p <- ggplot(plot_data, aes(fdrt, dehydrated_weight)) +
+  geom_point(alpha = 0.25, size = 0.7, colour = "grey40") +
+  geom_smooth(method = "loess", se = TRUE, colour = "#2c7fb8") +
+  facet_wrap(~ food_group, ncol = 3, scales = "free_y") +
+  scale_y_sqrt() +
+  labs(
+    title = "Total dehydrated weight by food group over time",
+    subtitle = "Each point is one patient-day; zero-intake days included as 0",
+    x = "Days relative to transplant (fdrt)",
+    y = "Total dehydrated weight"
+  ) +
+  theme_minimal(base_size = 11)
+
+ggsave("../data/dehydrated_weight_by_foodgroup.png", p, width = 11, height = 9, dpi = 200)
 ```
 
