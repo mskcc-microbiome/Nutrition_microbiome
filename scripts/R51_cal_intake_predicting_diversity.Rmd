@@ -93,7 +93,7 @@ final_model_data <- stool_samples_df %>%
 
 ```{r}
 # Build the full formula string dynamically
-formula_string <-  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN  + avg_cal_intake_2_day:empirical + (1 | pid) + (1 | timebin)"
+formula_string <-  "log(simpson_reciprocal) ~ 0 + intensity + empirical + TPN + EN  + avg_cal_intake_2_day*empirical + (1 | pid) + (1 | timebin)"
 
 # Convert the string to a formula object
 formula <- brms::bf(as.formula(formula_string))
