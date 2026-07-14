@@ -394,7 +394,7 @@ df_pt_stool_grouped <- df_pt_stool %>%
 
 df_pt_stool_grouped %>% count(disease_lineage, intensity)
 
-
+df_pt_stool_grouped |> write_csv('../data/R43_cleaned_patients_disease_lineage.csv')
 ```
 
 ```{r}
