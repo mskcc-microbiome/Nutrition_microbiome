@@ -1,0 +1,176 @@
+---
+title: "Submit the RNA seq and shallow shotgun to ncbi"
+output: html_document
+date: "2026-01-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+# reading the tsv file while telling R to ignore lines starting with '#'
+# this is crucial because the metadata at the top would otherwise mess up the header detection
+bio_data <- read_tsv("../data/Model.organism.animal.1.0.tsv", comment = "#", show_col_types = FALSE)
+
+# filtering the dataset to only look at columns that have the literal asterisk symbol
+# using contains() here is safer than regex because we just want that specific character
+asterisk_columns <- bio_data |>
+  select(contains("*")) |>
+  names()
+
+# printing out the list of mandatory fields found
+asterisk_columns
+```
+
+```{r}
+# fill in the biosample meta table
+meta <- read_tsv(
+  '../data/R38_batch1_meta.tsv'
+) |> 
+  filter(tissue == 'large_intestine') |> 
+  mutate(sample_name = sample_id,
+         organism = 'Mus musculus',
+         age = '6–8 weeks',
+         strain = 'C57BL/6',
+         collection_date = '2025-08-04',
+         geo_loc_name = 'USA: New York',
+         sex = 'female',
+         tissue = 'large intestine')
+
+meta |> write_tsv('../data/R57_filled_biosample_rna.tsv')
+```
+
+```{r}
+accs <- read_tsv('../data/attributes_biosample_acc_rnaseq.tsv') |> 
+  select(biosample_accession = accession, library_ID = sample_id)
+
+# fill in the sra meta data
+sra <- read_csv('../data/files.txt', col_names = c('path')) |> 
+  mutate(
+    # basename() is a handy function that instantly strips the folder path
+    file_name = basename(path),
+    
+    # Here we use a regex. We look for "_IGO" and everything (.*) that comes after it,
+    # and replace it with nothing.
+    library_ID = str_remove(file_name, "_IGO.*")
+  ) |> 
+  left_join(accs) |>
+  # Grouping by the ID is necessary to create a sequence (1, 2, 3...) for each group independently
+  group_by(library_ID) |>
+  mutate(
+    # Assign a number to each file within its library group
+    file_idx = row_number(),
+    # Create the specific column names: 'filename' for the first, 'filename2' for the rest
+    new_col_name = if_else(
+      file_idx == 1,
+      "filename",
+      paste0("filename", file_idx)
+    )
+  ) |>
+  ungroup() |>
+  # Spread the data out: unique IDs stay as rows, 'new_col_name' becomes headers
+  pivot_wider(
+    id_cols = c(library_ID, biosample_accession),
+    names_from = new_col_name,
+    values_from = file_name
+  ) |> 
+  mutate(
+    title = 'RNA-seq of large intestine epithelium',
+    sample_id = library_ID,
+     library_strategy = 'RNA-Seq',
+  library_source = 'TRANSCRIPTOMIC',
+  library_selection = 'PolyA',
+  library_layout ='PAIRED',
+  platform= 'ILLUMINA',
+  instrument_model= 'Illumina NovaSeq X',
+  design_description='Total RNA extracted from large intestine epithelial cells of C57BL/6 mice (Germ-Free/PBS) using mRNA Library Prep Kit from Watchmaker (7BK0001). Sequenced 100bp PE.',
+  filetype= 'fastq',
+  ) |> 
+  full_join(meta |> select(sample_id: diet_treatment))
+
+
+sra |> write_tsv('../data/sra_rnaseq.tsv', na = '')
+```
+
+# submit the shallow shotgun sequencing of the mouse cecal samples
+
+```{r}
+bio_samp <- read_tsv("~/Downloads/Metagenome.environmental.1.0.tsv", comment = "#", show_col_types = FALSE)
+
+# filtering the dataset to only look at columns that have the literal asterisk symbol
+# using contains() here is safer than regex because we just want that specific character
+asterisk_columns <- bio_samp |>
+  select(contains("*")) |>
+  names()
+
+# printing out the list of mandatory fields found
+asterisk_columns
+colnames(bio_samp)
+```
+```{r}
+meta_biosamp <- read_csv('../data/R48_shallow_shotgun_meta.csv') |> 
+  rename(sample_name = sample_id) |> 
+  mutate(host_subject_id = sample_name,
+          organism = 'mouse gut metagenome',
+         collection_date =  'NA',
+         geo_loc_name = 'USA: New York',
+         lat_lon = '40.7641 N 73.9568 W' ,
+         isolation_source = 'cecal content',
+         host = 'Mus musculus',
+         bioproject_accession = 'PRJNA878528') 
+
+
+meta_biosamp |> write_tsv('../data/R57_meta_biosample.tsv') 
+```
+```{r}
+accession_shallow <- read_tsv('../data/accession_shallow.tsv') |> 
+  select(biosample_accession = accession, library_ID = sample_name, timepoint_day : source)
+
+# fill in the sra meta data
+sra <- read_csv('../data/shallow_path.txt', col_names = c('file_name')) |> 
+  mutate(
+    # Here we use a regex. We look for "_IGO" and everything (.*) that comes after it,
+    # and replace it with nothing.
+    library_ID = str_remove(file_name, "_IGO.*"),
+    library_ID = str_remove(library_ID, "^[^_]+_")
+  ) |> 
+  left_join(accession_shallow) |>
+  # Grouping by the ID is necessary to create a sequence (1, 2, 3...) for each group independently
+  group_by(library_ID) |>
+  mutate(
+    # Assign a number to each file within its library group
+    file_idx = row_number(),
+    # Create the specific column names: 'filename' for the first, 'filename2' for the rest
+    new_col_name = if_else(
+      file_idx == 1,
+      "filename",
+      paste0("filename", file_idx)
+    )
+  ) |>
+  ungroup() |>
+  # Spread the data out: unique IDs stay as rows, 'new_col_name' becomes headers
+  pivot_wider(
+    id_cols = c(library_ID, biosample_accession),
+    names_from = new_col_name,
+    values_from = file_name
+  ) |> 
+  inner_join(accession_shallow) |>
+  mutate(
+    title = 'Metagenomic sequencing of mouse cecal sample',
+    sample_id = library_ID,
+     library_strategy = 'WGS',
+  library_source = 'METAGENOMIC',
+  library_selection = 'RANDOM',
+  library_layout ='PAIRED',
+  platform= 'ILLUMINA',
+  instrument_model= 'Illumina NovaSeq 6000',
+  design_description='After PicoGreen quantification and quality control by Agilent BioAnalyzer, 0.5ng-1.2g of genomic DNA was sheared using a LE220-plus Focused-ultrasonicator (Covaris catalog # 500569) and sequencing libraries were prepared using the KAPA Hyper Prep Kit (Kapa Biosystems KK8504) with 8 cycles of PCR. Samples were sequenced PE100 on a NovaSeq 6000 with the NovaSeq 6000 S2 or S4 Reagent Kit (200 or 300 cycles).',
+  filetype= 'fastq',
+  ) 
+
+
+sra |> write_tsv('../data/sra_meta_shallow.tsv', na = '')
+```
