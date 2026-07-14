@@ -30,6 +30,7 @@ scripts/R19_resizing_figures.Rmd
 scripts/R20_poster.Rmd
 scripts/R22_aGVHD_onset_clinical_outcome.Rmd
 scripts/Trajectory_clustering.R
+scripts/S_faecalis.Rmd
 scripts/.snakemake/
 data/*
 /data
