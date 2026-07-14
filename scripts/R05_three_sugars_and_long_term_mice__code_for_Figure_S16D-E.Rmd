@@ -85,6 +85,10 @@ f3_five_days
 f3_five %>% 
   count(experiment, abx_treatment,  diet_treatment , day) %>% 
   summarise(min_ = min(n), max_ = max(n))
+
+f3_five %>%  
+  select(abx_treatment__diet_treatment__day = xvar, cf_us_per_gram_stool ) |> 
+  write_csv('../data/R05_21days_E9a.csv')
 ```
 
 # three sugars
@@ -98,7 +102,7 @@ f3_sugars <- three %>%
   filter(!day %in% c(9,14,21) ) %>% 
   mutate(grp = factor(grp, levels = c('DPBS__vehicle','DPBS__sucrose','DPBS__glucose','DPBS__fructose','biapenem__vehicle','biapenem__sucrose','biapenem__glucose','biapenem__fructose'))) 
 
-f3_sugars %>% count(grp)
+f3_sugars %>% select(abx_treatment__diet_treatment__day = xvar, cf_us_per_gram_stool) |> write_csv('../data/R05_threesugars_E9c.csv')
 
 
 f3_sugars_days <- f3_sugars %>%    
