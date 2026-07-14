@@ -15,6 +15,7 @@ library(tidyverse)
 ```{r}
 meta <- read_csv('../data/153_combined_META.csv')
 ```
+
 # the vars summarized from corresponding scripts
 
 ```{r}
@@ -27,6 +28,9 @@ pt_disease_lineage <- read_csv('../data/R43_cleaned_patients_disease_lineage.csv
 pca_exposure <- read_csv('../data/084_samples_and_PCA.csv')
 
 abx_exposure_type <- read_csv('../data/R41_stool_sample_abx_exposure_type_4.csv')
+
+# the clr transformed value of asv 1
+clr_res <- read_csv('../data/R29_all_ASV_CLR_counts.csv') |> select(sampleid, asv_1_clr = asv_1)
 ```
 
 ```{r}
@@ -35,7 +39,8 @@ meta_expanded <- meta |>
   left_join(cleaned_ci_data, by = 'pid' ) |> 
   left_join(pt_disease_lineage, by = 'pid' ) |> 
   left_join(pca_exposure, by = 'sampleid' ) |> 
-  left_join(abx_exposure_type, by = 'sampleid' ) 
+  left_join(abx_exposure_type, by = 'sampleid' )  |> 
+  left_join(clr_res, by = 'sampleid' ) 
 ```
 
 ```{r}
