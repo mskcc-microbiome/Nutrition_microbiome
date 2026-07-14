@@ -34,3 +34,4 @@ scripts/.snakemake/
 data/*
 /data
 .positai
+results/
