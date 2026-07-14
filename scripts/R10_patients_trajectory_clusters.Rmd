@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(ggplot2)
-library(LCAtoolbox)
+#library(LCAtoolbox)
 library(gtsummary)
 library(ggsurvfit)
 library(tidycmprsk)
@@ -238,34 +238,33 @@ df_density <- read_csv('../data/152_combined_DTB.csv') %>%
             d_Calories_kcal = sum(Calories_kcal),
             d_Fibers_g = sum(Fibers_g),
             d_Sugars_g = sum(Sugars_g)) %>% 
-  filter(d_Calories_kcal > 0) %>% # to get rid of spurious results because of mathematical manipulatio
-  mutate(dens_Protein = round(d_Protein_g/(d_Calories_kcal )*1000, 2),
-         dens_carb = round(d_carb/(d_Calories_kcal )*1000, 2),
-         dens_fat = round(d_Fat_g/(d_Calories_kcal )*1000, 2),
-         dens_fiber = round(d_Fibers_g/(d_Calories_kcal )*1000, 2),
-         dens_sugar = round(d_Sugars_g/(d_Calories_kcal )*1000, 2)) %>% 
-  rowwise( ) %>% 
-  mutate(dens3 = dens_Protein + dens_carb + dens_fat) %>% 
-  mutate(log_den_sugar = log(dens_sugar + 0.5),
-        log_den_fiber = log(dens_fiber + 0.5),
-        log_den_3 = log(dens3 + 0.5)) 
+  filter(d_Calories_kcal > 0)  # to get rid of spurious results because of mathematical manipulatio
+
 
 p_cal <- df_density %>% 
   filter(fdrt %in% -7:12) %>% 
   left_join(readr::read_csv("~/Work/projects/MSS_pipeline-/scripts/food_tree/data/156_combined_PTB.csv") %>% select(pid, modal_diet)) %>%  # the original cluster label 
-  mutate(pid = as.factor(pid), 
+  mutate(fdrt = as.factor(fdrt), 
          modal_diet = factor(modal_diet, levels = c('cluster2:higher-intake','cluster 1:lower-intake/sugar-enriched')))
 
 cluster_cal <- p_cal %>% 
-  mutate(modal_diet = factor(modal_diet, levels = c('cluster 1:lower-intake/sugar-enriched', 'cluster2:higher-intake'))) %>% 
-  ggboxplot(x = 'fdrt', y = 'd_Calories_kcal', outlier.shape = NA,xlab = '',
-            #add = 'jitter', add.params = list(alpha = 0.2, shape = 16), 
-            title = 'calories') +
-  stat_summary(fun = median, geom = "line", aes(group = 1), color = "red", size = 1) +scale_x_discrete( breaks = seq(0, 10, 10)) +
-  facet_wrap(~ modal_diet)+theme_bw() +  theme(aspect.ratio = 3.5)
+  ggplot(aes(x = fdrt, y = d_Calories_kcal, fill = modal_diet, color = modal_diet)) +
+        geom_boxplot(
+          outlier.shape = NA,    
+          outlier.size = 1,    
+          outlier.alpha = 0.5,   
+          outlier.color = "red" 
+        ) +
+        labs(title = 'calories',y = 'Daily intake',x = 'HCT Day') +
+        stat_summary(fun = median, geom = "line", aes(group = 1), color = 'red', size = .5) +
+        scale_x_discrete( breaks = seq(0, 10, 10)) +
+  scale_color_manual(values = c( "darkgoldenrod2", "darkslateblue")) +
+  scale_fill_manual(values = c("darkgoldenrod2", "darkslateblue")) +
+        facet_wrap(~ modal_diet ) +theme_bw()  +  theme(aspect.ratio = 3.5, legend.position = 'none', strip.text = element_blank())
 
 cluster_cal 
 ```
+
 ```{r}
 # carbohydrate should be the total carbohydrate meaning it includes the sugar and fiber #!!!!!!!  
 # combine the fiber and the carb
@@ -323,7 +322,7 @@ prop_plots <- df_clean %>%
         facet_wrap(~ cluster_label ) +theme_bw()  +  theme(aspect.ratio = 3.5, legend.position = 'none', strip.text = element_blank())
      
   })  
-combined <- plot_grid(plotlist = prop_plots, nrow = 1)
+combined <- plot_grid(plotlist = c(prop_plots, cluster_cal), nrow = 1)
 combined
 ```
 ```{r}
@@ -332,9 +331,9 @@ res <- plot_grid(
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(0.1, 1)
-)+theme(plot.margin = unit(c(1,1,1,3), "cm"))
+)+theme(plot.margin = unit(c(1,1,1,0), "cm"))
 
-ggsave('../data/R10_clinical_proportions.pdf',
+ggsave('../data/E06cde_R10_clinical_proportions.pdf',
       width = 210, height = 297, units = "mm", device = 'pdf', plot = res, dpi = 300)  
 ```
 
