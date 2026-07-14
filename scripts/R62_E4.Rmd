@@ -26,6 +26,7 @@ dtb <- read_csv('../data/152_combined_DTB.csv') |> mutate(Food_code = as.charact
 
 meta <- read_csv('../data/R59_meta_expanded.csv')
 ```
+
 # a & b all macronutrients including starch
 
 ## pairwise correlation of the macronutrients 
@@ -92,7 +93,7 @@ rmcorr_results <- pairs |>
 
 rmcorr_results
 ```
-## a
+# a
 
 ```{r}
 # ---  Generate the heatmap ---
@@ -281,7 +282,7 @@ cleaned_effects <- results_df %>%
          clean_term = factor(clean_term, levels = level_order))
 ```
 
-## b
+# b
 
 ```{r}
 shading_df <- cleaned_effects %>%
@@ -341,7 +342,7 @@ ggsave(
 
 # c: calories R51
 
-# d:top 10 food codes in sweets
+# d: top 10 food codes in sweets
 
 ```{r}
 # Isolate the top 10 most consumed items in the Sweets/Beverages category (food group starting with '9')
