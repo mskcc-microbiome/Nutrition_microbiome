@@ -18,7 +18,7 @@ software/
 results/*
 
 # Files (specific files and files within the results/ and scripts/ directories)
-Snakefile
+
 results/173_div_model_fg_post_interaction.csv
 results/output_food_tree_datatree.newick
 results/output_food_tree_datatree_name.newick
@@ -30,5 +30,7 @@ scripts/R19_resizing_figures.Rmd
 scripts/R20_poster.Rmd
 scripts/R22_aGVHD_onset_clinical_outcome.Rmd
 scripts/Trajectory_clustering.R
+scripts/.snakemake/
 data/*
 /data
+.positai
