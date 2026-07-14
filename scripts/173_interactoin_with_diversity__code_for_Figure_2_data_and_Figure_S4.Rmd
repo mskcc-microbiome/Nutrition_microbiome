@@ -17,7 +17,7 @@ library(ggpubr)
 library(tidybayes)
 library(cowplot)
 library(ggridges)
-library(brmstools)
+#library(brmstools)
 library(bayesplot)
 options(mc.cores = parallel::detectCores())
 rstan::rstan_options(auto_write = TRUE)
@@ -141,11 +141,11 @@ model_div <- brm( div_model,
 samples_prior <- prior_draws(model_div)
 # save it for future use
 post_res <- suppressWarnings(posterior_samples(model_div)) 
-post_res %>%  write_csv('../results/173_div_model_fg_post_interaction.csv')
+post_res %>%  write_csv('../data/173_div_model_fg_post_interaction.csv')
 ```
 ```{r}
 # to see the median and the 95% CI of the coeff
-post_res <-  read_csv('../results/173_div_model_fg_post_interaction.csv') |> gather()
+post_res <-  read_csv('../data/173_div_model_fg_post_interaction.csv') |> gather()
 
 post_res %>% filter(str_detect(key, '_e$')) %>% 
   group_by(key) %>% 
@@ -234,10 +234,9 @@ condi_dat <- dat_conditional %>%
   keep(.p = str_detect(names(.), ':')) %>% 
   bind_rows(.id = 'grp')     
 
-condi_dat %>% write_csv('../intermediate_data/173_conditional_data.csv')
+condi_dat %>% write_csv('../data/173_conditional_data.csv')
 ```
 
-# for the S16
 
 ## prior predictive check  
 
