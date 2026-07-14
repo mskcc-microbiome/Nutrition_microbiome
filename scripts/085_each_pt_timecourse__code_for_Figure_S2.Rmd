@@ -7,322 +7,231 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE) 
 ```
 
-Make a figure with panels with each patient's timecourse in daily caloric intake, diet and stool alpha diversity as a supplementary figure.
-
 ```{r}
+# =============================================================================
+# Data S6 — per-patient timecourse of daily calories, diet Faith diversity,
+# and fecal alpha-diversity. Produces a single multi-page PDF: an enlarged
+# example patient sits top-left on page 1, every other patient is a small
+# panel, and each page carries one shared "Transplant day" x-axis label.
+#
+# To run: set the paths in the CONFIG block, then source() this file.
+# =============================================================================
 library(ggpubr)
 library(tidyverse)
 library(cowplot)
-pt_line_size <- 0.2
-alpha_val <- 1
-point_size <- 0.5
-diet_line_color <- '#E41A1C'
-axis_text_size <- 5
-axis_title_size <- 8
-stool_line_color <- 'blue'
-faith_line_color <- 'black'
-axis_line_thickness <- 0.2
+
+# ----- CONFIG ----------------------------------------------------------------
+# Everything that might need changing lives here, so the rest is untouched.
+
+cfg <- list(
+  # input files
+  dtb_file        = '../data/152_combined_DTB.csv',
+  meta_file       = '../data/153_combined_META.csv',
+  faith_file      = '../data/005_faith_pd/alpha-diversity.tsv',
+  engraft_file    = '../data/085_engraftment_day_annot.csv',
+
+  # output
+  out_file        = '../data/dataS6_085_all_patients_timecourse.pdf',
+
+  # the example patient shown enlarged, with the detailed Diet:/Stool: labels
+  example_pid     = 'P1',
+
+  # plotting constants
+  scale_factor    = 92,          # 4600/50 — brings stool diversity onto the calorie axis
+  y_limit         = 4600,        # shared upper bound so every panel is comparable
+  pt_line_size    = 0.2,
+  axis_line_thick = 0.2,
+  diet_color      = '#E41A1C',
+  stool_color     = 'blue',
+  faith_color     = 'black',
+
+  panels_per_page = 40,          # 5 columns x 8 rows on an A4 sheet
+  ncol            = 5
+)
 ```
 
 
 ```{r}
-# the three datasets split to each patient
-dtb <- read_csv('../data/152_combined_DTB.csv')
-meta <- read_csv('../data/153_combined_META.csv') %>% 
-  split(.$pid)
+# ----- LOAD & RESHAPE DATA ---------------------------------------------------
+# Each dataset is split into a per-patient list so a panel can be built by
+# simply looking up one patient's name.
 
-# scale the faith pd and the day cal by dividing by 1000 and then revert this to the original scale by the axis representation
-day_calori <- dtb %>% 
-  group_by(pid, fdrt) %>% 
-  summarise(daycal = sum(Calories_kcal))%>% 
-  split(.$pid)
+dtb  <- read_csv(cfg$dtb_file)
+meta <- read_csv(cfg$meta_file) |> split(~ pid)
 
-faith <- read_csv('../data/162_all_faith_pid.csv') %>% 
-  split(.$pid)
+# daily calories: sum every food record within a patient-day
+day_calori <- dtb |>
+  group_by(pid, fdrt) |>
+  summarise(daycal = sum(Calories_kcal), .groups = 'drop') |>
+  split(~ pid)
 
-cal_perday <-  dtb %>% 
-  group_by(pid, fdrt) %>% 
-  summarise(daycal = sum(Calories_kcal))
+# diet Faith diversity: the sample id packs patient and day as "<pid>d<day>"
+faith <- read_tsv(cfg$faith_file) |>
+  rename(sampleid = 1) |>                       # first column comes in unnamed
+  separate(sampleid, into = c('pid', 'fdrt'), sep = 'd') |>
+  mutate(fdrt = as.numeric(fdrt)) |>             # separate() returns text; the axis needs a number
+  split(~ pid)
 
-# keep the patients that have stool data
+# patients carried through the figure are those that actually have stool data
 pids <- names(meta)
 
-# the range of the value 
-# use the same y axis scale
-# now the calories have some crazy values such as 4500 kcal today per day!
-range(read_csv('../data/162_all_faith_pid.csv')$faith_pd)
-range(cal_perday$daycal)
-range(meta$simpson_reciprocal)
-```
-
-# summary stats
-
-```{r}
-# the number of d days and s days, the engraftment day for the 158   
-
-# create and save the table about patients engraftment day 
-# load('../data/df_main_Sep18.Rdata')
-# link <- read_csv('../../MSS_pipeline-/scripts/food_tree/data/152_pid_match.csv')
-# 
-# engraftment_day_annot <- df_main %>% 
-#   select(mrn, hct, ANEUT_500_DATE) %>% 
-#   mutate(engraftment_day = as.numeric(ANEUT_500_DATE - hct)) %>% 
-#   full_join(link) %>%
-#    select( pid, engraftment_day)
-# 
-# engraftment_day_annot %>% write_csv('../data/085_engraftment_day_annot.csv')
-
-engraftment_day_annot <- read_csv('../data/085_engraftment_day_annot.csv') %>% 
+# per-patient annotation: engraftment day, diet-day count, stool-sample count
+engraftment <- read_csv(cfg$engraft_file) |>
   filter(pid %in% pids)
 
-# the number of d days and s days
-d_num <- dtb %>% 
-  filter(pid %in% pids) %>% 
-  distinct(pid,fdrt ) %>% 
+diet_days <- dtb |>
+  filter(pid %in% pids) |>
+  distinct(pid, fdrt) |>
   count(pid, name = 'd_days')
 
-stb <- read_csv('../data/153_combined_META.csv')
-s_num <- stb %>% 
-  filter(pid %in% pids) %>% 
-  distinct(pid,sdrt ) %>% 
+stool_days <- read_csv(cfg$meta_file) |>
+  filter(pid %in% pids) |>
+  distinct(pid, sdrt) |>
   count(pid, name = 's_days')
 
-all_annot <- engraftment_day_annot %>% 
-  full_join(d_num) %>% 
-  full_join(s_num) %>% 
-  split(.$pid)
+annot <- engraftment |>
+  full_join(diet_days, by = 'pid') |>
+  full_join(stool_days, by = 'pid') |>
+  split(~ pid)
 
-```
+# a quick look at the value ranges, handy when sanity-checking y_limit
+message('Faith pd range:  ', paste(range(read_csv(cfg$faith_file)$faith_pd), collapse = ' - '))
+message('Daily cal range: ', paste(range(day_calori |> bind_rows() |> pull(daycal)), collapse = ' - '))
 
-          
+# ----- PANEL BUILDER ---------------------------------------------------------
+# One function builds any patient's panel. 'detailed = TRUE' gives the enlarged
+# example look (axis titles, "Diet:"/"Stool:" prefixes); FALSE gives the bare
+# small-panel look used for the grid.
 
-# example pt
+make_panel <- function(pid, detailed = FALSE) {
 
-```{r}
-# this is for the example patient!
-scale_factor <- 92 # 4600/50
+  # the count labels differ only in whether they carry a "Diet:"/"Stool:" prefix
+  diet_label  <- if (detailed) 'Diet: {d_days} days'    else '{d_days} days'
+  stool_label <- if (detailed) 'Stool: {s_days} samples' else '{s_days} samples'
 
-every_pt_list <-  c('P1') %>% 
-  c('P1') %>% 
-  map(function(.x) {
-      ggplot()  +
-      geom_line(data = day_calori[[.x]], aes(x = fdrt, y = daycal), linetype = 'solid', size = pt_line_size, col = diet_line_color) +
-      # the diet faith 
-      geom_line(data = faith[[.x]], aes(x = fdrt, y = faith_pd), linetype = 'solid', size = pt_line_size, col = faith_line_color) +
-      # the stool data
-      geom_line(data = meta[[.x]], aes(x = sdrt, y = simpson_reciprocal*scale_factor), linetype = 'solid', size = pt_line_size, col = stool_line_color) +
-      geom_vline( data = all_annot[[.x]],mapping = aes(xintercept = engraftment_day), color = 'forestgreen', size = axis_line_thickness, linetype = 'dashed') +
-      geom_vline( xintercept = 0, color = 'darkgray', size = axis_line_thickness) +
-      geom_text(
-    data = all_annot[[.x]],  
-   mapping = aes(x = Inf, y = Inf, label = str_glue('Diet: {d_days} days')),  
-    hjust = 1.6, vjust = 1,  
-   size = 2,color = diet_line_color,
-    inherit.aes = FALSE  
-  ) +
-      geom_text(
-    data = all_annot[[.x]],  
-   mapping = aes(x = Inf, y = Inf, label = str_glue('Stool: {s_days} samples')),   
-    hjust = 1.3, vjust = 2.5,  
-   size = 2,color = stool_line_color,
-    inherit.aes = FALSE  
-  ) +
-      theme_pubr() +
-    scale_y_continuous(name = "Daily calories, Faith div", 
-                       limits = c(0, 4600),
-    sec.axis = sec_axis(~./scale_factor, name = expression(Fecal~alpha~diversity))) +
-      labs(x = 'Transplant day', y = '') + 
-  theme(axis.text=element_text(size=axis_text_size),
-        axis.title=element_text(size=axis_title_size),
-        plot.title = element_text(size=axis_title_size),
-        axis.title.y = element_text(color = diet_line_color),
-        axis.line = element_line(colour = 'black', size = axis_line_thickness),
-        axis.title.y.right = element_text(color = stool_line_color),
-         axis.ticks = element_line(colour = "black", size = axis_line_thickness), 
-        aspect.ratio=1/2)
-  })
+  p <- ggplot() +
+    # daily caloric intake
+    geom_line(data = day_calori[[pid]], aes(fdrt, daycal),
+              linewidth = cfg$pt_line_size, colour = cfg$diet_color) +
+    # diet Faith diversity
+    geom_line(data = faith[[pid]], aes(fdrt, faith_pd),
+              linewidth = cfg$pt_line_size, colour = cfg$faith_color) +
+    # fecal diversity, scaled up onto the calorie axis
+    geom_line(data = meta[[pid]], aes(sdrt, simpson_reciprocal * cfg$scale_factor),
+              linewidth = cfg$pt_line_size, colour = cfg$stool_color) +
+    # engraftment day, and transplant day zero
+    geom_vline(data = annot[[pid]], aes(xintercept = engraftment_day),
+               colour = 'forestgreen', linewidth = cfg$axis_line_thick, linetype = 'dashed') +
+    geom_vline(xintercept = 0, colour = 'darkgray', linewidth = cfg$axis_line_thick) +
+    # the two count annotations, pinned to the top-right corner
+    geom_text(data = annot[[pid]], inherit.aes = FALSE,
+              aes(Inf, Inf, label = str_glue(diet_label)),
+              hjust = 1.6, vjust = 1, size = 2, colour = cfg$diet_color) +
+    geom_text(data = annot[[pid]], inherit.aes = FALSE,
+              aes(Inf, Inf, label = str_glue(stool_label)),
+              hjust = 1.3, vjust = 2.5, size = 2, colour = cfg$stool_color) +
+    theme_pubr()
 
+  if (detailed) {
+    # the enlarged example carries full axis titles on both sides
+    p +
+      scale_y_continuous(
+        name = 'Daily calories, Faith div', limits = c(0, cfg$y_limit),
+        sec.axis = sec_axis(~ . / cfg$scale_factor,
+                            name = expression(Fecal ~ alpha ~ diversity))) +
+      labs(x = 'Transplant day', y = '', title = pid) +
+      theme(axis.text       = element_text(size = 5),
+            axis.title      = element_text(size = 8),
+            plot.title      = element_text(size = 8),
+            axis.title.y    = element_text(colour = cfg$diet_color),
+            axis.title.y.right = element_text(colour = cfg$stool_color),
+            axis.line       = element_line(colour = 'black', linewidth = cfg$axis_line_thick),
+            axis.ticks      = element_line(colour = 'black', linewidth = cfg$axis_line_thick),
+            aspect.ratio    = 1/2)
+  } else {
+    # the small grid panels drop axis titles and the left y numbers to cut clutter;
+    # tick marks stay so each panel keeps its own scale
+    p +
+      scale_y_continuous(name = '', limits = c(0, cfg$y_limit),
+                         sec.axis = sec_axis(~ . / cfg$scale_factor)) +
+      labs(x = 'Transplant day', y = '', title = pid) +
+      theme(axis.text          = element_text(size = 7),
+            axis.title         = element_text(size = 5),
+            plot.title         = element_text(size = 8),
+            axis.title.x       = element_blank(),
+            axis.text.y        = element_blank(),
+            axis.title.y       = element_text(colour = cfg$diet_color),
+            axis.title.y.right = element_text(colour = cfg$stool_color),
+            axis.line          = element_line(colour = 'black', linewidth = cfg$axis_line_thick),
+            axis.ticks         = element_line(colour = 'black', linewidth = cfg$axis_line_thick),
+            aspect.ratio       = 1/2)
+  }
+}
 
-# use one to be the example plot
-example <- every_pt_list[[1]]
+# build every small panel once, keyed by patient
+small_panels <- pids |> set_names() |> map(make_panel, detailed = FALSE)
 
-ggsave('../intermediate_data/085_example_patient_timecourse.pdf', 
-        width = 60,
-       height = 60,
-         units = c("mm"),
-         dpi = 400, device = 'pdf',
-       plot = example)
-```
+# the enlarged example patient
+example_panel <- make_panel(cfg$example_pid, detailed = TRUE)
 
-```{r}
-# to put the stool data in the same dimension as the diet data use a scaling factor to bring them to same level when plotting the y but then show on the  y axis scale that they are different
+# ----- PAGE BUILDER ----------------------------------------------------------
+# Assembles one A4 page: bold title on top, panel grid in the middle, and one
+# shared "Transplant day" label at the bottom. Page 1 reserves a top-left 2x2
+# block for the enlarged example.
 
+xlab_strip <- ggdraw() + draw_label('Transplant day', size = 8)
 
-whole_list <-  pids %>% 
-  set_names(pids) %>% 
-  map(function(.x) {
-      ggplot()  +
-      geom_line(data = day_calori[[.x]], aes(x = fdrt, y = daycal), linetype = 'solid', size = pt_line_size, col = diet_line_color) +
-      # the diet faith 
-      geom_line(data = faith[[.x]], aes(x = fdrt, y = faith_pd), linetype = 'solid', size = pt_line_size, col = faith_line_color) +
-      # the stool data
-      geom_line(data = meta[[.x]], aes(x = sdrt, y = simpson_reciprocal*scale_factor), linetype = 'solid', size = pt_line_size, col = stool_line_color) +
-       geom_vline( data = all_annot[[.x]],mapping = aes(xintercept = engraftment_day), color = 'forestgreen', size = axis_line_thickness, linetype = 'dashed') +
-      geom_vline( xintercept = 0, color = 'darkgray', size = axis_line_thickness) +
-      geom_text(
-    data = all_annot[[.x]],  
-   mapping = aes(x = Inf, y = Inf, label = str_glue('{d_days} days')),  
-    hjust = 1.6, vjust = 1,  
-   size = 2,color = diet_line_color,
-    inherit.aes = FALSE  
-  ) +
-      geom_text(
-    data = all_annot[[.x]],  
-   mapping = aes(x = Inf, y = Inf, label = str_glue('{s_days} samples')),  
-    hjust = 1.2, vjust = 2.5,  
-   size = 2,color = stool_line_color,
-    inherit.aes = FALSE  
-  ) +
-      theme_pubr() +
-    scale_y_continuous(name = "", limits = c(0, 4600),
-    sec.axis = sec_axis(~./scale_factor)) +
-    labs(x = 'Transplant day', y = '', title = str_glue('{.x}')) + 
-      
-  theme(axis.text=element_text(size=7),
-        axis.title=element_text(size=5),
-        plot.title = element_text(size=8),
-        axis.title.y = element_text(color = diet_line_color),
-        axis.line = element_line(colour = 'black', size = axis_line_thickness),
-        axis.ticks = element_line(colour = "black", size = axis_line_thickness), 
-        axis.title.x = element_blank(), 
-        axis.text.y = element_blank(), 
-        axis.title.y.right = element_text(color = stool_line_color),
-        aspect.ratio=1/2)
-  })
+make_page <- function(panels, page_title, big_panel = NULL) {
 
-# arrange the above into a facet-wrap
-```
+  title <- ggdraw() +
+    draw_label(page_title, fontface = 'bold', x = 0, hjust = 0) +
+    theme(plot.margin = margin(0, 0, 0, 7))
 
-```{r}
-# to put those to two pages, and each page is A4 size 
-title <- ggdraw() + 
-  draw_label(
-    "Fig. S2",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 7)
-  )
+  if (is.null(big_panel)) {
+    # ordinary page: a plain 5-column grid
+    body <- plot_grid(plotlist = panels, ncol = cfg$ncol)
+  } else {
+    # page 1: the example fills a top-left 2x2; the first 6 small panels sit
+    # to its right, and the remaining 30 fill a normal grid below
+    top_right <- plot_grid(plotlist = panels[1:6], ncol = 3)
+    top_band  <- plot_grid(big_panel, top_right, ncol = 2, rel_widths = c(2, 3))
+    bottom    <- plot_grid(plotlist = panels[7:36], ncol = cfg$ncol)
+    body      <- plot_grid(top_band, bottom, ncol = 1, rel_heights = c(2, 5))
+  }
 
-all <- plot_grid(plotlist =   whole_list[1:40],
-                  ncol = 5)
+  plot_grid(title, body, xlab_strip, ncol = 1, rel_heights = c(0.08, 1, 0.05)) +
+    theme(plot.margin = unit(c(1, 1, 2, 1), 'cm'))
+}
 
-combined <- plot_grid(
-  title, all,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,1,2,1), "cm"))
-
-ggsave('../results//S02_all_patients_timecourse_1.pdf', 
-       width = 210, 
-       height = 297,
-         units = c("mm"), 
-         dpi = 300, plot = combined)     
+# ----- SPLIT PATIENTS ACROSS PAGES -------------------------------------------
+# Page 1 holds 36 small panels because the example eats 4 cells; later pages
+# hold a full 40. The chunking is computed rather than hand-typed so adding or
+# losing patients never means re-editing index ranges.
+ 
+n          <- length(pids)
+page1_n    <- cfg$panels_per_page - 4                 # 36
+later_idx  <- seq(page1_n + 1, n)
+later_chunks <- split(later_idx, ceiling(seq_along(later_idx) / cfg$panels_per_page))
+ 
+pages <- c(
+  list(make_page(small_panels[1:page1_n], 'Data S6',
+                 big_panel = example_panel)),
+  map(later_chunks, ~ make_page(small_panels[.x], 'Data S6 (Continued)'))
+)
+  
+# ----- WRITE ONE MULTI-PAGE PDF ----------------------------------------------
+# A single pdf() device keeps every print() as its own page, so the four pages
+# land in one file with no Illustrator step.
+ 
+pdf(cfg$out_file, width = 210 / 25.4, height = 297 / 25.4)  # A4, mm -> inches
+walk(pages, print)
+dev.off()
+ 
+message('Wrote ', length(pages), '-page figure to ', cfg$out_file)
 ```
 
 
-```{r}
-# page 2:
-title <- ggdraw() + 
-  draw_label(
-    "Fig. S2 (Continued)",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 7)
-  )
 
-all <- plot_grid(plotlist =   whole_list[41:80],
-                  ncol = 5)
-
-combined <- plot_grid(
-  title, all,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,1,2,1), "cm"))
-
-ggsave('../results/S02_all_patients_timecourse_2.pdf', 
-       width = 210, 
-       height = 297,
-         units = c("mm"), 
-         dpi = 300, plot = combined) 
-```
-
-```{r}
-# page 3
-title <- ggdraw() + 
-  draw_label(
-    "Fig. S2 (Continued)",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 7)
-  )
-
-all <- plot_grid(plotlist =   whole_list[81:120],
-                  ncol = 5)
-
-combined <- plot_grid(
-  title, all,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,1,2,1), "cm"))
-
-ggsave('../results/S02_all_patients_timecourse_3.pdf', 
-       width = 210, 
-       height = 297,
-         units = c("mm"), 
-         dpi = 300, plot = combined) 
-```
-
-```{r}
-# page 4
-title <- ggdraw() + 
-  draw_label(
-    "Fig. S2 (Continued)",
-    fontface = 'bold',
-    x = 0,
-    hjust = 0
-  ) +
-  theme(
-    plot.margin = margin(0, 0, 0, 7)
-  )
-
-all <- plot_grid(plotlist =   whole_list[121:158],
-                  ncol = 5)
-
-combined <- plot_grid(
-  title, all,
-  ncol = 1,
-  # rel_heights values control vertical title margins
-  rel_heights = c(0.1, 1)
-) +theme(plot.margin = unit(c(1,1,4.5,1), "cm"))
-
-ggsave('../results/S02_all_patients_timecourse_4.pdf', 
-       width = 210, 
-       height = 297,
-         units = c("mm"), 
-         dpi = 300, plot = combined) 
-```
 
 
 
