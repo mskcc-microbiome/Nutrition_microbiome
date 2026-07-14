@@ -1,0 +1,33 @@
+---
+title: "cleaning survival analysis clinical table"
+output: html_document
+date: "2026-05-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+```{r}
+# checking the new label that Teng gave me 
+df <- read_csv("../data/New cluster labels.csv") |>
+  mutate(id = paste0("P", id)) |> 
+  full_join(df_main |> select(id = pid, old_modal_diet = modal_diet))
+
+# Tally up the occurrences of each diet category.
+label_summary <- df |>
+  count(modal_diet, old_modal_diet)
+
+label_summary  
+```
+
+
+```{r}
+patient_summary <- read_rds('../data/R09_df_main_for_nutrition_clinical_outcome.RDS')
+```
+
+
+
